@@ -12,6 +12,8 @@ The frontend currently supports:
 - Universal Ask mode that routes common math questions to the right solver
 - Propositional logic evaluation and truth tables
 - Algebra simplification with constants and like terms
+- Rational-root polynomial factoring for quadratics, cubics, and higher-degree
+  one-variable polynomials with rational roots
 - Linear and quadratic equation solving
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations through Universal Ask mode
@@ -76,6 +78,8 @@ Each node evaluates itself recursively:
 The same idea works for algebra and calculus:
 
 - `2x + 3x` becomes a tree with `+` at the root and multiplication below it.
+- `factor x^3 - 6x^2 + 11x - 6` uses rational roots and synthetic division
+  to produce `(x - 1)(x - 2)(x - 3)`.
 - `x^3` becomes a power node, so the derivative engine can apply the power rule.
 - `x^2 - 5x + 6 = 0` becomes an equation node with left and right expression trees.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
@@ -144,6 +148,7 @@ The demo includes:
 - A clear answer area
 - Expression-tree visualization
 - Truth tables for logic mode
+- Polynomial factoring through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
   Poisson probability, normal probability, z-scores, one-sample/two-sample/paired
   t tests, ANOVA, chi-square tests, nonparametric rank tests, effect sizes, and
