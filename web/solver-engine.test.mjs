@@ -20,6 +20,10 @@ function runTest(name, callback) {
   console.log(`ok - ${name}`);
 }
 
+function artifactValue(result, label) {
+  return result.artifacts.find(([key]) => key === label)?.[1];
+}
+
 runTest("logic mode classifies tautologies", () => {
   const result = analyzeLogic("P or not P", { P: true });
 
@@ -105,6 +109,7 @@ runTest("statistics mode computes one-sample tests", () => {
 
   assert.equal(result.summary, "one-sample t test");
   assert.equal(result.answer, "t = 0, p = 1");
+  assert.equal(artifactValue(result, "Cohen's d"), "0");
 });
 
 runTest("statistics mode computes two-sample tests", () => {
@@ -112,6 +117,7 @@ runTest("statistics mode computes two-sample tests", () => {
 
   assert.equal(result.summary, "two-sample t test");
   assert.equal(result.answer, "t = 1.118034, p = 0.331352");
+  assert.equal(artifactValue(result, "Hedges g"), "0.730297");
 });
 
 runTest("statistics mode computes chi-square goodness-of-fit", () => {
@@ -119,6 +125,7 @@ runTest("statistics mode computes chi-square goodness-of-fit", () => {
 
   assert.equal(result.summary, "chi-square goodness-of-fit");
   assert.equal(result.answer, "chi-square = 3.333333, p = 0.186672");
+  assert.equal(artifactValue(result, "Cohen's w"), "0.235702");
 });
 
 runTest("statistics mode computes paired t-tests", () => {
@@ -126,6 +133,7 @@ runTest("statistics mode computes paired t-tests", () => {
 
   assert.equal(result.summary, "paired t test");
   assert.equal(result.answer, "t = 4, p = 0.057191");
+  assert.equal(artifactValue(result, "Cohen's dz"), "2.309401");
 });
 
 runTest("statistics mode computes one-way ANOVA", () => {
@@ -133,6 +141,8 @@ runTest("statistics mode computes one-way ANOVA", () => {
 
   assert.equal(result.summary, "one-way ANOVA");
   assert.equal(result.answer, "F = 13, p = 0.006592");
+  assert.equal(artifactValue(result, "Eta squared"), "0.8125");
+  assert.equal(artifactValue(result, "Pairwise comparisons"), "1 vs 2: diff=-4, p_adj=0.008141; 1 vs 3: diff=-1, p_adj=0.799709; 2 vs 3: diff=3, p_adj=0.031205");
 });
 
 runTest("statistics mode computes Poisson probabilities", () => {
@@ -147,6 +157,7 @@ runTest("statistics mode computes Mann-Whitney U tests", () => {
 
   assert.equal(result.summary, "Mann-Whitney U test");
   assert.equal(result.answer, "U = 2, p = 0.275234");
+  assert.equal(artifactValue(result, "Rank-biserial r"), "0.555556");
 });
 
 runTest("statistics mode computes Wilcoxon signed-rank tests", () => {
@@ -154,6 +165,7 @@ runTest("statistics mode computes Wilcoxon signed-rank tests", () => {
 
   assert.equal(result.summary, "Wilcoxon signed-rank test");
   assert.equal(result.answer, "W = 0, p = 0.063318");
+  assert.equal(artifactValue(result, "Matched rank-biserial r"), "1");
 });
 
 runTest("statistics mode computes Kruskal-Wallis tests", () => {
@@ -161,6 +173,8 @@ runTest("statistics mode computes Kruskal-Wallis tests", () => {
 
   assert.equal(result.summary, "Kruskal-Wallis test");
   assert.equal(result.answer, "H = 6.056497, p = 0.047103");
+  assert.equal(artifactValue(result, "Epsilon squared"), "0.676083");
+  assert.equal(artifactValue(result, "Pairwise comparisons"), "1 vs 2: rank diff=-5.333333, p_adj=0.048482; 1 vs 3: rank diff=-1.666667, p_adj=1; 2 vs 3: rank diff=3.666667, p_adj=0.294613");
 });
 
 runTest("system solver handles two-variable systems", () => {

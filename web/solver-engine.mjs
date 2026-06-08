@@ -980,6 +980,7 @@ function analyzeHypothesisTest(statement) {
   const degreesFreedom = summary.count - 1;
   const pValue = pValueForT(tStatistic, degreesFreedom, alternative);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const cohenD = (summary.mean - mu) / summary.sampleStdDev;
 
   return {
     mode: "statistics",
@@ -988,6 +989,7 @@ function analyzeHypothesisTest(statement) {
       statsMetricNode("MEAN", summary.mean),
       statsMetricNode("T", tStatistic),
       statsMetricNode("P", pValue),
+      statsMetricNode("D", cohenD),
     ], "TEST"),
     answer: `t = ${formatNumber(tStatistic)}, p = ${formatNumber(pValue)}`,
     summary: "one-sample t test",
@@ -1016,6 +1018,11 @@ function analyzeHypothesisTest(statement) {
         detail: "The p-value comes from the Student t distribution.",
       },
       {
+        title: "Compute effect size",
+        expression: `Cohen's d = ${formatNumber(cohenD)}`,
+        detail: "Effect size reports the mean difference in sample-standard-deviation units.",
+      },
+      {
         title: "Make decision",
         expression: decision,
         detail: "Small p-values give evidence against the null hypothesis.",
@@ -1030,6 +1037,7 @@ function analyzeHypothesisTest(statement) {
       ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["t statistic", formatNumber(tStatistic)],
       ["p-value", formatNumber(pValue)],
+      ["Cohen's d", formatNumber(cohenD)],
       ["Decision", decision],
     ],
   };
@@ -1058,6 +1066,9 @@ function analyzeTwoSampleTTest(statement) {
   const degreesFreedom = dfNumerator / dfDenominator;
   const pValue = pValueForT(tStatistic, degreesFreedom, alternative);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const pooledStdDev = pooledSampleStdDev(leftSummary, rightSummary);
+  const cohenD = (leftSummary.mean - rightSummary.mean) / pooledStdDev;
+  const hedgesG = hedgesCorrection(leftSummary.count + rightSummary.count - 2) * cohenD;
 
   return {
     mode: "statistics",
@@ -1066,6 +1077,7 @@ function analyzeTwoSampleTTest(statement) {
       statsMetricNode("MEAN2", rightSummary.mean),
       statsMetricNode("T", tStatistic),
       statsMetricNode("P", pValue),
+      statsMetricNode("G", hedgesG),
     ], "2-SAMPLE"),
     answer: `t = ${formatNumber(tStatistic)}, p = ${formatNumber(pValue)}`,
     summary: "two-sample t test",
@@ -1094,6 +1106,11 @@ function analyzeTwoSampleTTest(statement) {
         detail: "The solver reports Welch degrees of freedom and a Student t-distribution p-value.",
       },
       {
+        title: "Compute effect size",
+        expression: `Hedges g = ${formatNumber(hedgesG)}`,
+        detail: "Hedges g standardizes the mean difference and corrects Cohen's d for small samples.",
+      },
+      {
         title: "Make decision",
         expression: decision,
         detail: "Small p-values suggest the group means differ more than expected by sampling noise.",
@@ -1107,6 +1124,8 @@ function analyzeTwoSampleTTest(statement) {
       ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["t statistic", formatNumber(tStatistic)],
       ["p-value", formatNumber(pValue)],
+      ["Cohen's d", formatNumber(cohenD)],
+      ["Hedges g", formatNumber(hedgesG)],
       ["Decision", decision],
     ],
   };
@@ -1129,6 +1148,7 @@ function analyzePairedTTest(statement) {
   const degreesFreedom = summary.count - 1;
   const pValue = pValueForT(tStatistic, degreesFreedom, alternative);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const cohenDz = summary.mean / summary.sampleStdDev;
 
   return {
     mode: "statistics",
@@ -1136,6 +1156,7 @@ function analyzePairedTTest(statement) {
       statsMetricNode("MEAN DIFF", summary.mean),
       statsMetricNode("T", tStatistic),
       statsMetricNode("P", pValue),
+      statsMetricNode("DZ", cohenDz),
     ], "PAIRED"),
     answer: `t = ${formatNumber(tStatistic)}, p = ${formatNumber(pValue)}`,
     summary: "paired t test",
@@ -1159,6 +1180,11 @@ function analyzePairedTTest(statement) {
         detail: "The statistic measures mean difference relative to standard error.",
       },
       {
+        title: "Compute effect size",
+        expression: `Cohen's dz = ${formatNumber(cohenDz)}`,
+        detail: "Paired effect size standardizes the mean difference by the SD of differences.",
+      },
+      {
         title: "Make decision",
         expression: decision,
         detail: "Small p-values suggest the matched differences are not centered at zero.",
@@ -1180,6 +1206,7 @@ function analyzePairedTTest(statement) {
       ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["t statistic", formatNumber(tStatistic)],
       ["p-value", formatNumber(pValue)],
+      ["Cohen's dz", formatNumber(cohenDz)],
       ["Decision", decision],
     ],
   };
@@ -1210,6 +1237,10 @@ function analyzeAnova(statement) {
   const fStatistic = msBetween / msWithin;
   const pValue = fRightTail(fStatistic, dfBetween, dfWithin);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const totalSS = ssBetween + ssWithin;
+  const etaSquared = ssBetween / totalSS;
+  const omegaSquared = Math.max(0, (ssBetween - dfBetween * msWithin) / (totalSS + msWithin));
+  const pairwiseComparisons = pairwiseAnovaComparisons(groupSummaries, groups, msWithin, dfWithin);
 
   return {
     mode: "statistics",
@@ -1218,6 +1249,7 @@ function analyzeAnova(statement) {
       statsMetricNode("DF1", dfBetween),
       statsMetricNode("DF2", dfWithin),
       statsMetricNode("P", pValue),
+      statsMetricNode("ETA2", etaSquared),
     ], "ANOVA"),
     answer: `F = ${formatNumber(fStatistic)}, p = ${formatNumber(pValue)}`,
     summary: "one-way ANOVA",
@@ -1246,6 +1278,16 @@ function analyzeAnova(statement) {
         detail: "The solver evaluates the F distribution using the regularized beta function.",
       },
       {
+        title: "Compute effect size",
+        expression: `eta^2 = ${formatNumber(etaSquared)}, omega^2 = ${formatNumber(omegaSquared)}`,
+        detail: "Effect sizes estimate how much outcome variation is associated with group membership.",
+      },
+      {
+        title: "Compare groups pairwise",
+        expression: formatPairwiseComparisons(pairwiseComparisons),
+        detail: "Pairwise rows use pooled ANOVA error and Bonferroni-adjusted t approximations.",
+      },
+      {
         title: "Make decision",
         expression: decision,
         detail: "Small p-values suggest at least one group mean differs.",
@@ -1256,13 +1298,16 @@ function analyzeAnova(statement) {
       rows: [
         ["Between", formatNumber(ssBetween), formatNumber(dfBetween), formatNumber(msBetween), formatNumber(fStatistic)],
         ["Within", formatNumber(ssWithin), formatNumber(dfWithin), formatNumber(msWithin), ""],
-        ["Total", formatNumber(ssBetween + ssWithin), formatNumber(allValues.length - 1), "", ""],
+        ["Total", formatNumber(totalSS), formatNumber(allValues.length - 1), "", ""],
       ],
     },
     artifacts: [
       ["Grand mean", formatNumber(grandMean)],
       ["F statistic", formatNumber(fStatistic)],
       ["p-value", formatNumber(pValue)],
+      ["Eta squared", formatNumber(etaSquared)],
+      ["Omega squared", formatNumber(omegaSquared)],
+      ["Pairwise comparisons", formatPairwiseComparisons(pairwiseComparisons)],
       ["Decision", decision],
     ],
   };
@@ -1293,6 +1338,8 @@ function analyzeMannWhitney(statement) {
   const z = (u1 - meanU) / Math.sqrt(varianceU);
   const pValue = pValueForNormal(z, alternative);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const rankBiserial = (u1 - u2) / (left.length * right.length);
+  const normalR = z / Math.sqrt(allValues.length);
 
   return {
     mode: "statistics",
@@ -1300,6 +1347,7 @@ function analyzeMannWhitney(statement) {
       statsMetricNode("U", statistic),
       statsMetricNode("Z", z),
       statsMetricNode("P", pValue),
+      statsMetricNode("RBC", rankBiserial),
     ], "MANN-WHITNEY"),
     answer: `U = ${formatNumber(statistic)}, p = ${formatNumber(pValue)}`,
     summary: "Mann-Whitney U test",
@@ -1328,6 +1376,11 @@ function analyzeMannWhitney(statement) {
         detail: "The p-value uses a tie-corrected normal approximation.",
       },
       {
+        title: "Compute effect size",
+        expression: `rank-biserial r = ${formatNumber(rankBiserial)}`,
+        detail: "Rank-biserial correlation estimates how strongly group 1 tends to rank above group 2.",
+      },
+      {
         title: "Make decision",
         expression: decision,
         detail: "Small p-values suggest the two distributions are shifted relative to each other.",
@@ -1348,6 +1401,8 @@ function analyzeMannWhitney(statement) {
       ["Reported U", formatNumber(statistic)],
       ["z statistic", formatNumber(z)],
       ["p-value", formatNumber(pValue)],
+      ["Rank-biserial r", formatNumber(rankBiserial)],
+      ["Normal approximation r", formatNumber(normalR)],
       ["Decision", decision],
     ],
   };
@@ -1379,6 +1434,8 @@ function analyzeWilcoxonSignedRank(statement) {
   const z = (wPlus - meanW) / Math.sqrt(varianceW);
   const pValue = pValueForNormal(z, alternative);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const rankBiserial = (wPlus - wMinus) / (wPlus + wMinus);
+  const normalR = z / Math.sqrt(n);
   let rankCursor = 0;
   const pairRows = left.map((value, index) => {
     const difference = pairedDifferences[index];
@@ -1398,6 +1455,7 @@ function analyzeWilcoxonSignedRank(statement) {
       statsMetricNode("W+", wPlus),
       statsMetricNode("W-", wMinus),
       statsMetricNode("P", pValue),
+      statsMetricNode("RBC", rankBiserial),
     ], "WILCOXON"),
     answer: `W = ${formatNumber(statistic)}, p = ${formatNumber(pValue)}`,
     summary: "Wilcoxon signed-rank test",
@@ -1426,6 +1484,11 @@ function analyzeWilcoxonSignedRank(statement) {
         detail: "The p-value uses a tie-corrected normal approximation.",
       },
       {
+        title: "Compute effect size",
+        expression: `matched rank-biserial r = ${formatNumber(rankBiserial)}`,
+        detail: "The signed rank-biserial correlation measures direction and strength of the paired shift.",
+      },
+      {
         title: "Make decision",
         expression: decision,
         detail: "Small p-values suggest a systematic paired shift.",
@@ -1442,6 +1505,8 @@ function analyzeWilcoxonSignedRank(statement) {
       ["Reported W", formatNumber(statistic)],
       ["z statistic", formatNumber(z)],
       ["p-value", formatNumber(pValue)],
+      ["Matched rank-biserial r", formatNumber(rankBiserial)],
+      ["Normal approximation r", formatNumber(normalR)],
       ["Decision", decision],
     ],
   };
@@ -1473,6 +1538,8 @@ function analyzeKruskalWallis(statement) {
   const degreesFreedom = groups.length - 1;
   const pValue = chiSquareRightTailApprox(hStatistic, degreesFreedom);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const epsilonSquared = Math.max(0, (hStatistic - groups.length + 1) / (totalCount - groups.length));
+  const dunnComparisons = pairwiseDunnComparisons(groups, groupRankSums, totalCount, ranked.tieCorrection);
 
   return {
     mode: "statistics",
@@ -1480,6 +1547,7 @@ function analyzeKruskalWallis(statement) {
       statsMetricNode("H", hStatistic),
       statsMetricNode("DF", degreesFreedom),
       statsMetricNode("P", pValue),
+      statsMetricNode("EPS2", epsilonSquared),
     ], "KRUSKAL"),
     answer: `H = ${formatNumber(hStatistic)}, p = ${formatNumber(pValue)}`,
     summary: "Kruskal-Wallis test",
@@ -1508,6 +1576,16 @@ function analyzeKruskalWallis(statement) {
         detail: "The p-value uses a chi-square approximation with tie correction.",
       },
       {
+        title: "Compute effect size",
+        expression: `epsilon^2 = ${formatNumber(epsilonSquared)}`,
+        detail: "Epsilon squared estimates the share of ranked variation explained by group membership.",
+      },
+      {
+        title: "Compare groups pairwise",
+        expression: formatPairwiseComparisons(dunnComparisons),
+        detail: "Dunn-style pairwise rows compare mean ranks with Bonferroni-adjusted normal p-values.",
+      },
+      {
         title: "Make decision",
         expression: decision,
         detail: "Small p-values suggest at least one group distribution is shifted.",
@@ -1526,6 +1604,8 @@ function analyzeKruskalWallis(statement) {
       ["H statistic", formatNumber(hStatistic)],
       ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["p-value", formatNumber(pValue)],
+      ["Epsilon squared", formatNumber(epsilonSquared)],
+      ["Pairwise comparisons", formatPairwiseComparisons(dunnComparisons)],
       ["Decision", decision],
     ],
   };
@@ -1545,6 +1625,8 @@ function analyzeChiSquare(statement) {
   const degreesFreedom = observed.length - 1;
   const pValue = chiSquareRightTailApprox(statistic, degreesFreedom);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const totalCount = observed.reduce((sum, value) => sum + value, 0);
+  const cohensW = Math.sqrt(statistic / totalCount);
 
   return {
     mode: "statistics",
@@ -1552,6 +1634,7 @@ function analyzeChiSquare(statement) {
       statsMetricNode("X2", statistic),
       statsMetricNode("DF", degreesFreedom),
       statsMetricNode("P", pValue),
+      statsMetricNode("W", cohensW),
     ], "CHI2"),
     answer: `chi-square = ${formatNumber(statistic)}, p = ${formatNumber(pValue)}`,
     summary: "chi-square goodness-of-fit",
@@ -1580,6 +1663,11 @@ function analyzeChiSquare(statement) {
         detail: "The browser demo uses the Wilson-Hilferty normal approximation.",
       },
       {
+        title: "Compute effect size",
+        expression: `Cohen's w = ${formatNumber(cohensW)}`,
+        detail: "Cohen's w standardizes the size of the difference between observed and expected counts.",
+      },
+      {
         title: "Make decision",
         expression: decision,
         detail: "Small p-values suggest the observed counts do not fit the expected pattern.",
@@ -1598,6 +1686,7 @@ function analyzeChiSquare(statement) {
       ["Chi-square", formatNumber(statistic)],
       ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["p-value", formatNumber(pValue)],
+      ["Cohen's w", formatNumber(cohensW)],
       ["Decision", decision],
     ],
   };
@@ -3204,6 +3293,77 @@ function pValueForNormal(statistic, alternative) {
     return 1 - cdf;
   }
   return Math.min(1, 2 * Math.min(cdf, 1 - cdf));
+}
+
+function pooledSampleStdDev(leftSummary, rightSummary) {
+  const degreesFreedom = leftSummary.count + rightSummary.count - 2;
+  return Math.sqrt(
+    ((leftSummary.count - 1) * leftSummary.sampleVariance +
+      (rightSummary.count - 1) * rightSummary.sampleVariance) /
+      degreesFreedom,
+  );
+}
+
+function hedgesCorrection(degreesFreedom) {
+  return degreesFreedom > 1 ? 1 - 3 / (4 * degreesFreedom - 1) : 1;
+}
+
+function pairwiseAnovaComparisons(groupSummaries, groups, msWithin, degreesFreedom) {
+  const comparisons = [];
+  const pairCount = (groups.length * (groups.length - 1)) / 2;
+  for (let left = 0; left < groups.length; left += 1) {
+    for (let right = left + 1; right < groups.length; right += 1) {
+      const difference = groupSummaries[left].mean - groupSummaries[right].mean;
+      const standardError = Math.sqrt(msWithin * (1 / groups[left].length + 1 / groups[right].length));
+      const statistic = difference / standardError;
+      const pValue = pValueForT(statistic, degreesFreedom, "two-sided");
+      comparisons.push({
+        label: `${left + 1} vs ${right + 1}`,
+        statistic,
+        adjustedP: bonferroniAdjust(pValue, pairCount),
+        estimateLabel: "diff",
+        estimate: difference,
+      });
+    }
+  }
+  return comparisons;
+}
+
+function pairwiseDunnComparisons(groups, groupRankSums, totalCount, tieCorrection) {
+  const comparisons = [];
+  const pairCount = (groups.length * (groups.length - 1)) / 2;
+  const rankVariance = totalCount * (totalCount + 1) / 12 -
+    tieCorrection / (12 * (totalCount - 1));
+  for (let left = 0; left < groups.length; left += 1) {
+    for (let right = left + 1; right < groups.length; right += 1) {
+      const leftMeanRank = groupRankSums[left] / groups[left].length;
+      const rightMeanRank = groupRankSums[right] / groups[right].length;
+      const difference = leftMeanRank - rightMeanRank;
+      const standardError = Math.sqrt(rankVariance * (1 / groups[left].length + 1 / groups[right].length));
+      const statistic = difference / standardError;
+      const pValue = pValueForNormal(statistic, "two-sided");
+      comparisons.push({
+        label: `${left + 1} vs ${right + 1}`,
+        statistic,
+        adjustedP: bonferroniAdjust(pValue, pairCount),
+        estimateLabel: "rank diff",
+        estimate: difference,
+      });
+    }
+  }
+  return comparisons;
+}
+
+function bonferroniAdjust(pValue, comparisonCount) {
+  return Math.min(1, pValue * comparisonCount);
+}
+
+function formatPairwiseComparisons(comparisons) {
+  return comparisons
+    .map((comparison) =>
+      `${comparison.label}: ${comparison.estimateLabel}=${formatNumber(comparison.estimate)}, p_adj=${formatNumber(comparison.adjustedP)}`,
+    )
+    .join("; ");
 }
 
 function studentTCdf(tStatistic, degreesFreedom) {
