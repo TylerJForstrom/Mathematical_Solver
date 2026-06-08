@@ -28,6 +28,10 @@ The frontend currently supports:
   one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis,
   chi-square goodness-of-fit, binomial probability, Poisson probability, normal
   probability, and z-score calculations
+- Effect sizes and follow-up comparisons, including Cohen's d/dz, Hedges g,
+  eta squared, omega squared, rank-biserial correlation, epsilon squared,
+  Cohen's w, Bonferroni-adjusted ANOVA pairwise comparisons, and Dunn-style
+  rank comparisons
 - Newton and bisection numerical root solvers
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
@@ -88,6 +92,8 @@ The same idea works for algebra and calculus:
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
 - `mann-whitney group1: 10,12,9; group2: 8,7,11` ranks combined samples
   and computes a nonparametric U test.
+- `ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10` reports F,
+  p-value, eta squared, omega squared, and pairwise comparisons.
 
 ## Run It
 
@@ -140,7 +146,8 @@ The demo includes:
 - Truth tables for logic mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
   Poisson probability, normal probability, z-scores, one-sample/two-sample/paired
-  t tests, ANOVA, chi-square tests, and nonparametric rank tests in Stats mode
+  t tests, ANOVA, chi-square tests, nonparametric rank tests, effect sizes, and
+  pairwise follow-up summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
   graphing, and numerical roots through Ask mode
 - Step-by-step explanation cards
@@ -169,7 +176,7 @@ These are good ways to make the project more impressive mathematically:
 2. Add exact radical output for quadratic equations with irrational roots.
 3. Add trigonometric simplification identities.
 4. Add substitution, integration by parts, and partial-fraction decomposition.
-5. Add Tukey HSD, Dunn's test, and confidence intervals for effect sizes.
+5. Add confidence intervals for effect sizes and exact small-sample rank-test p-values.
 6. Add row-space bases, column-space bases, and larger-matrix eigenvalue approximation.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add multi-step natural-language explanations for word problems.
