@@ -301,6 +301,10 @@ export function analyzeStatistics(statement) {
     return analyzeBinomial(statement);
   }
 
+  if (lower.includes("poisson")) {
+    return analyzePoisson(statement);
+  }
+
   if (
     lower.includes("regression") ||
     lower.includes("correlation") ||
@@ -953,7 +957,8 @@ function analyzeHypothesisTest(statement) {
 
   const standardError = summary.sampleStdDev / Math.sqrt(summary.count);
   const tStatistic = (summary.mean - mu) / standardError;
-  const pValue = pValueForAlternative(tStatistic, alternative);
+  const degreesFreedom = summary.count - 1;
+  const pValue = pValueForT(tStatistic, degreesFreedom, alternative);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
 
   return {
@@ -966,7 +971,7 @@ function analyzeHypothesisTest(statement) {
     ], "TEST"),
     answer: `t = ${formatNumber(tStatistic)}, p = ${formatNumber(pValue)}`,
     summary: "one-sample t test",
-    details: `${alternative} alternative, normal tail approximation`,
+    details: `${alternative} alternative, Student t p-value`,
     variables: [],
     metrics: treeMetrics(statsDatasetNode(values)),
     steps: [
@@ -988,7 +993,7 @@ function analyzeHypothesisTest(statement) {
       {
         title: "Approximate p-value",
         expression: `p = ${formatNumber(pValue)}`,
-        detail: "The browser demo uses the normal curve as a lightweight tail approximation.",
+        detail: "The p-value comes from the Student t distribution.",
       },
       {
         title: "Make decision",
@@ -1002,6 +1007,7 @@ function analyzeHypothesisTest(statement) {
       ["Sample mean", formatNumber(summary.mean)],
       ["Sample SD", formatNumber(summary.sampleStdDev)],
       ["Standard error", formatNumber(standardError)],
+      ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["t statistic", formatNumber(tStatistic)],
       ["p-value", formatNumber(pValue)],
       ["Decision", decision],
@@ -1030,7 +1036,7 @@ function analyzeTwoSampleTTest(statement) {
     (leftVarianceTerm ** 2) / (leftSummary.count - 1) +
     (rightVarianceTerm ** 2) / (rightSummary.count - 1);
   const degreesFreedom = dfNumerator / dfDenominator;
-  const pValue = pValueForAlternative(tStatistic, alternative);
+  const pValue = pValueForT(tStatistic, degreesFreedom, alternative);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
 
   return {
@@ -1043,7 +1049,7 @@ function analyzeTwoSampleTTest(statement) {
     ], "2-SAMPLE"),
     answer: `t = ${formatNumber(tStatistic)}, p = ${formatNumber(pValue)}`,
     summary: "two-sample t test",
-    details: "Welch test with normal tail approximation",
+    details: "Welch test with Student t p-value",
     variables: [],
     metrics: treeMetrics(statsDatasetNode([...left, ...right])),
     steps: [
@@ -1065,7 +1071,7 @@ function analyzeTwoSampleTTest(statement) {
       {
         title: "Compute test statistic",
         expression: `t = ${formatNumber(tStatistic)}, df = ${formatNumber(degreesFreedom)}`,
-        detail: "The browser demo reports Welch degrees of freedom and a normal-tail p-value approximation.",
+        detail: "The solver reports Welch degrees of freedom and a Student t-distribution p-value.",
       },
       {
         title: "Make decision",
@@ -1100,7 +1106,8 @@ function analyzePairedTTest(statement) {
 
   const standardError = summary.sampleStdDev / Math.sqrt(summary.count);
   const tStatistic = summary.mean / standardError;
-  const pValue = pValueForAlternative(tStatistic, alternative);
+  const degreesFreedom = summary.count - 1;
+  const pValue = pValueForT(tStatistic, degreesFreedom, alternative);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
 
   return {
@@ -1112,7 +1119,7 @@ function analyzePairedTTest(statement) {
     ], "PAIRED"),
     answer: `t = ${formatNumber(tStatistic)}, p = ${formatNumber(pValue)}`,
     summary: "paired t test",
-    details: "Mean of paired differences with normal tail approximation",
+    details: "Mean of paired differences with Student t p-value",
     variables: [],
     metrics: treeMetrics(statsDatasetNode(differences)),
     steps: [
@@ -1150,6 +1157,7 @@ function analyzePairedTTest(statement) {
       ["Mean difference", formatNumber(summary.mean)],
       ["Sample SD of differences", formatNumber(summary.sampleStdDev)],
       ["Standard error", formatNumber(standardError)],
+      ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["t statistic", formatNumber(tStatistic)],
       ["p-value", formatNumber(pValue)],
       ["Decision", decision],
@@ -1513,6 +1521,81 @@ function analyzeBinomial(statement) {
       ["Expected value", formatNumber(expected)],
       ["Variance", formatNumber(variance)],
       ["Standard deviation", formatNumber(Math.sqrt(variance))],
+    ],
+  };
+}
+
+function analyzePoisson(statement) {
+  const request = parsePoissonInput(statement);
+  const lambda = request.lambda;
+  const k = request.k;
+
+  if (!(lambda > 0)) {
+    throw new Error("Poisson probability needs lambda greater than 0.");
+  }
+  if (!Number.isInteger(k) || k < 0) {
+    throw new Error("Poisson probability needs a nonnegative integer k.");
+  }
+
+  const exact = poissonProbability(lambda, k);
+  const atMost = sumRange(0, k, (value) => poissonProbability(lambda, value));
+  const below = k === 0 ? 0 : sumRange(0, k - 1, (value) => poissonProbability(lambda, value));
+  const atLeast = 1 - below;
+  const greater = 1 - atMost;
+  const probability = request.tail === "at-most"
+    ? atMost
+    : request.tail === "less"
+      ? below
+      : request.tail === "at-least"
+        ? atLeast
+        : request.tail === "greater"
+          ? greater
+          : exact;
+  const label = poissonProbabilityLabel(request.tail, k);
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "POISSON",
+      children: [
+        statsMetricNode("lambda", lambda),
+        statsMetricNode("k", k),
+        statsMetricNode("P", probability),
+      ],
+    },
+    answer: `${label} = ${formatNumber(probability)}`,
+    summary: "Poisson probability",
+    details: "Discrete count distribution",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("lambda", lambda), statsMetricNode("k", k)],
+    }),
+    steps: [
+      {
+        title: "Read Poisson parameters",
+        expression: `lambda = ${formatNumber(lambda)}, k = ${k}`,
+        detail: "A Poisson model counts events occurring at a constant average rate.",
+      },
+      {
+        title: "Apply probability formula",
+        expression: "P(X = k) = e^-lambda lambda^k / k!",
+        detail: "The formula gives the probability of exactly k events.",
+      },
+      {
+        title: "Evaluate requested tail",
+        expression: `${label} = ${formatNumber(probability)}`,
+        detail: "Cumulative questions sum the exact probabilities over the requested counts.",
+      },
+    ],
+    artifacts: [
+      [`P(X = ${k})`, formatNumber(exact)],
+      [`P(X <= ${k})`, formatNumber(atMost)],
+      [`P(X >= ${k})`, formatNumber(atLeast)],
+      ["Expected value", formatNumber(lambda)],
+      ["Variance", formatNumber(lambda)],
+      ["Standard deviation", formatNumber(Math.sqrt(lambda))],
     ],
   };
 }
@@ -2462,14 +2545,28 @@ function parseAlternative(text) {
   return "two-sided";
 }
 
-function pValueForAlternative(statistic, alternative) {
+function pValueForT(statistic, degreesFreedom, alternative) {
+  const cdf = studentTCdf(statistic, degreesFreedom);
   if (alternative === "less") {
-    return normalCdf(statistic);
+    return cdf;
   }
   if (alternative === "greater") {
-    return 1 - normalCdf(statistic);
+    return 1 - cdf;
   }
-  return Math.min(1, 2 * (1 - normalCdf(Math.abs(statistic))));
+  return Math.min(1, 2 * Math.min(cdf, 1 - cdf));
+}
+
+function studentTCdf(tStatistic, degreesFreedom) {
+  if (!(degreesFreedom > 0)) {
+    return Number.NaN;
+  }
+  if (nearlyEqual(tStatistic, 0)) {
+    return 0.5;
+  }
+
+  const x = degreesFreedom / (degreesFreedom + tStatistic ** 2);
+  const beta = regularizedBeta(x, degreesFreedom / 2, 0.5);
+  return tStatistic > 0 ? 1 - beta / 2 : beta / 2;
 }
 
 function chiSquareRightTailApprox(statistic, degreesFreedom) {
@@ -2647,6 +2744,38 @@ function parseNamedProbabilityParams(text) {
   throw new Error("Use binomial n=10 p=0.5 k=3.");
 }
 
+function parsePoissonInput(text) {
+  const numbers = parseNumbers(text);
+  const lambda = readNamedNumber(text, ["lambda", "rate", "mean", "mu"], numbers[0]);
+  const kFallback = numbers.length >= 2 ? numbers[1] : Number.NaN;
+  const k = readNamedNumber(text, ["k", "x", "value"], kFallback);
+  const lower = text.toLowerCase();
+  let tail = "exact";
+  if (lower.includes("at most") || lower.includes("<=") || lower.includes("no more than")) {
+    tail = "at-most";
+  } else if (lower.includes("less than") || lower.includes("<")) {
+    tail = "less";
+  } else if (lower.includes("at least") || lower.includes(">=")) {
+    tail = "at-least";
+  } else if (lower.includes("greater than") || lower.includes("more than") || lower.includes(">")) {
+    tail = "greater";
+  }
+
+  return {
+    lambda,
+    k: Number(k),
+    tail,
+  };
+}
+
+function poissonProbabilityLabel(tail, k) {
+  if (tail === "at-most") return `P(X <= ${k})`;
+  if (tail === "less") return `P(X < ${k})`;
+  if (tail === "at-least") return `P(X >= ${k})`;
+  if (tail === "greater") return `P(X > ${k})`;
+  return `P(X = ${k})`;
+}
+
 function readNamedNumber(text, names, fallback) {
   for (const name of names) {
     const match = text.match(new RegExp(`\\b${name}\\s*=\\s*([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)`, "i"));
@@ -2688,6 +2817,18 @@ function modes(values) {
 
 function binomialProbability(n, p, k) {
   return combination(n, k) * p ** k * (1 - p) ** (n - k);
+}
+
+function poissonProbability(lambda, k) {
+  return Math.exp(-lambda) * lambda ** k / factorial(k);
+}
+
+function factorial(value) {
+  let result = 1;
+  for (let index = 2; index <= value; index += 1) {
+    result *= index;
+  }
+  return result;
 }
 
 function combination(n, k) {
@@ -2843,6 +2984,7 @@ function isStatisticsQuestion(lower) {
     "regression",
     "correlation",
     "binomial",
+    "poisson",
     "normal",
     "z-score",
     "zscore",

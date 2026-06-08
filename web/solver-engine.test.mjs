@@ -111,7 +111,7 @@ runTest("statistics mode computes two-sample tests", () => {
   const result = analyzeStatistics("two-sample t-test group1: 10, 12, 9; group2: 8, 7, 11");
 
   assert.equal(result.summary, "two-sample t test");
-  assert.equal(result.answer, "t = 1.118034, p = 0.263553");
+  assert.equal(result.answer, "t = 1.118034, p = 0.331352");
 });
 
 runTest("statistics mode computes chi-square goodness-of-fit", () => {
@@ -125,7 +125,7 @@ runTest("statistics mode computes paired t-tests", () => {
   const result = analyzeStatistics("paired t-test before: 10, 12, 9; after: 11, 14, 10");
 
   assert.equal(result.summary, "paired t test");
-  assert.equal(result.answer, "t = 4, p = 0.000063");
+  assert.equal(result.answer, "t = 4, p = 0.057191");
 });
 
 runTest("statistics mode computes one-way ANOVA", () => {
@@ -133,6 +133,13 @@ runTest("statistics mode computes one-way ANOVA", () => {
 
   assert.equal(result.summary, "one-way ANOVA");
   assert.equal(result.answer, "F = 13, p = 0.006592");
+});
+
+runTest("statistics mode computes Poisson probabilities", () => {
+  const result = analyzeStatistics("poisson lambda=3 at most k=2");
+
+  assert.equal(result.summary, "Poisson probability");
+  assert.equal(result.answer, "P(X <= 2) = 0.42319");
 });
 
 runTest("system solver handles two-variable systems", () => {
@@ -278,6 +285,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("chi-square observed 10,20,30 expected 15,15,30").summary, "chi-square goodness-of-fit");
   assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
+  assert.equal(analyzeUniversal("poisson lambda=3 k=2").summary, "Poisson probability");
   assert.equal(analyzeUniversal("rank [[1,2],[2,4]]").summary, "matrix rank");
   assert.equal(analyzeUniversal("eigen [[2,1],[1,2]]").summary, "2x2 eigenvalues");
   assert.equal(analyzeUniversal("nullspace [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix null space");
