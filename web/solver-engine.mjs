@@ -260,6 +260,10 @@ export function analyzeDerivative(statement, variable = "x") {
 export function analyzeStatistics(statement) {
   const lower = statement.toLowerCase();
 
+  if (lower.includes("hypothesis") || lower.includes("t-test") || lower.includes("t test") || lower.includes("test mean")) {
+    return analyzeHypothesisTest(statement);
+  }
+
   if (lower.includes("confidence") || /\bci\b/i.test(statement)) {
     return analyzeConfidenceInterval(statement);
   }
@@ -293,7 +297,19 @@ export function analyzeUniversal(question, values = {}) {
   let routed;
   let routedLabel;
 
-  if (isSystemQuestion(lower)) {
+  if (isMatrixQuestion(lower)) {
+    routed = analyzeMatrix(question);
+    routedLabel = "Matrix";
+  } else if (isGraphQuestion(lower)) {
+    routed = analyzeGraph(question);
+    routedLabel = "Graph";
+  } else if (isIntegralQuestion(lower)) {
+    routed = analyzeIntegral(question);
+    routedLabel = "Integral";
+  } else if (isNumericalQuestion(lower)) {
+    routed = analyzeNumerical(question);
+    routedLabel = "Numerical";
+  } else if (isSystemQuestion(lower)) {
     routed = analyzeSystem(question);
     routedLabel = "System";
   } else if (isDerivativeQuestion(lower)) {
@@ -404,6 +420,325 @@ export function analyzeSystem(statement) {
       ["Variables", variables.join(", ")],
       ["Augmented matrix", formatAugmentedMatrix(matrix, constants)],
       ["Solution", answer],
+    ],
+  };
+}
+
+export function analyzeMatrix(statement) {
+  const lower = statement.toLowerCase();
+  const matrices = extractMatrices(statement);
+  if (matrices.length === 0) {
+    throw new Error("Matrix questions need matrix notation like [[1,2],[3,4]].");
+  }
+
+  let answer;
+  let summary;
+  let artifacts;
+  let children;
+  let steps;
+
+  if (lower.includes("multiply") || lower.includes("product")) {
+    if (matrices.length < 2) {
+      throw new Error("Matrix multiplication needs two matrices.");
+    }
+    const result = multiplyMatrices(matrices[0], matrices[1]);
+    answer = formatMatrix(result);
+    summary = "matrix multiplication";
+    artifacts = [
+      ["A", formatMatrix(matrices[0])],
+      ["B", formatMatrix(matrices[1])],
+      ["A * B", answer],
+    ];
+    children = [matrixNode("A", matrices[0]), matrixNode("B", matrices[1]), matrixNode("PRODUCT", result)];
+    steps = [
+      {
+        title: "Read matrices",
+        expression: `A is ${matrixShape(matrices[0])}, B is ${matrixShape(matrices[1])}`,
+        detail: "For A * B, columns of A must match rows of B.",
+      },
+      {
+        title: "Multiply rows by columns",
+        expression: answer,
+        detail: "Each result entry is a dot product.",
+      },
+    ];
+  } else if (lower.includes("inverse")) {
+    const inverse = invertMatrix(matrices[0]);
+    answer = formatMatrix(inverse);
+    summary = "matrix inverse";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["Inverse", answer],
+    ];
+    children = [matrixNode("A", matrices[0]), matrixNode("INV", inverse)];
+    steps = [
+      {
+        title: "Build augmented matrix",
+        expression: `[A | I] for ${matrixShape(matrices[0])}`,
+        detail: "The inverse is found with Gauss-Jordan elimination.",
+      },
+      {
+        title: "Reduce to identity",
+        expression: answer,
+        detail: "When the left side becomes I, the right side is A^-1.",
+      },
+    ];
+  } else {
+    const determinantValue = determinant(matrices[0]);
+    answer = `det = ${formatNumber(determinantValue)}`;
+    summary = "determinant";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["Determinant", formatNumber(determinantValue)],
+    ];
+    children = [matrixNode("A", matrices[0]), statsMetricNode("det", determinantValue)];
+    steps = [
+      {
+        title: "Read square matrix",
+        expression: matrixShape(matrices[0]),
+        detail: "Determinants are defined for square matrices.",
+      },
+      {
+        title: "Compute determinant",
+        expression: answer,
+        detail: "The solver expands recursively along the first row.",
+      },
+    ];
+  }
+
+  const tree = { kind: "matrixOperation", label: "MATRIX", children };
+  return {
+    mode: "matrix",
+    tree,
+    answer,
+    summary,
+    details: "Matrix operation",
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps,
+    artifacts,
+  };
+}
+
+export function analyzeIntegral(statement, variableHint = "x") {
+  const request = extractIntegralQuestion(statement, variableHint);
+  const expression = parseMath(request.expression);
+  if (expression.kind === "equation") {
+    throw new Error("Integral mode expects an expression, not an equation.");
+  }
+
+  const steps = [
+    {
+      title: "Parse integrand",
+      expression: formatMath(expression),
+      detail: `The antiderivative is taken with respect to ${request.variable}.`,
+    },
+  ];
+
+  const polynomial = polynomialFrom(simplifyNode(expression, steps));
+  if (!polynomial) {
+    throw new Error("Integral mode currently supports polynomial expressions.");
+  }
+
+  const integral = integratePolynomial(polynomial, request.variable);
+  const answer = `${formatPolynomial(integral)} + C`;
+  steps.push({
+    title: "Apply power rule for integrals",
+    expression: answer,
+    detail: "Each x^n term becomes x^(n+1)/(n+1).",
+  });
+
+  return {
+    mode: "integral",
+    tree: expression,
+    answer,
+    summary: "indefinite integral",
+    details: `with respect to ${request.variable}`,
+    variables: mathVariables(expression),
+    metrics: treeMetrics(expression),
+    steps,
+    artifacts: [
+      ["Integrand", formatMath(expression)],
+      ["Antiderivative", answer],
+    ],
+  };
+}
+
+export function analyzeGraph(statement) {
+  const request = extractGraphQuestion(statement);
+  const expression = parseMath(request.expression);
+  if (expression.kind === "equation") {
+    throw new Error("Graph mode expects a function expression, such as graph x^2 - 4.");
+  }
+
+  const variable = request.variable;
+  const xMin = request.xMin;
+  const xMax = request.xMax;
+  const points = sampleFunction(expression, variable, xMin, xMax, 121);
+  if (points.length < 2) {
+    throw new Error("Could not sample enough finite graph points.");
+  }
+
+  const yValues = points.map((point) => point.y);
+  const yMin = Math.min(...yValues);
+  const yMax = Math.max(...yValues);
+
+  return {
+    mode: "graph",
+    tree: expression,
+    answer: `graph y = ${formatMath(expression)}`,
+    summary: "function graph",
+    details: `${variable} from ${formatNumber(xMin)} to ${formatNumber(xMax)}`,
+    variables: mathVariables(expression),
+    metrics: treeMetrics(expression),
+    steps: [
+      {
+        title: "Parse function",
+        expression: `y = ${formatMath(expression)}`,
+        detail: "The graph uses the parsed expression tree as a function.",
+      },
+      {
+        title: "Sample points",
+        expression: `${points.length} finite points`,
+        detail: "The solver evaluates the function over the requested x-range.",
+      },
+      {
+        title: "Scale axes",
+        expression: `x: [${formatNumber(xMin)}, ${formatNumber(xMax)}], y: [${formatNumber(yMin)}, ${formatNumber(yMax)}]`,
+        detail: "The output panel maps sampled points into an SVG plot.",
+      },
+    ],
+    artifacts: [
+      ["Function", `y = ${formatMath(expression)}`],
+      ["Domain", `[${formatNumber(xMin)}, ${formatNumber(xMax)}]`],
+      ["Range shown", `[${formatNumber(yMin)}, ${formatNumber(yMax)}]`],
+    ],
+    graph: {
+      expression: `y = ${formatMath(expression)}`,
+      points,
+      xMin,
+      xMax,
+      yMin,
+      yMax,
+    },
+  };
+}
+
+export function analyzeNumerical(statement) {
+  const request = extractNumericalQuestion(statement);
+  const expression = parseMath(request.expression);
+  const evaluator = numericFunctionFromExpression(expression);
+  const steps = [
+    {
+      title: "Parse numerical problem",
+      expression: request.expression,
+      detail: `The solver treats the input as f(${request.variable}) = 0.`,
+    },
+  ];
+
+  let root;
+  let summary;
+  if (request.method === "newton") {
+    root = newtonRoot(evaluator, request.guess);
+    summary = "Newton root";
+    steps.push({
+      title: "Apply Newton's method",
+      expression: `${request.variable} ~= ${formatNumber(root)}`,
+      detail: "Newton's method repeatedly follows tangent lines toward a root.",
+    });
+  } else {
+    root = bisectionRoot(evaluator, request.low, request.high);
+    summary = "bisection root";
+    steps.push({
+      title: "Apply bisection",
+      expression: `${request.variable} ~= ${formatNumber(root)}`,
+      detail: "Bisection repeatedly halves an interval where the function changes sign.",
+    });
+  }
+
+  return {
+    mode: "numerical",
+    tree: expression,
+    answer: `${request.variable} ~= ${formatNumber(root)}`,
+    summary,
+    details: "Numerical root approximation",
+    variables: mathVariables(expression),
+    metrics: treeMetrics(expression),
+    steps,
+    artifacts: [
+      ["Method", request.method],
+      ["Function", request.expression],
+      ["Root", `${request.variable} ~= ${formatNumber(root)}`],
+      ["f(root)", formatNumber(evaluator(root))],
+    ],
+  };
+}
+
+function analyzeHypothesisTest(statement) {
+  const { mu, values, alternative, alpha } = parseHypothesisInput(statement);
+  if (values.length < 2) {
+    throw new Error("Hypothesis tests need at least two sample values.");
+  }
+
+  const summary = descriptiveSummary(values);
+  if (!(summary.sampleStdDev > 0)) {
+    throw new Error("Hypothesis tests need sample variation.");
+  }
+
+  const standardError = summary.sampleStdDev / Math.sqrt(summary.count);
+  const tStatistic = (summary.mean - mu) / standardError;
+  const pValue = pValueForAlternative(tStatistic, alternative);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(values, [
+      statsMetricNode("H0", mu),
+      statsMetricNode("MEAN", summary.mean),
+      statsMetricNode("T", tStatistic),
+      statsMetricNode("P", pValue),
+    ], "TEST"),
+    answer: `t = ${formatNumber(tStatistic)}, p = ${formatNumber(pValue)}`,
+    summary: "one-sample t test",
+    details: `${alternative} alternative, normal tail approximation`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(values)),
+    steps: [
+      {
+        title: "Read hypothesis test",
+        expression: `H0: mean = ${formatNumber(mu)}, n = ${summary.count}`,
+        detail: "The solver extracts the null mean and sample data.",
+      },
+      {
+        title: "Compute sample summary",
+        expression: `mean = ${formatNumber(summary.mean)}, sample sd = ${formatNumber(summary.sampleStdDev)}`,
+        detail: "The one-sample test compares the sample mean to the null mean.",
+      },
+      {
+        title: "Compute test statistic",
+        expression: `t = (mean - mu) / (sd / sqrt(n)) = ${formatNumber(tStatistic)}`,
+        detail: "The statistic measures how many standard errors the sample mean is from H0.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `p = ${formatNumber(pValue)}`,
+        detail: "The browser demo uses the normal curve as a lightweight tail approximation.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values give evidence against the null hypothesis.",
+      },
+    ],
+    artifacts: [
+      ["Null mean", formatNumber(mu)],
+      ["Alternative", alternative],
+      ["Sample mean", formatNumber(summary.mean)],
+      ["Sample SD", formatNumber(summary.sampleStdDev)],
+      ["Standard error", formatNumber(standardError)],
+      ["t statistic", formatNumber(tStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Decision", decision],
     ],
   };
 }
@@ -791,6 +1126,320 @@ function analyzeConfidenceInterval(statement) {
   };
 }
 
+function extractMatrices(text) {
+  const matrices = [];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "[" && text[index + 1] === "[") {
+      let depth = 0;
+      const start = index;
+      for (; index < text.length; index += 1) {
+        if (text[index] === "[") depth += 1;
+        if (text[index] === "]") depth -= 1;
+        if (depth === 0) {
+          const literal = text.slice(start, index + 1);
+          matrices.push(parseMatrixLiteral(literal));
+          break;
+        }
+      }
+    }
+  }
+  return matrices;
+}
+
+function parseMatrixLiteral(literal) {
+  let matrix;
+  try {
+    matrix = JSON.parse(literal);
+  } catch {
+    throw new Error(`Invalid matrix notation '${literal}'. Use [[1,2],[3,4]].`);
+  }
+
+  if (
+    !Array.isArray(matrix) ||
+    matrix.length === 0 ||
+    matrix.some((row) => !Array.isArray(row) || row.length !== matrix[0].length)
+  ) {
+    throw new Error("Matrix rows must be rectangular.");
+  }
+
+  return matrix.map((row) => row.map((value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      throw new Error("Matrix entries must be numbers.");
+    }
+    return number;
+  }));
+}
+
+function matrixShape(matrix) {
+  return `${matrix.length}x${matrix[0].length}`;
+}
+
+function formatMatrix(matrix) {
+  return `[${matrix.map((row) => `[${row.map(formatNumber).join(", ")}]`).join(", ")}]`;
+}
+
+function matrixNode(label, matrix) {
+  return {
+    kind: "matrix",
+    label,
+    children: matrix.map((row, index) => ({
+      kind: "matrixRow",
+      label: `R${index + 1}`,
+      children: row.map((value) => statsMetricNode("VALUE", value)),
+    })),
+  };
+}
+
+function multiplyMatrices(left, right) {
+  if (left[0].length !== right.length) {
+    throw new Error("Matrix multiplication requires columns of A to equal rows of B.");
+  }
+
+  return left.map((row) =>
+    right[0].map((_, columnIndex) =>
+      row.reduce((sum, value, index) => sum + value * right[index][columnIndex], 0),
+    ),
+  );
+}
+
+function determinant(matrix) {
+  if (matrix.length !== matrix[0].length) {
+    throw new Error("Determinants require a square matrix.");
+  }
+  if (matrix.length === 1) return matrix[0][0];
+  if (matrix.length === 2) return matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0];
+
+  return matrix[0].reduce((sum, value, column) => {
+    const minor = matrix.slice(1).map((row) => row.filter((_, index) => index !== column));
+    return sum + (column % 2 === 0 ? 1 : -1) * value * determinant(minor);
+  }, 0);
+}
+
+function invertMatrix(matrix) {
+  if (matrix.length !== matrix[0].length) {
+    throw new Error("Matrix inverse requires a square matrix.");
+  }
+
+  const size = matrix.length;
+  const augmented = matrix.map((row, rowIndex) => [
+    ...row,
+    ...Array.from({ length: size }, (_, columnIndex) => (rowIndex === columnIndex ? 1 : 0)),
+  ]);
+
+  for (let column = 0; column < size; column += 1) {
+    let pivot = column;
+    for (let row = column + 1; row < size; row += 1) {
+      if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) {
+        pivot = row;
+      }
+    }
+    if (nearlyEqual(augmented[pivot][column], 0)) {
+      throw new Error("Matrix is singular and has no inverse.");
+    }
+
+    [augmented[column], augmented[pivot]] = [augmented[pivot], augmented[column]];
+    const pivotValue = augmented[column][column];
+    for (let col = 0; col < 2 * size; col += 1) {
+      augmented[column][col] /= pivotValue;
+    }
+    for (let row = 0; row < size; row += 1) {
+      if (row === column) continue;
+      const factor = augmented[row][column];
+      for (let col = 0; col < 2 * size; col += 1) {
+        augmented[row][col] -= factor * augmented[column][col];
+      }
+    }
+  }
+
+  return augmented.map((row) => row.slice(size).map(normalizeNumber));
+}
+
+function extractIntegralQuestion(statement, fallbackVariable) {
+  let text = statement
+    .replace(/^(integrate|integral of|find the integral of|antiderivative of)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  let variable = fallbackVariable;
+
+  const respectMatch = text.match(/\b(?:with respect to|wrt)\s+([A-Za-z_]\w*)/i);
+  const dxMatch = text.match(/\bd([A-Za-z_]\w*)\b/i);
+  if (respectMatch) {
+    variable = respectMatch[1];
+    text = text.replace(respectMatch[0], "").trim();
+  } else if (dxMatch) {
+    variable = dxMatch[1];
+    text = text.replace(dxMatch[0], "").trim();
+  }
+
+  return {
+    expression: text,
+    variable,
+  };
+}
+
+function integratePolynomial(poly, variable) {
+  const result = new Map();
+  for (const [key, coefficient] of poly.entries()) {
+    const powers = powersFromKey(key);
+    for (const otherVariable of Object.keys(powers)) {
+      if (otherVariable !== variable) {
+        throw new Error("Integral mode currently supports one-variable polynomials.");
+      }
+    }
+    const currentPower = powers[variable] ?? 0;
+    powers[variable] = currentPower + 1;
+    result.set(monomialKey(powers), coefficient / (currentPower + 1));
+  }
+  return cleanPolynomial(result);
+}
+
+function extractGraphQuestion(statement) {
+  let text = statement
+    .replace(/^(graph|plot|draw)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  let xMin = -10;
+  let xMax = 10;
+  let variable = "x";
+
+  const rangeMatch = text.match(/\b(?:from|range)\s+([-+]?\d*\.?\d+)\s+(?:to|,)\s+([-+]?\d*\.?\d+)/i);
+  if (rangeMatch) {
+    xMin = Number(rangeMatch[1]);
+    xMax = Number(rangeMatch[2]);
+    text = text.replace(rangeMatch[0], "").trim();
+  }
+
+  const variableMatch = text.match(/\bfor\s+([A-Za-z_]\w*)\b/i);
+  if (variableMatch) {
+    variable = variableMatch[1];
+    text = text.replace(variableMatch[0], "").trim();
+  }
+
+  text = text.replace(/^y\s*=\s*/i, "").trim();
+  if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || xMin >= xMax) {
+    throw new Error("Graph mode needs a valid range, such as from -5 to 5.");
+  }
+  return { expression: text, variable, xMin, xMax };
+}
+
+function sampleFunction(expression, variable, xMin, xMax, count) {
+  const points = [];
+  for (let index = 0; index < count; index += 1) {
+    const x = xMin + ((xMax - xMin) * index) / (count - 1);
+    const y = evaluateMath(expression, { [variable]: x });
+    if (Number.isFinite(y)) {
+      points.push({ x, y });
+    }
+  }
+  return points;
+}
+
+function extractNumericalQuestion(statement) {
+  const lower = statement.toLowerCase();
+  const method = lower.includes("newton") ? "newton" : "bisection";
+  let expression = statement
+    .replace(/^(newton|bisection|numerical root|root of|find root of|solve numerically)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+
+  const guessMatch = expression.match(/\bguess\s*=\s*([-+]?\d*\.?\d+)/i);
+  const intervalMatch = expression.match(/\b(?:interval|between)\s*=?\s*([-+]?\d*\.?\d+)\s*,?\s+([-+]?\d*\.?\d+)/i);
+  let guess = 1;
+  let low = -10;
+  let high = 10;
+
+  if (guessMatch) {
+    guess = Number(guessMatch[1]);
+    expression = expression.replace(guessMatch[0], "").trim();
+  }
+  if (intervalMatch) {
+    low = Number(intervalMatch[1]);
+    high = Number(intervalMatch[2]);
+    expression = expression.replace(intervalMatch[0], "").trim();
+  }
+  if (!Number.isFinite(guess) || !Number.isFinite(low) || !Number.isFinite(high) || low >= high) {
+    throw new Error("Numerical solving needs a valid guess or interval.");
+  }
+
+  return {
+    expression,
+    variable: "x",
+    method,
+    guess,
+    low,
+    high,
+  };
+}
+
+function numericFunctionFromExpression(parsed) {
+  if (parsed.kind === "equation") {
+    return (x) => evaluateMath(parsed.left, { x }) - evaluateMath(parsed.right, { x });
+  }
+  return (x) => evaluateMath(parsed, { x });
+}
+
+function evaluateMath(node, values = {}) {
+  if (node.kind === "mathNumber") return node.value;
+  if (node.kind === "mathSymbol") {
+    if (node.name in values) return values[node.name];
+    throw new Error(`Missing numeric value for ${node.name}.`);
+  }
+  if (node.kind === "mathUnary") return -evaluateMath(node.operand, values);
+  if (node.kind === "mathFunction") return evaluateFunction(node.name, evaluateMath(node.argument, values));
+  if (node.kind === "mathBinary") {
+    const left = evaluateMath(node.left, values);
+    const right = evaluateMath(node.right, values);
+    return evaluateBinary(node.operator, left, right);
+  }
+  throw new Error(`Cannot evaluate node '${node.kind}'.`);
+}
+
+function newtonRoot(evaluator, initialGuess) {
+  let x = initialGuess;
+  for (let index = 0; index < 40; index += 1) {
+    const y = evaluator(x);
+    if (Math.abs(y) < 1e-9) return normalizeNumber(x);
+    const derivative = numericDerivative(evaluator, x);
+    if (nearlyEqual(derivative, 0)) {
+      throw new Error("Newton's method hit a flat slope; try a different guess.");
+    }
+    x -= y / derivative;
+    if (!Number.isFinite(x)) {
+      throw new Error("Newton's method diverged; try bisection with an interval.");
+    }
+  }
+  return normalizeNumber(x);
+}
+
+function numericDerivative(evaluator, x) {
+  const h = 1e-5;
+  return (evaluator(x + h) - evaluator(x - h)) / (2 * h);
+}
+
+function bisectionRoot(evaluator, lowStart, highStart) {
+  let low = lowStart;
+  let high = highStart;
+  let lowValue = evaluator(low);
+  let highValue = evaluator(high);
+  if (lowValue * highValue > 0) {
+    throw new Error("Bisection needs an interval where the function changes sign.");
+  }
+  for (let index = 0; index < 80; index += 1) {
+    const mid = (low + high) / 2;
+    const midValue = evaluator(mid);
+    if (Math.abs(midValue) < 1e-9) return normalizeNumber(mid);
+    if (lowValue * midValue < 0) {
+      high = mid;
+      highValue = midValue;
+    } else {
+      low = mid;
+      lowValue = midValue;
+    }
+  }
+  return normalizeNumber((low + high) / 2);
+}
+
 function descriptiveSummary(values) {
   const sorted = [...values].sort((left, right) => left - right);
   const count = values.length;
@@ -837,6 +1486,73 @@ function descriptiveAnswer(statement, summary) {
 
 function parseNumbers(text) {
   return [...text.matchAll(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)].map((match) => Number(match[0]));
+}
+
+function parseHypothesisInput(text) {
+  const numberPattern = "([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)";
+  let dataText = text;
+  let mu;
+
+  const h0Match = dataText.match(new RegExp(`\\b(?:h0|h_0)\\s*:?\\s*(?:mu|mean)\\s*=\\s*${numberPattern}`, "i"));
+  const namedMeanMatch = dataText.match(new RegExp(`\\b(?:mu|mean)\\s*=\\s*${numberPattern}`, "i"));
+  const againstMatch = dataText.match(new RegExp(`\\bagainst\\s+${numberPattern}`, "i"));
+  const phraseMatch = dataText.match(new RegExp(`\\b(?:less than|greater than|more than|under|over)\\s+${numberPattern}`, "i"));
+  const selected = h0Match ?? namedMeanMatch ?? againstMatch ?? phraseMatch;
+
+  if (selected) {
+    mu = Number(selected[1]);
+    dataText = dataText.replace(selected[0], "");
+  }
+
+  const alphaMatch = dataText.match(new RegExp(`\\balpha\\s*=\\s*${numberPattern}`, "i"));
+  const alpha = alphaMatch ? Number(alphaMatch[1]) : 0.05;
+  if (alphaMatch) {
+    dataText = dataText.replace(alphaMatch[0], "");
+  }
+
+  if (!Number.isFinite(mu)) {
+    throw new Error("Use t-test mean=10 data 8, 9, 11, 12.");
+  }
+  if (!(alpha > 0 && alpha < 1)) {
+    throw new Error("Hypothesis test alpha must be between 0 and 1.");
+  }
+
+  const lower = text.toLowerCase();
+  let alternative = "two-sided";
+  if (/\b(less|below|under)\b/.test(lower) || /<\s*[-+]?\d/.test(lower)) {
+    alternative = "less";
+  } else if (/\b(greater|above|over|more)\b/.test(lower) || />\s*[-+]?\d/.test(lower)) {
+    alternative = "greater";
+  }
+
+  dataText = dataText
+    .replace(/\bt-?test\b/gi, "")
+    .replace(/\bhypothesis\b/gi, "")
+    .replace(/\btest\b/gi, "")
+    .replace(/\bmean\b/gi, "")
+    .replace(/\bmu\b/gi, "")
+    .replace(/\bsample\b/gi, "")
+    .replace(/\bdata\b/gi, "")
+    .replace(/\bfor\b/gi, "")
+    .replace(/\bagainst\b/gi, "")
+    .replace(/\b(?:less|greater|than|more|under|over|above|below|two-sided|two sided)\b/gi, "");
+
+  return {
+    mu,
+    alpha,
+    alternative,
+    values: parseNumbers(dataText),
+  };
+}
+
+function pValueForAlternative(statistic, alternative) {
+  if (alternative === "less") {
+    return normalCdf(statistic);
+  }
+  if (alternative === "greater") {
+    return 1 - normalCdf(statistic);
+  }
+  return Math.min(1, 2 * (1 - normalCdf(Math.abs(statistic))));
 }
 
 function parseConfidenceInput(text) {
@@ -1041,6 +1757,36 @@ function isDerivativeQuestion(lower) {
   return lower.includes("derivative") || lower.includes("differentiate") || /d\s*\/\s*d[a-z]\w*/i.test(lower);
 }
 
+function isMatrixQuestion(lower) {
+  return lower.includes("matrix") ||
+    lower.includes("determinant") ||
+    lower.startsWith("det ") ||
+    lower.includes(" det ") ||
+    lower.includes("inverse [[") ||
+    lower.includes("multiply [[") ||
+    lower.includes("product [[");
+}
+
+function isGraphQuestion(lower) {
+  return lower.startsWith("graph ") || lower.startsWith("plot ") || lower.startsWith("draw ");
+}
+
+function isIntegralQuestion(lower) {
+  return lower.startsWith("integrate ") ||
+    lower.startsWith("integral of ") ||
+    lower.startsWith("find the integral of ") ||
+    lower.startsWith("antiderivative of ");
+}
+
+function isNumericalQuestion(lower) {
+  return lower.startsWith("newton ") ||
+    lower.startsWith("bisection ") ||
+    lower.startsWith("numerical root ") ||
+    lower.startsWith("root of ") ||
+    lower.startsWith("find root of ") ||
+    lower.startsWith("solve numerically ");
+}
+
 function isSystemQuestion(lower) {
   return lower.includes("system") || lower.includes("simultaneous equations");
 }
@@ -1063,6 +1809,10 @@ function isStatisticsQuestion(lower) {
     "probability",
     "statistics",
     "dataset",
+    "hypothesis",
+    "t-test",
+    "t test",
+    "test mean",
   ].some((word) => lower.includes(word)) || parsePairs(lower).length >= 2;
 }
 
@@ -2106,7 +2856,7 @@ function solvePolynomial(poly, variable) {
   const numericRoots = approximateRealPolynomialRoots(coefficients);
   return {
     answer: numericRoots.length
-      ? numericRoots.map((root) => `${variable} ≈ ${formatNumber(root)}`).join(", ")
+      ? numericRoots.map((root) => `${variable} ~= ${formatNumber(root)}`).join(", ")
       : "no real roots found",
     summary: numericRoots.length ? "numeric roots" : "no real roots found",
     steps: [
@@ -2445,6 +3195,7 @@ function isOperatorNode(node) {
     "mathBinary",
     "mathFunction",
     "equation",
+    "matrixOperation",
   ].includes(node.kind);
 }
 
@@ -2475,12 +3226,16 @@ export function nodeLabel(node) {
   if (node.kind === "statsRegression") return "REG";
   if (node.kind === "statsDistribution") return node.label ?? "DIST";
   if (node.kind === "system") return "SYSTEM";
+  if (node.kind === "matrixOperation") return node.label ?? "MATRIX";
+  if (node.kind === "matrix") return node.label ?? "M";
+  if (node.kind === "matrixRow") return node.label ?? "ROW";
   return "?";
 }
 
 export function nodeTone(node) {
   if (node.kind.startsWith("logic")) return "logic";
   if (node.kind.startsWith("stats")) return "statistics";
+  if (node.kind.startsWith("matrix")) return "matrix";
   if (node.kind === "system") return "equation";
   if (node.kind === "mathNumber") return "number";
   if (node.kind === "mathSymbol") return "symbol";

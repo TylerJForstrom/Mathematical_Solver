@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import {
   analyzeDerivative,
   analyzeEquation,
+  analyzeGraph,
+  analyzeIntegral,
   analyzeLogic,
+  analyzeMatrix,
+  analyzeNumerical,
   analyzeSimplification,
   analyzeStatistics,
   analyzeSystem,
@@ -95,6 +99,13 @@ runTest("statistics mode computes confidence intervals", () => {
   assert.equal(result.answer, "95% CI = [11.228192, 16.771808]");
 });
 
+runTest("statistics mode computes one-sample tests", () => {
+  const result = analyzeStatistics("t-test mean=10 data 8, 9, 11, 12, 10");
+
+  assert.equal(result.summary, "one-sample t test");
+  assert.equal(result.answer, "t = 0, p = 1");
+});
+
 runTest("system solver handles two-variable systems", () => {
   const result = analyzeSystem("2x + y = 5; x - y = 1");
 
@@ -102,11 +113,60 @@ runTest("system solver handles two-variable systems", () => {
   assert.equal(result.answer, "x = 2, y = 1");
 });
 
+runTest("matrix mode computes determinants", () => {
+  const result = analyzeMatrix("det [[1,2],[3,4]]");
+
+  assert.equal(result.summary, "determinant");
+  assert.equal(result.answer, "det = -2");
+});
+
+runTest("matrix mode multiplies matrices", () => {
+  const result = analyzeMatrix("multiply [[1,2],[3,4]] [[5,6],[7,8]]");
+
+  assert.equal(result.summary, "matrix multiplication");
+  assert.equal(result.answer, "[[19, 22], [43, 50]]");
+});
+
+runTest("matrix mode computes inverses", () => {
+  const result = analyzeMatrix("inverse [[1,2],[3,4]]");
+
+  assert.equal(result.summary, "matrix inverse");
+  assert.equal(result.answer, "[[-2, 1], [1.5, -0.5]]");
+});
+
+runTest("integral mode applies polynomial power rules", () => {
+  const result = analyzeIntegral("integrate x^2 + 3x");
+
+  assert.equal(result.summary, "indefinite integral");
+  assert.equal(result.answer, "0.333333x^3 + 1.5x^2 + C");
+});
+
+runTest("graph mode samples functions", () => {
+  const result = analyzeGraph("graph x^2 - 4 from -2 to 2");
+
+  assert.equal(result.summary, "function graph");
+  assert.equal(result.graph.points.length, 121);
+});
+
+runTest("numerical mode runs Newton's method", () => {
+  const result = analyzeNumerical("newton x^3 - x - 2 guess=1");
+
+  assert.equal(result.summary, "Newton root");
+  assert.equal(result.answer, "x ~= 1.52138");
+});
+
+runTest("numerical mode runs bisection", () => {
+  const result = analyzeNumerical("bisection x^2 - 4 interval 0 3");
+
+  assert.equal(result.summary, "bisection root");
+  assert.equal(result.answer, "x ~= 2");
+});
+
 runTest("equation mode approximates higher-degree real roots", () => {
   const result = analyzeEquation("x^3 - x - 2 = 0", "x");
 
   assert.equal(result.summary, "numeric roots");
-  assert.equal(result.answer, "x ≈ 1.52138");
+  assert.equal(result.answer, "x ~= 1.52138");
 });
 
 runTest("universal mode routes statistics questions", () => {
@@ -128,4 +188,11 @@ runTest("universal mode routes systems", () => {
 
   assert.equal(result.summary, "linear system");
   assert.equal(result.answer, "x = 2, y = 1");
+});
+
+runTest("universal mode routes advanced solvers", () => {
+  assert.equal(analyzeUniversal("det [[1,2],[3,4]]").summary, "determinant");
+  assert.equal(analyzeUniversal("integrate x^2").summary, "indefinite integral");
+  assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
+  assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
 });
