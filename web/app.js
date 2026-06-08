@@ -225,6 +225,7 @@ function renderLogicValues(names) {
 
 function renderOutput(analysis) {
   const graphMarkup = analysis.graph ? renderGraph(analysis.graph) : "";
+  const artifactMarkup = renderArtifacts(analysis.artifacts);
 
   if (analysis.table) {
     const headerCells = analysis.table.headers
@@ -233,12 +234,16 @@ function renderOutput(analysis) {
     const bodyRows = analysis.table.rows
       .map((row) => `<tr>${row.map(outputCell).join("")}</tr>`)
       .join("");
-    elements.outputPanel.innerHTML = `${graphMarkup}<div class="table-wrap"><table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+    elements.outputPanel.innerHTML = `${graphMarkup}<div class="table-wrap"><table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>${artifactMarkup}`;
     return;
   }
 
   const artifacts = analysis.artifacts ?? [["Answer", analysis.answer]];
-  const artifactMarkup = artifacts
+  elements.outputPanel.innerHTML = `${graphMarkup}${renderArtifacts(artifacts)}`;
+}
+
+function renderArtifacts(artifacts = []) {
+  return artifacts
     .map(
       ([label, value]) => `
         <div class="artifact-row">
@@ -248,7 +253,6 @@ function renderOutput(analysis) {
       `,
     )
     .join("");
-  elements.outputPanel.innerHTML = `${graphMarkup}${artifactMarkup}`;
 }
 
 function renderGraph(graph) {
