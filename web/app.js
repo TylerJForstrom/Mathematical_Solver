@@ -224,6 +224,8 @@ function renderLogicValues(names) {
 }
 
 function renderOutput(analysis) {
+  const graphMarkup = analysis.graph ? renderGraph(analysis.graph) : "";
+
   if (analysis.table) {
     const headerCells = analysis.table.headers
       .map((header) => `<th scope="col">${escapeHtml(header)}</th>`)
@@ -231,12 +233,12 @@ function renderOutput(analysis) {
     const bodyRows = analysis.table.rows
       .map((row) => `<tr>${row.map(outputCell).join("")}</tr>`)
       .join("");
-    elements.outputPanel.innerHTML = `<div class="table-wrap"><table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+    elements.outputPanel.innerHTML = `${graphMarkup}<div class="table-wrap"><table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
     return;
   }
 
   const artifacts = analysis.artifacts ?? [["Answer", analysis.answer]];
-  elements.outputPanel.innerHTML = artifacts
+  const artifactMarkup = artifacts
     .map(
       ([label, value]) => `
         <div class="artifact-row">
@@ -246,6 +248,43 @@ function renderOutput(analysis) {
       `,
     )
     .join("");
+  elements.outputPanel.innerHTML = `${graphMarkup}${artifactMarkup}`;
+}
+
+function renderGraph(graph) {
+  const width = 640;
+  const height = 260;
+  const pad = 30;
+  const yPad = Math.max(1, (graph.yMax - graph.yMin) * 0.08);
+  const yMin = graph.yMin - yPad;
+  const yMax = graph.yMax + yPad;
+  const mapX = (x) => pad + ((x - graph.xMin) / (graph.xMax - graph.xMin)) * (width - pad * 2);
+  const mapY = (y) => height - pad - ((y - yMin) / (yMax - yMin)) * (height - pad * 2);
+  const points = graph.points.map((point) => `${mapX(point.x).toFixed(2)},${mapY(point.y).toFixed(2)}`).join(" ");
+  const xAxis = yMin <= 0 && yMax >= 0 ? `<line class="graph-axis" x1="${pad}" y1="${mapY(0)}" x2="${width - pad}" y2="${mapY(0)}"></line>` : "";
+  const yAxis = graph.xMin <= 0 && graph.xMax >= 0 ? `<line class="graph-axis" x1="${mapX(0)}" y1="${pad}" x2="${mapX(0)}" y2="${height - pad}"></line>` : "";
+
+  return `
+    <div class="graph-card" aria-label="Function graph">
+      <div class="graph-header">
+        <strong>${escapeHtml(graph.expression)}</strong>
+        <span>x ${escapeHtml(`[${formatPlotNumber(graph.xMin)}, ${formatPlotNumber(graph.xMax)}]`)}</span>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(graph.expression)}">
+        <rect x="0" y="0" width="${width}" height="${height}"></rect>
+        ${xAxis}
+        ${yAxis}
+        <polyline class="graph-line" points="${points}"></polyline>
+        <text class="graph-label" x="${pad}" y="20">${escapeHtml(`y ${formatPlotNumber(yMin)} to ${formatPlotNumber(yMax)}`)}</text>
+      </svg>
+    </div>
+  `;
+}
+
+function formatPlotNumber(value) {
+  if (Object.is(value, -0) || Math.abs(value) < 1e-10) return "0";
+  if (Number.isInteger(value)) return String(value);
+  return String(Number(value.toFixed(3)));
 }
 
 function outputCell(value) {
@@ -392,4 +431,37 @@ for (const button of elements.sampleButtons) {
   });
 }
 
-setMode("ask", true);
+if (!loadInitialState()) {
+  setMode("ask", true);
+}
+
+function loadInitialState() {
+  const params = new URLSearchParams(window.location.search);
+  const sampleLabel = params.get("sample");
+  if (sampleLabel) {
+    const sampleButton = [...elements.sampleButtons].find(
+      (button) => button.textContent.trim().toLowerCase() === sampleLabel.toLowerCase(),
+    );
+    if (sampleButton) {
+      const mode = sampleButton.dataset.sampleMode;
+      setMode(mode, false);
+      elements.statementInput.value = sampleButton.dataset.sample;
+      elements.compareInput.value = sampleButton.dataset.compare ?? MODE_CONFIG[mode].compare;
+      update();
+      return true;
+    }
+  }
+
+  const problem = params.get("problem");
+  if (!problem) {
+    return false;
+  }
+
+  const requestedMode = params.get("mode") ?? "ask";
+  const mode = MODE_CONFIG[requestedMode] ? requestedMode : "ask";
+  setMode(mode, false);
+  elements.statementInput.value = problem;
+  elements.compareInput.value = params.get("compare") ?? MODE_CONFIG[mode].compare;
+  update();
+  return true;
+}

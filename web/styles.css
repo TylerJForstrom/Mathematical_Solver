@@ -36,6 +36,7 @@ textarea {
 }
 
 button {
+  min-width: 0;
   min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -66,6 +67,10 @@ textarea:focus-visible {
   align-items: center;
   gap: 14px;
   min-height: 74px;
+}
+
+.hero > div:last-child {
+  min-width: 0;
 }
 
 .brand-mark {
@@ -135,6 +140,7 @@ h3 {
 
 .mode-tabs button {
   font-weight: 750;
+  overflow-wrap: anywhere;
 }
 
 .mode-tabs button.active {
@@ -186,6 +192,7 @@ input {
 #flipAllButton {
   padding: 0 12px;
   color: var(--teal-dark);
+  white-space: normal;
 }
 
 .control-strip {
@@ -403,6 +410,11 @@ input {
   fill: var(--teal-dark);
 }
 
+.tree-node.matrix circle,
+.tree-node.matrix rect {
+  fill: var(--violet);
+}
+
 .tree-node.equation circle,
 .tree-node.equation rect {
   fill: var(--red);
@@ -422,6 +434,68 @@ input {
   margin-top: 12px;
   border-top: 1px solid var(--line);
   overflow: auto;
+}
+
+.graph-card {
+  padding: 14px 16px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.graph-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.graph-header strong {
+  overflow-wrap: anywhere;
+  font-family:
+    "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.graph-header span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.graph-card svg {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(#e8eeeb 1px, transparent 1px),
+    linear-gradient(90deg, #e8eeeb 1px, transparent 1px);
+  background-color: #fbfcfb;
+  background-size: 40px 40px;
+}
+
+.graph-card rect {
+  fill: transparent;
+}
+
+.graph-axis {
+  stroke: #9aa9a4;
+  stroke-width: 1.5;
+}
+
+.graph-line {
+  fill: none;
+  stroke: var(--teal);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+}
+
+.graph-label {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .artifact-row {
@@ -563,7 +637,7 @@ td.false {
   }
 
   .mode-tabs {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .answer-band {
