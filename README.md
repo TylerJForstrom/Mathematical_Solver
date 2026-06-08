@@ -25,8 +25,9 @@ The frontend currently supports:
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression and correlation for coordinate pairs
 - Confidence intervals, one-sample/two-sample/paired t tests with Student t p-values,
-  one-way ANOVA, chi-square goodness-of-fit, binomial probability, Poisson probability,
-  normal probability, and z-score calculations
+  one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis,
+  chi-square goodness-of-fit, binomial probability, Poisson probability, normal
+  probability, and z-score calculations
 - Newton and bisection numerical root solvers
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
@@ -85,6 +86,8 @@ The same idea works for algebra and calculus:
 - `maximize -x^2 + 4x + 1` differentiates, solves critical points, and classifies them.
 - `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
+- `mann-whitney group1: 10,12,9; group2: 8,7,11` ranks combined samples
+  and computes a nonparametric U test.
 
 ## Run It
 
@@ -137,7 +140,7 @@ The demo includes:
 - Truth tables for logic mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
   Poisson probability, normal probability, z-scores, one-sample/two-sample/paired
-  t tests, ANOVA, and chi-square tests in Stats mode
+  t tests, ANOVA, chi-square tests, and nonparametric rank tests in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
   graphing, and numerical roots through Ask mode
 - Step-by-step explanation cards
@@ -166,7 +169,7 @@ These are good ways to make the project more impressive mathematically:
 2. Add exact radical output for quadratic equations with irrational roots.
 3. Add trigonometric simplification identities.
 4. Add substitution, integration by parts, and partial-fraction decomposition.
-5. Add post-hoc tests for ANOVA and nonparametric statistical tests.
+5. Add Tukey HSD, Dunn's test, and confidence intervals for effect sizes.
 6. Add row-space bases, column-space bases, and larger-matrix eigenvalue approximation.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add multi-step natural-language explanations for word problems.
