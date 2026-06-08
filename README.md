@@ -4,7 +4,8 @@ Mathematical Solver is a browser-based symbolic math, statistics, and logic
 workbench. It parses problems into expression trees or statistical models, then
 uses those structures to evaluate logic, simplify algebra, solve equations,
 compute derivatives, summarize datasets, run regression, compute probability,
-and explain the work step by step.
+work with matrices, graph functions, approximate roots numerically, and explain
+the work step by step.
 
 The frontend currently supports:
 
@@ -14,10 +15,14 @@ The frontend currently supports:
 - Linear and quadratic equation solving
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations through Universal Ask mode
+- Matrix determinants, inverses, and multiplication
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
+- Polynomial indefinite integrals
+- Function graphing with sampled SVG plots
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression and correlation for coordinate pairs
-- Confidence intervals, binomial probability, normal probability, and z-score calculations
+- Confidence intervals, one-sample t tests, binomial probability, normal probability, and z-score calculations
+- Newton and bisection numerical root solvers
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
 
@@ -64,6 +69,8 @@ The same idea works for algebra and calculus:
 - `x^3` becomes a power node, so the derivative engine can apply the power rule.
 - `x^2 - 5x + 6 = 0` becomes an equation node with left and right expression trees.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
+- `det [[1,2],[3,4]]` becomes a matrix-operation tree.
+- `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
 
 ## Run It
@@ -116,8 +123,8 @@ The demo includes:
 - Expression-tree visualization
 - Truth tables for logic mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
-  normal probability, and z-scores in Stats mode
-- Systems of equations and higher-degree numerical roots through Ask mode
+  normal probability, z-scores, and one-sample t tests in Stats mode
+- Systems of equations, matrices, integrals, graphing, and numerical roots through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
 
@@ -143,10 +150,10 @@ These are good ways to make the project more impressive mathematically:
 1. Add a formal problem-router grammar for more natural-language questions.
 2. Add exact radical output for quadratic equations with irrational roots.
 3. Add trigonometric simplification identities.
-4. Add definite and indefinite integration for common functions.
-5. Add hypothesis tests, t-tests, and chi-square tests.
-6. Add matrix operations: determinants, inverses, eigenvalues, and row reduction.
-7. Add graphing for functions, distributions, and regression lines.
+4. Add definite integration and more symbolic integration rules for trig, exponential, and logarithmic functions.
+5. Add chi-square tests, ANOVA, and exact t-distribution p-values.
+6. Add eigenvalues, eigenvectors, row reduction, and matrix rank.
+7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add multi-step natural-language explanations for word problems.
 9. Add exact symbolic roots for cubic and quartic equations when possible.
 10. Convert logic statements to negation normal form, conjunctive normal form, and
