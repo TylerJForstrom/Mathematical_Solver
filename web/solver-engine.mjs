@@ -444,6 +444,19 @@ export function analyzeStatistics(statement) {
     return analyzePoisson(statement);
   }
 
+  if (lower.includes("expected value") || lower.includes("expectation") || lower.includes("expected distribution")) {
+    return analyzeDiscreteDistribution(statement);
+  }
+
+  if (
+    lower.includes("bayes") ||
+    lower.includes("posterior") ||
+    lower.includes("sensitivity") ||
+    lower.includes("specificity")
+  ) {
+    return analyzeBayes(statement);
+  }
+
   if (
     lower.includes("regression") ||
     lower.includes("correlation") ||
@@ -2100,6 +2113,147 @@ function analyzePoisson(statement) {
   };
 }
 
+function analyzeDiscreteDistribution(statement) {
+  const { values, probabilities } = parseDiscreteDistributionInput(statement);
+  const expectedValue = values.reduce((sum, value, index) => sum + value * probabilities[index], 0);
+  const variance = values.reduce((sum, value, index) => sum + probabilities[index] * (value - expectedValue) ** 2, 0);
+  const standardDeviation = Math.sqrt(variance);
+  let cumulative = 0;
+  const rows = values.map((value, index) => {
+    cumulative += probabilities[index];
+    return [
+      formatNumber(value),
+      formatNumber(probabilities[index]),
+      formatNumber(value * probabilities[index]),
+      formatNumber(cumulative),
+    ];
+  });
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "DISCRETE",
+      children: [
+        statsMetricNode("E[X]", expectedValue),
+        statsMetricNode("VAR", variance),
+        statsMetricNode("SD", standardDeviation),
+      ],
+    },
+    answer: `E(X) = ${formatNumber(expectedValue)}, Var(X) = ${formatNumber(variance)}`,
+    summary: "discrete expected value",
+    details: "Expected value and variance from a probability mass function",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: values.map((value, index) => statsMetricNode(formatNumber(value), probabilities[index])),
+    }),
+    steps: [
+      {
+        title: "Read probability mass function",
+        expression: values.map((value, index) => `${formatNumber(value)}:${formatNumber(probabilities[index])}`).join(", "),
+        detail: "Each outcome is paired with its probability.",
+      },
+      {
+        title: "Compute expected value",
+        expression: `E(X) = sum x p(x) = ${formatNumber(expectedValue)}`,
+        detail: "Expected value is the long-run weighted average outcome.",
+      },
+      {
+        title: "Compute variance",
+        expression: `Var(X) = sum p(x)(x - E(X))^2 = ${formatNumber(variance)}`,
+        detail: "Variance measures the weighted squared distance from the expected value.",
+      },
+    ],
+    table: {
+      headers: ["Outcome", "Probability", "x p(x)", "Cumulative"],
+      rows,
+    },
+    artifacts: [
+      ["Expected value", formatNumber(expectedValue)],
+      ["Variance", formatNumber(variance)],
+      ["Standard deviation", formatNumber(standardDeviation)],
+    ],
+  };
+}
+
+function analyzeBayes(statement) {
+  const { prior, sensitivity, falsePositiveRate, specificity } = parseBayesInput(statement);
+  const truePositiveMass = sensitivity * prior;
+  const falsePositiveMass = falsePositiveRate * (1 - prior);
+  const positiveProbability = truePositiveMass + falsePositiveMass;
+  const posteriorPositive = truePositiveMass / positiveProbability;
+  const falseNegativeMass = (1 - sensitivity) * prior;
+  const trueNegativeMass = specificity * (1 - prior);
+  const negativeProbability = falseNegativeMass + trueNegativeMass;
+  const posteriorNegative = negativeProbability > 0 ? falseNegativeMass / negativeProbability : Number.NaN;
+  const likelihoodRatioPositive = falsePositiveRate > 0 ? sensitivity / falsePositiveRate : Infinity;
+  const likelihoodRatioPositiveText = falsePositiveRate > 0 ? formatNumber(likelihoodRatioPositive) : "infinity";
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "BAYES",
+      children: [
+        statsMetricNode("PRIOR", prior),
+        statsMetricNode("TPR", sensitivity),
+        statsMetricNode("FPR", falsePositiveRate),
+        statsMetricNode("POST", posteriorPositive),
+      ],
+    },
+    answer: `P(H | positive) = ${formatNumber(posteriorPositive)}`,
+    summary: "Bayes theorem",
+    details: "Posterior probability after a positive test",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [
+        statsMetricNode("prior", prior),
+        statsMetricNode("sensitivity", sensitivity),
+        statsMetricNode("false positive", falsePositiveRate),
+      ],
+    }),
+    steps: [
+      {
+        title: "Read prior and test rates",
+        expression: `prior = ${formatNumber(prior)}, sensitivity = ${formatNumber(sensitivity)}, specificity = ${formatNumber(specificity)}`,
+        detail: "Bayes theorem updates a prior probability after observing test evidence.",
+      },
+      {
+        title: "Compute positive evidence",
+        expression: `P(positive) = ${formatNumber(truePositiveMass)} + ${formatNumber(falsePositiveMass)} = ${formatNumber(positiveProbability)}`,
+        detail: "Positive results can come from true positives or false positives.",
+      },
+      {
+        title: "Apply Bayes theorem",
+        expression: `P(H | positive) = ${formatNumber(truePositiveMass)} / ${formatNumber(positiveProbability)} = ${formatNumber(posteriorPositive)}`,
+        detail: "The posterior divides true-positive probability mass by all positive probability mass.",
+      },
+    ],
+    table: {
+      headers: ["Event", "Probability mass"],
+      rows: [
+        ["true positive", formatNumber(truePositiveMass)],
+        ["false positive", formatNumber(falsePositiveMass)],
+        ["positive result", formatNumber(positiveProbability)],
+        ["false negative", formatNumber(falseNegativeMass)],
+        ["true negative", formatNumber(trueNegativeMass)],
+      ],
+    },
+    artifacts: [
+      ["Prior P(H)", formatNumber(prior)],
+      ["Sensitivity P(+|H)", formatNumber(sensitivity)],
+      ["Specificity P(-|not H)", formatNumber(specificity)],
+      ["False positive rate", formatNumber(falsePositiveRate)],
+      ["P(positive)", formatNumber(positiveProbability)],
+      ["P(H | positive)", formatNumber(posteriorPositive)],
+      ["P(H | negative)", formatNumber(posteriorNegative)],
+      ["Positive likelihood ratio", likelihoodRatioPositiveText],
+    ],
+  };
+}
+
 function analyzeNormalDistribution(statement) {
   const numbers = parseNumbers(statement);
   const meanValue = readNamedNumber(statement, ["mean", "mu"], numbers[0] ?? 0);
@@ -3706,6 +3860,69 @@ function parsePoissonInput(text) {
   };
 }
 
+function parseDiscreteDistributionInput(text) {
+  const valuesMatch = text.match(/\b(?:values|outcomes|x)\s*[:=]\s*([^;]+?)(?=\b(?:probabilities|probability|probs)\s*[:=]|$)/i);
+  const probabilitiesMatch = text.match(/\b(?:probabilities|probability|probs)\s*[:=]\s*([^;]+)/i);
+  let values;
+  let probabilities;
+
+  if (valuesMatch && probabilitiesMatch) {
+    values = parseNumbers(valuesMatch[1]);
+    probabilities = parseNumbers(probabilitiesMatch[1]);
+  } else {
+    const chunks = text
+      .replace(/\bexpected\s+value\b/gi, "")
+      .replace(/\bexpectation\b/gi, "")
+      .replace(/\bdistribution\b/gi, "")
+      .split(";")
+      .map((chunk) => parseNumbers(chunk))
+      .filter((chunkValues) => chunkValues.length > 0);
+    if (chunks.length >= 2) {
+      values = chunks[0];
+      probabilities = chunks[1];
+    }
+  }
+
+  if (!values || !probabilities || values.length === 0 || values.length !== probabilities.length) {
+    throw new Error("Use expected value values: 0, 1, 2 probabilities: 0.2, 0.5, 0.3.");
+  }
+  if (!probabilities.every((probability) => probability >= 0 && probability <= 1)) {
+    throw new Error("Discrete distribution probabilities must be between 0 and 1.");
+  }
+
+  const totalProbability = probabilities.reduce((sum, probability) => sum + probability, 0);
+  if (Math.abs(totalProbability - 1) > 1e-6) {
+    throw new Error("Discrete distribution probabilities must sum to 1.");
+  }
+
+  return {
+    values,
+    probabilities: probabilities.map((probability) => probability / totalProbability),
+  };
+}
+
+function parseBayesInput(text) {
+  const numbers = parseNumbers(text);
+  const prior = readNamedNumber(text, ["prior", "base", "prevalence"], numbers[0]);
+  const sensitivity = readNamedNumber(text, ["sensitivity", "sens", "tpr"], numbers[1]);
+  const namedSpecificity = readNamedNumber(text, ["specificity", "spec", "tnr"], Number.NaN);
+  const fallbackFalsePositive = Number.isFinite(namedSpecificity) ? 1 - namedSpecificity : numbers[2];
+  const falsePositiveRate = readNamedNumber(text, ["fpr", "falsepositive", "false_positive"], fallbackFalsePositive);
+  const specificity = Number.isFinite(namedSpecificity) ? namedSpecificity : 1 - falsePositiveRate;
+
+  if (![prior, sensitivity, falsePositiveRate, specificity].every(Number.isFinite)) {
+    throw new Error("Use bayes prior=0.01 sensitivity=0.99 specificity=0.95.");
+  }
+  if (![prior, sensitivity, falsePositiveRate, specificity].every((value) => value >= 0 && value <= 1)) {
+    throw new Error("Bayes probabilities must be between 0 and 1.");
+  }
+  if (sensitivity * prior + falsePositiveRate * (1 - prior) <= 0) {
+    throw new Error("Bayes theorem needs a positive probability of observing a positive result.");
+  }
+
+  return { prior, sensitivity, falsePositiveRate, specificity };
+}
+
 function poissonProbabilityLabel(tail, k) {
   if (tail === "at-most") return `P(X <= ${k})`;
   if (tail === "less") return `P(X < ${k})`;
@@ -3926,6 +4143,15 @@ function isStatisticsQuestion(lower) {
     "normal",
     "z-score",
     "zscore",
+    "expected value",
+    "expectation",
+    "probabilities",
+    "outcomes",
+    "bayes",
+    "posterior",
+    "prior",
+    "sensitivity",
+    "specificity",
     "probability",
     "statistics",
     "dataset",

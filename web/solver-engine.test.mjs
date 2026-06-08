@@ -208,6 +208,22 @@ runTest("statistics mode computes Poisson probabilities", () => {
   assert.equal(result.answer, "P(X <= 2) = 0.42319");
 });
 
+runTest("statistics mode computes discrete expected value", () => {
+  const result = analyzeStatistics("expected value values: 0, 1, 2 probabilities: 0.2, 0.5, 0.3");
+
+  assert.equal(result.summary, "discrete expected value");
+  assert.equal(result.answer, "E(X) = 1.1, Var(X) = 0.49");
+  assert.equal(artifactValue(result, "Standard deviation"), "0.7");
+});
+
+runTest("statistics mode applies Bayes theorem", () => {
+  const result = analyzeStatistics("bayes prior=0.01 sensitivity=0.99 specificity=0.95");
+
+  assert.equal(result.summary, "Bayes theorem");
+  assert.equal(result.answer, "P(H | positive) = 0.166667");
+  assert.equal(artifactValue(result, "False positive rate"), "0.05");
+});
+
 runTest("statistics mode computes Mann-Whitney U tests", () => {
   const result = analyzeStatistics("mann-whitney group1: 10, 12, 9; group2: 8, 7, 11");
 
@@ -413,6 +429,8 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
   assert.equal(analyzeUniversal("poisson lambda=3 k=2").summary, "Poisson probability");
+  assert.equal(analyzeUniversal("expected value values: 0, 1, 2 probabilities: 0.2, 0.5, 0.3").summary, "discrete expected value");
+  assert.equal(analyzeUniversal("bayes prior=0.01 sensitivity=0.99 specificity=0.95").summary, "Bayes theorem");
   assert.equal(analyzeUniversal("mann-whitney group1: 10,12,9; group2: 8,7,11").summary, "Mann-Whitney U test");
   assert.equal(analyzeUniversal("wilcoxon signed-rank before: 10,12,9,11; after: 11,14,10,13").summary, "Wilcoxon signed-rank test");
   assert.equal(analyzeUniversal("kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "Kruskal-Wallis test");
