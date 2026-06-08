@@ -76,7 +76,7 @@ python -m logic_solver "(P and Q) -> (R or not S)" --metrics --tree
 ## Run Tests
 
 ```powershell
-python -m unittest
+python -m unittest discover -s tests
 ```
 
 ## Mathematical Upgrade Ideas
@@ -99,4 +99,3 @@ These are good ways to make the project more impressive mathematically:
 9. Add binary decision diagrams to represent equivalent formulas compactly.
 10. Add probability or fuzzy truth values so statements can evaluate beyond
     simple true/false logic.
-
