@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mathematical Solver Demo</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">MS</div>
+          <div>
+            <h1>Mathematical Solver</h1>
+            <p>Expression-tree logic workbench</p>
+          </div>
+        </div>
+        <div class="top-stats" aria-live="polite">
+          <div>
+            <span>Classification</span>
+            <strong id="classificationBadge">contingency</strong>
+          </div>
+          <div>
+            <span>Variables</span>
+            <strong id="variableCount">0</strong>
+          </div>
+        </div>
+      </header>
+
+      <section class="workspace" aria-label="Logic solver workbench">
+        <section class="editor-panel" aria-labelledby="statementTitle">
+          <div class="panel-heading">
+            <h2 id="statementTitle">Statement</h2>
+          </div>
+          <textarea
+            id="statementInput"
+            spellcheck="false"
+            aria-label="Logic statement"
+          >(P and Q) -> (R or not S)</textarea>
+
+          <div class="sample-row" aria-label="Sample statements">
+            <button type="button" data-sample="P or not P">Tautology</button>
+            <button type="button" data-sample="P and not P">Contradiction</button>
+            <button type="button" data-sample="(P and Q) -> R">Implication</button>
+            <button type="button" data-sample="(P -> Q) iff (not Q -> not P)">Contrapositive</button>
+          </div>
+
+          <div id="errorBox" class="error-box" role="alert" hidden></div>
+
+          <div class="values-header">
+            <h3>Values</h3>
+            <button type="button" id="flipAllButton">Flip all</button>
+          </div>
+          <div id="valuesPanel" class="values-panel" aria-live="polite"></div>
+        </section>
+
+        <section class="result-panel" aria-labelledby="resultTitle">
+          <div class="panel-heading">
+            <h2 id="resultTitle">Evaluation</h2>
+          </div>
+          <div class="result-banner" id="resultBanner">
+            <span id="resultLabel">true</span>
+          </div>
+          <dl class="metrics-list">
+            <div>
+              <dt>Nodes</dt>
+              <dd id="nodesMetric">0</dd>
+            </div>
+            <div>
+              <dt>Height</dt>
+              <dd id="heightMetric">0</dd>
+            </div>
+            <div>
+              <dt>Operators</dt>
+              <dd id="operatorsMetric">0</dd>
+            </div>
+            <div>
+              <dt>True rows</dt>
+              <dd id="trueRowsMetric">0</dd>
+            </div>
+          </dl>
+        </section>
+      </section>
+
+      <section class="analysis-grid" aria-label="Analysis output">
+        <section class="tree-panel" aria-labelledby="treeTitle">
+          <div class="panel-heading">
+            <h2 id="treeTitle">Expression Tree</h2>
+          </div>
+          <div class="tree-frame">
+            <svg id="treeSvg" role="img" aria-label="Expression tree"></svg>
+          </div>
+        </section>
+
+        <section class="table-panel" aria-labelledby="tableTitle">
+          <div class="panel-heading">
+            <h2 id="tableTitle">Truth Table</h2>
+          </div>
+          <div class="table-wrap">
+            <table id="truthTable"></table>
+          </div>
+        </section>
+      </section>
+
+      <section class="compare-panel" aria-labelledby="compareTitle">
+        <div class="panel-heading">
+          <h2 id="compareTitle">Equivalence</h2>
+        </div>
+        <div class="compare-layout">
+          <input
+            id="compareInput"
+            type="text"
+            spellcheck="false"
+            aria-label="Statement to compare"
+            value="not (P and Q) or (R or not S)"
+          >
+          <div id="compareResult" class="compare-result" aria-live="polite">
+            equivalent
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
+
