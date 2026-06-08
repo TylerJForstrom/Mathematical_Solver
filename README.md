@@ -23,8 +23,9 @@ The frontend currently supports:
 - Function graphing with sampled SVG plots
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression and correlation for coordinate pairs
-- Confidence intervals, one-sample/two-sample/paired t tests, one-way ANOVA,
-  chi-square goodness-of-fit, binomial probability, normal probability, and z-score calculations
+- Confidence intervals, one-sample/two-sample/paired t tests with Student t p-values,
+  one-way ANOVA, chi-square goodness-of-fit, binomial probability, Poisson probability,
+  normal probability, and z-score calculations
 - Newton and bisection numerical root solvers
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
@@ -132,8 +133,8 @@ The demo includes:
 - Expression-tree visualization
 - Truth tables for logic mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
-  normal probability, z-scores, one-sample/two-sample/paired t tests, ANOVA,
-  and chi-square tests in Stats mode
+  Poisson probability, normal probability, z-scores, one-sample/two-sample/paired
+  t tests, ANOVA, and chi-square tests in Stats mode
 - Systems of equations, matrices, integrals, optimization, graphing, and numerical roots through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
@@ -161,7 +162,7 @@ These are good ways to make the project more impressive mathematically:
 2. Add exact radical output for quadratic equations with irrational roots.
 3. Add trigonometric simplification identities.
 4. Add more symbolic integration rules for trig, exponential, and logarithmic functions.
-5. Add exact t-distribution p-values and post-hoc tests for ANOVA.
+5. Add post-hoc tests for ANOVA and nonparametric statistical tests.
 6. Add row-space bases, column-space bases, and larger-matrix eigenvalue approximation.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add multi-step natural-language explanations for word problems.
