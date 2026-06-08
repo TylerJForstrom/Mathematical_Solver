@@ -5,6 +5,7 @@ import {
   analyzeEquation,
   analyzeFactoring,
   analyzeGraph,
+  analyzeInequality,
   analyzeIntegral,
   analyzeLogic,
   analyzeMatrix,
@@ -64,6 +65,32 @@ runTest("factoring mode leaves irreducible factors", () => {
 
   assert.equal(result.summary, "rational factorization");
   assert.equal(result.answer, "(x + 1)(x - 1)(x^2 + 1)");
+});
+
+runTest("inequality mode solves strict quadratic inequalities", () => {
+  const result = analyzeInequality("solve x^2 - 5x + 6 > 0");
+
+  assert.equal(result.summary, "polynomial inequality");
+  assert.equal(result.answer, "x in (-inf, 2) U (3, inf)");
+});
+
+runTest("inequality mode solves inclusive quadratic inequalities", () => {
+  const result = analyzeInequality("solve x^2 - 5x + 6 <= 0");
+
+  assert.equal(result.summary, "polynomial inequality");
+  assert.equal(result.answer, "x in [2, 3]");
+});
+
+runTest("inequality mode handles singleton and empty solutions", () => {
+  assert.equal(analyzeInequality("solve x^2 <= 0").answer, "x in {0}");
+  assert.equal(analyzeInequality("solve x^2 + 1 < 0").answer, "no solution");
+});
+
+runTest("inequality mode solves linear inequalities", () => {
+  const result = analyzeInequality("solve 2x + 5 >= 17");
+
+  assert.equal(result.summary, "polynomial inequality");
+  assert.equal(result.answer, "x in [6, inf)");
 });
 
 runTest("equation mode solves quadratics", () => {
@@ -375,6 +402,7 @@ runTest("universal mode routes systems", () => {
 runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("det [[1,2],[3,4]]").summary, "determinant");
   assert.equal(analyzeUniversal("factor x^2 - 5x + 6").answer, "(x - 2)(x - 3)");
+  assert.equal(analyzeUniversal("solve x^2 - 5x + 6 > 0").answer, "x in (-inf, 2) U (3, inf)");
   assert.equal(analyzeUniversal("integrate x^2").summary, "indefinite integral");
   assert.equal(analyzeUniversal("integrate x^2 from 0 to 3").summary, "definite integral");
   assert.equal(analyzeUniversal("integrate sin(x)").answer, "-cos(x) + C");

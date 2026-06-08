@@ -204,6 +204,75 @@ export function analyzeFactoring(statement, variableHint = "x") {
   };
 }
 
+export function analyzeInequality(statement, variableHint = "x") {
+  const request = extractInequalityQuestion(statement);
+  const left = parseMath(request.left);
+  const right = parseMath(request.right);
+  if (left.kind === "equation" || right.kind === "equation") {
+    throw new Error("Inequality mode expects one comparison, such as x^2 - 5x + 6 > 0.");
+  }
+
+  const tree = {
+    kind: "mathInequality",
+    operator: request.operator,
+    children: [left, right],
+  };
+  const steps = [
+    {
+      title: "Parse inequality",
+      expression: `${formatMath(left)} ${request.operator} ${formatMath(right)}`,
+      detail: "The left and right sides are parsed into expression trees.",
+    },
+  ];
+
+  const normalized = mathBinary("-", left, right);
+  steps.push({
+    title: "Move terms to one side",
+    expression: `${formatMath(normalized)} ${request.operator} 0`,
+    detail: "Subtract the right side so the inequality can be solved with a sign chart.",
+  });
+
+  const simplified = simplifyNode(normalized, steps);
+  const polynomial = polynomialFrom(simplified);
+  if (!polynomial) {
+    throw new Error("Inequality mode currently supports one-variable polynomial inequalities.");
+  }
+
+  const variableNames = polynomialVariables(polynomial);
+  const variable = chooseVariable(variableNames, variableHint);
+  if (variableNames.length > 1) {
+    throw new Error("Inequality mode currently supports one-variable polynomial inequalities.");
+  }
+
+  const polynomialText = formatPolynomial(polynomial);
+  steps.push({
+    title: "Simplify polynomial",
+    expression: `${polynomialText} ${request.operator} 0`,
+    detail: "Constants and like terms are combined.",
+  });
+
+  const coefficients = trimPolynomialCoefficients(polynomialCoefficients(polynomial, variable));
+  const solution = solvePolynomialInequality(coefficients, request.operator, variable);
+  steps.push(...solution.steps);
+
+  return {
+    mode: "inequality",
+    tree,
+    answer: solution.answer,
+    summary: "polynomial inequality",
+    details: `Solving for ${variable}`,
+    variables: variable ? [variable] : [],
+    metrics: treeMetrics(tree),
+    steps,
+    table: solution.table,
+    artifacts: [
+      ["Normalized", `${polynomialText} ${request.operator} 0`],
+      ["Critical points", solution.roots.length ? solution.roots.map(formatNumber).join(", ") : "none"],
+      ["Solution", solution.answer],
+    ],
+  };
+}
+
 export function analyzeEquation(statement, variableHint = "x") {
   const parsed = parseMath(statement);
   if (parsed.kind !== "equation") {
@@ -420,6 +489,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isStatisticsQuestion(lower)) {
     routed = analyzeStatistics(question);
     routedLabel = "Statistics";
+  } else if (isInequalityQuestion(question)) {
+    routed = analyzeInequality(question);
+    routedLabel = "Inequality";
   } else if (isLogicQuestion(question)) {
     routed = analyzeLogic(cleanLogicQuestion(question), values);
     routedLabel = "Logic";
@@ -3899,6 +3971,11 @@ function isFactorQuestion(lower) {
     lower.startsWith("factor the ");
 }
 
+function isInequalityQuestion(question) {
+  const withoutLogicArrows = question.replace(/<->|<=>|->|=>/g, "");
+  return /<=|>=|<|>|\u2264|\u2265/.test(withoutLogicArrows);
+}
+
 function looksLikeMathExpression(question) {
   return /[a-zA-Z0-9)]\s*[\+\-\*\/\^]\s*[-a-zA-Z0-9(]/.test(question);
 }
@@ -3962,6 +4039,27 @@ function cleanFactorQuestion(question) {
     .replace(/^(factorize|factorise|fully factor|factor)\s+(?:the\s+)?/i, "")
     .replace(/[?!.]+$/, "")
     .trim();
+}
+
+function extractInequalityQuestion(question) {
+  const cleaned = question
+    .replace(/^(solve|find|calculate|compute)\s+/i, "")
+    .replace(/^inequality\s*:?\s*/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  const match = cleaned.match(/(<=|>=|<|>|\u2264|\u2265)/);
+  if (!match) {
+    throw new Error("Use an inequality such as x^2 - 5x + 6 > 0.");
+  }
+
+  const operator = match[1] === "\u2264" ? "<=" : match[1] === "\u2265" ? ">=" : match[1];
+  const left = cleaned.slice(0, match.index).trim();
+  const right = cleaned.slice(match.index + match[0].length).trim();
+  if (!left || !right) {
+    throw new Error("Inequality mode needs expressions on both sides of the comparison.");
+  }
+
+  return { left, operator, right };
 }
 
 function formatSigned(value) {
@@ -5201,6 +5299,180 @@ function formatFactorProduct(coefficient, factors) {
   return `${formatNumber(normalized)}${factors.join("")}`;
 }
 
+function solvePolynomialInequality(coefficients, operator, variable) {
+  const degree = polynomialDegree(coefficients);
+  if (degree === 0) {
+    const constant = coefficients[0] ?? 0;
+    const isTrue = compareWithOperator(constant, operator, 0);
+    return {
+      answer: isTrue ? "all real numbers" : "no solution",
+      roots: [],
+      table: {
+        headers: ["Region", "Test value", "Polynomial", "Included"],
+        rows: [["all real numbers", "any", formatNumber(constant), isTrue ? "yes" : "no"]],
+      },
+      steps: [
+        {
+          title: "Check constant inequality",
+          expression: `${formatNumber(constant)} ${operator} 0`,
+          detail: isTrue
+            ? "The constant inequality is true for every real value."
+            : "The constant inequality is false for every real value.",
+        },
+      ],
+    };
+  }
+
+  const roots = realPolynomialRoots(coefficients);
+  const includeEqual = operator.includes("=");
+  const intervals = [];
+  const signRows = [];
+  const boundaries = [-Infinity, ...roots, Infinity];
+
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const lower = boundaries[index];
+    const upper = boundaries[index + 1];
+    const testValue = chooseIntervalTestValue(lower, upper);
+    const value = evaluatePolynomialCoefficients(coefficients, testValue);
+    const included = compareWithOperator(value, operator, 0);
+    const part = {
+      type: "interval",
+      lower,
+      upper,
+      lowerClosed: includeEqual && Number.isFinite(lower),
+      upperClosed: includeEqual && Number.isFinite(upper),
+    };
+    signRows.push([
+      formatIntervalPart(part),
+      formatNumber(testValue),
+      formatNumber(value),
+      included ? "yes" : "no",
+    ]);
+    if (included) {
+      intervals.push(part);
+    }
+  }
+
+  if (includeEqual) {
+    for (const root of roots) {
+      if (nearlyEqual(evaluatePolynomialCoefficients(coefficients, root), 0) && !intervals.some((part) => intervalContainsRoot(part, root))) {
+        intervals.push({ type: "point", value: root });
+      }
+    }
+  }
+
+  const sortedSolution = sortSolutionParts(intervals);
+  const answer = formatInequalitySolution(variable, sortedSolution);
+
+  return {
+    answer,
+    roots,
+    table: {
+      headers: ["Region", "Test value", "Polynomial", "Included"],
+      rows: signRows,
+    },
+    steps: [
+      {
+        title: "Find critical points",
+        expression: roots.length ? roots.map(formatNumber).join(", ") : "none",
+        detail: "The sign of a polynomial can change only at real roots.",
+      },
+      {
+        title: "Build sign chart",
+        expression: signRows.map((row) => `${row[0]}: ${row[3]}`).join("; "),
+        detail: "The solver tests one value in each interval between critical points.",
+      },
+      {
+        title: "Write interval solution",
+        expression: answer,
+        detail: includeEqual ? "Boundary roots are included because the inequality allows equality." : "Boundary roots are excluded for a strict inequality.",
+      },
+    ],
+  };
+}
+
+function realPolynomialRoots(coefficients) {
+  const degree = polynomialDegree(coefficients);
+  if (degree <= 0) {
+    return [];
+  }
+  if (degree === 1) {
+    return uniqueSortedNumbers([-(coefficients[0] ?? 0) / (coefficients[1] ?? 0)]).map(normalizeNumber);
+  }
+  if (degree === 2) {
+    const c = coefficients[0] ?? 0;
+    const b = coefficients[1] ?? 0;
+    const a = coefficients[2] ?? 0;
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant < -EPSILON) {
+      return [];
+    }
+    if (nearlyEqual(discriminant, 0)) {
+      return uniqueSortedNumbers([-b / (2 * a)]).map(normalizeNumber);
+    }
+    const root = Math.sqrt(discriminant);
+    return uniqueSortedNumbers([
+      (-b - root) / (2 * a),
+      (-b + root) / (2 * a),
+    ]).map(normalizeNumber);
+  }
+  return approximateRealPolynomialRoots(coefficients);
+}
+
+function compareWithOperator(left, operator, right) {
+  if (operator === "<") return left < right && !nearlyEqual(left, right);
+  if (operator === "<=") return left < right || nearlyEqual(left, right);
+  if (operator === ">") return left > right && !nearlyEqual(left, right);
+  if (operator === ">=") return left > right || nearlyEqual(left, right);
+  return false;
+}
+
+function chooseIntervalTestValue(lower, upper) {
+  if (!Number.isFinite(lower) && !Number.isFinite(upper)) return 0;
+  if (!Number.isFinite(lower)) return upper - 1;
+  if (!Number.isFinite(upper)) return lower + 1;
+  return (lower + upper) / 2;
+}
+
+function intervalContainsRoot(part, root) {
+  if (part.type !== "interval") return false;
+  if (part.lowerClosed && nearlyEqual(part.lower, root)) return true;
+  if (part.upperClosed && nearlyEqual(part.upper, root)) return true;
+  return part.lower < root && root < part.upper;
+}
+
+function sortSolutionParts(parts) {
+  return [...parts].sort((left, right) => solutionPartStart(left) - solutionPartStart(right));
+}
+
+function solutionPartStart(part) {
+  return part.type === "point" ? part.value : part.lower;
+}
+
+function formatInequalitySolution(variable, parts) {
+  if (parts.length === 0) {
+    return "no solution";
+  }
+  if (parts.length === 1) {
+    const [part] = parts;
+    if (part.type === "interval" && !Number.isFinite(part.lower) && !Number.isFinite(part.upper)) {
+      return "all real numbers";
+    }
+  }
+  return `${variable} in ${parts.map(formatIntervalPart).join(" U ")}`;
+}
+
+function formatIntervalPart(part) {
+  if (part.type === "point") {
+    return `{${formatNumber(part.value)}}`;
+  }
+  const leftBracket = part.lowerClosed ? "[" : "(";
+  const rightBracket = part.upperClosed ? "]" : ")";
+  const lower = Number.isFinite(part.lower) ? formatNumber(part.lower) : "-inf";
+  const upper = Number.isFinite(part.upper) ? formatNumber(part.upper) : "inf";
+  return `${leftBracket}${lower}, ${upper}${rightBracket}`;
+}
+
 function polynomialCoefficients(poly, variable) {
   const coefficients = [];
   for (const [key, coefficient] of poly.entries()) {
@@ -5546,6 +5818,7 @@ export function nodeLabel(node) {
   if (node.kind === "mathBinary") return node.operator;
   if (node.kind === "mathFunction") return node.name.toUpperCase();
   if (node.kind === "equation") return "=";
+  if (node.kind === "mathInequality") return node.operator;
   if (node.kind === "statsDataset") return node.label ?? "DATA";
   if (node.kind === "statsMetric") return `${node.label}`;
   if (node.kind === "statsRegression") return "REG";
@@ -5566,6 +5839,7 @@ export function nodeTone(node) {
   if (node.kind === "mathSymbol") return "symbol";
   if (node.kind === "mathFunction") return "function";
   if (node.kind === "equation") return "equation";
+  if (node.kind === "mathInequality") return "equation";
   return "operator";
 }
 
