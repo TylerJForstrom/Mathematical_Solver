@@ -184,6 +184,20 @@ runTest("matrix mode computes 2x2 eigenvalues", () => {
   assert.equal(result.answer, "lambda = 3, 1");
 });
 
+runTest("matrix mode computes null-space bases", () => {
+  const result = analyzeMatrix("nullspace [[1,2,1],[2,4,2],[1,1,0]]");
+
+  assert.equal(result.summary, "matrix null space");
+  assert.equal(result.answer, "basis = [[1, -1, 1]]");
+});
+
+runTest("matrix mode computes 2x2 eigenvectors", () => {
+  const result = analyzeMatrix("eigenvectors [[2,1],[1,2]]");
+
+  assert.equal(result.summary, "2x2 eigenvectors");
+  assert.equal(result.answer, "lambda 3: [[1, 1]]; lambda 1: [[1, -1]]");
+});
+
 runTest("integral mode applies polynomial power rules", () => {
   const result = analyzeIntegral("integrate x^2 + 3x");
 
@@ -266,4 +280,6 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
   assert.equal(analyzeUniversal("rank [[1,2],[2,4]]").summary, "matrix rank");
   assert.equal(analyzeUniversal("eigen [[2,1],[1,2]]").summary, "2x2 eigenvalues");
+  assert.equal(analyzeUniversal("nullspace [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix null space");
+  assert.equal(analyzeUniversal("eigenvectors [[2,1],[1,2]]").summary, "2x2 eigenvectors");
 });

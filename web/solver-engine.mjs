@@ -461,7 +461,62 @@ export function analyzeMatrix(statement) {
   let children;
   let steps;
 
-  if (lower.includes("rref") || lower.includes("row reduce") || lower.includes("row-reduce")) {
+  if (lower.includes("nullspace") || lower.includes("null space") || lower.includes("kernel")) {
+    const result = nullSpaceBasis(matrices[0]);
+    answer = result.basis.length ? `basis = ${formatVectorList(result.basis)}` : "null space = {0}";
+    summary = "matrix null space";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["RREF", formatMatrix(result.rref)],
+      ["Rank", formatNumber(result.rank)],
+      ["Free columns", result.freeColumns.map((index) => String(index + 1)).join(", ") || "none"],
+      ["Basis", result.basis.length ? formatVectorList(result.basis) : "{0}"],
+    ];
+    children = result.basis.length
+      ? [matrixNode("A", matrices[0]), matrixNode("RREF", result.rref), matrixNode("BASIS", result.basis)]
+      : [matrixNode("A", matrices[0]), matrixNode("RREF", result.rref), statsMetricNode("dim", 0)];
+    steps = [
+      {
+        title: "Row reduce matrix",
+        expression: formatMatrix(result.rref),
+        detail: "The null space solves Ax = 0 using row-reduced echelon form.",
+      },
+      {
+        title: "Identify free variables",
+        expression: result.freeColumns.map((index) => `x${index + 1}`).join(", ") || "none",
+        detail: "Each free variable creates one basis vector.",
+      },
+      {
+        title: "Build basis",
+        expression: result.basis.length ? formatVectorList(result.basis) : "{0}",
+        detail: "Pivot variables are written in terms of the free variables.",
+      },
+    ];
+  } else if (lower.includes("eigenvector")) {
+    const result = eigenvectors2x2(matrices[0]);
+    answer = result.map((entry) => `lambda ${entry.lambda}: ${formatVectorList(entry.basis)}`).join("; ");
+    summary = "2x2 eigenvectors";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["Eigenvectors", answer],
+    ];
+    children = [
+      matrixNode("A", matrices[0]),
+      ...result.map((entry) => matrixNode(`L${entry.lambda}`, entry.basis)),
+    ];
+    steps = [
+      {
+        title: "Find eigenvalues",
+        expression: result.map((entry) => entry.lambda).join(", "),
+        detail: "Eigenvectors are found after solving the characteristic equation.",
+      },
+      {
+        title: "Solve null spaces",
+        expression: answer,
+        detail: "For each eigenvalue, the solver finds the null space of A - lambda I.",
+      },
+    ];
+  } else if (lower.includes("rref") || lower.includes("row reduce") || lower.includes("row-reduce")) {
     const result = rowReduceMatrix(matrices[0]);
     answer = formatMatrix(result.rref);
     summary = "row-reduced echelon form";
@@ -1693,6 +1748,14 @@ function formatMatrix(matrix) {
   return `[${matrix.map((row) => `[${row.map(formatNumber).join(", ")}]`).join(", ")}]`;
 }
 
+function formatVector(vector) {
+  return `[${vector.map(formatNumber).join(", ")}]`;
+}
+
+function formatVectorList(vectors) {
+  return `[${vectors.map(formatVector).join(", ")}]`;
+}
+
 function matrixNode(label, matrix) {
   return {
     kind: "matrix",
@@ -1812,6 +1875,29 @@ function rowReduceMatrix(matrix) {
   };
 }
 
+function nullSpaceBasis(matrix) {
+  const reduced = rowReduceMatrix(matrix);
+  const columnCount = matrix[0].length;
+  const pivotSet = new Set(reduced.pivots);
+  const freeColumns = Array.from({ length: columnCount }, (_, index) => index)
+    .filter((index) => !pivotSet.has(index));
+
+  const basis = freeColumns.map((freeColumn) => {
+    const vector = Array(columnCount).fill(0);
+    vector[freeColumn] = 1;
+    reduced.pivots.forEach((pivotColumn, rowIndex) => {
+      vector[pivotColumn] = -reduced.rref[rowIndex][freeColumn];
+    });
+    return vector.map(normalizeNumber);
+  });
+
+  return {
+    ...reduced,
+    freeColumns,
+    basis,
+  };
+}
+
 function eigenvalues2x2(matrix) {
   if (matrix.length !== 2 || matrix[0].length !== 2) {
     throw new Error("Eigenvalue mode currently supports 2x2 matrices.");
@@ -1834,6 +1920,49 @@ function eigenvalues2x2(matrix) {
     `${formatNumber(real)} + ${formatNumber(imaginary)}i`,
     `${formatNumber(real)} - ${formatNumber(imaginary)}i`,
   ];
+}
+
+function eigenvectors2x2(matrix) {
+  const eigenvalues = realEigenvalues2x2(matrix);
+  return eigenvalues.map((lambda) => {
+    const shifted = matrix.map((row, rowIndex) =>
+      row.map((value, columnIndex) => value - (rowIndex === columnIndex ? lambda : 0)),
+    );
+    const nullSpace = nullSpaceBasis(shifted);
+    if (nullSpace.basis.length === 0) {
+      throw new Error("Could not find a nonzero eigenvector.");
+    }
+    return {
+      lambda: formatNumber(lambda),
+      basis: nullSpace.basis.map(normalizeVector),
+    };
+  });
+}
+
+function realEigenvalues2x2(matrix) {
+  if (matrix.length !== 2 || matrix[0].length !== 2) {
+    throw new Error("Eigenvector mode currently supports 2x2 matrices.");
+  }
+
+  const trace = matrix[0][0] + matrix[1][1];
+  const det = determinant(matrix);
+  const discriminant = trace ** 2 - 4 * det;
+  if (discriminant < -EPSILON) {
+    throw new Error("Eigenvector mode currently supports real 2x2 eigenvalues.");
+  }
+  const root = Math.sqrt(Math.max(0, discriminant));
+  return uniqueSortedNumbers([
+    normalizeNumber((trace + root) / 2),
+    normalizeNumber((trace - root) / 2),
+  ]).sort((left, right) => right - left);
+}
+
+function normalizeVector(vector) {
+  const firstNonzero = vector.find((value) => !nearlyEqual(value, 0));
+  if (firstNonzero === undefined || firstNonzero > 0) {
+    return vector.map(normalizeNumber);
+  }
+  return vector.map((value) => normalizeNumber(-value));
 }
 
 function extractIntegralQuestion(statement, fallbackVariable) {
@@ -2654,6 +2783,10 @@ function isMatrixQuestion(lower) {
     lower.startsWith("rank ") ||
     lower.startsWith("eigen ") ||
     lower.includes("eigenvalue") ||
+    lower.includes("eigenvector") ||
+    lower.startsWith("nullspace ") ||
+    lower.startsWith("null space ") ||
+    lower.startsWith("kernel ") ||
     lower.includes("inverse [[") ||
     lower.includes("multiply [[") ||
     lower.includes("product [[");
