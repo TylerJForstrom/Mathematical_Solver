@@ -8,121 +8,100 @@
   </head>
   <body>
     <main class="app-shell">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-mark" aria-hidden="true">MS</div>
-          <div>
-            <h1>Mathematical Solver</h1>
-            <p>Expression-tree logic workbench</p>
-          </div>
-        </div>
-        <div class="top-stats" aria-live="polite">
-          <div>
-            <span>Classification</span>
-            <strong id="classificationBadge">contingency</strong>
-          </div>
-          <div>
-            <span>Variables</span>
-            <strong id="variableCount">0</strong>
-          </div>
+      <header class="hero">
+        <div class="brand-mark" aria-hidden="true">MS</div>
+        <div>
+          <h1>Mathematical Solver</h1>
+          <p>Logic, algebra, equations, and derivatives from expression trees.</p>
         </div>
       </header>
 
-      <section class="workspace" aria-label="Logic solver workbench">
-        <section class="editor-panel" aria-labelledby="statementTitle">
-          <div class="panel-heading">
-            <h2 id="statementTitle">Statement</h2>
-          </div>
-          <textarea
-            id="statementInput"
-            spellcheck="false"
-            aria-label="Logic statement"
-          >(P and Q) -> (R or not S)</textarea>
+      <section class="solver-card" aria-label="Solver">
+        <div class="mode-tabs" aria-label="Solver mode">
+          <button type="button" data-mode="equation">Equation</button>
+          <button type="button" data-mode="simplify">Simplify</button>
+          <button type="button" data-mode="derivative">Derivative</button>
+          <button type="button" data-mode="logic">Logic</button>
+        </div>
 
-          <div class="sample-row" aria-label="Sample statements">
-            <button type="button" data-sample="P or not P">Tautology</button>
-            <button type="button" data-sample="P and not P">Contradiction</button>
-            <button type="button" data-sample="(P and Q) -> R">Implication</button>
-            <button type="button" data-sample="(P -> Q) iff (not Q -> not P)">Contrapositive</button>
+        <label class="input-label" for="statementInput">Problem</label>
+        <textarea id="statementInput" spellcheck="false"></textarea>
+
+        <div class="sample-row" aria-label="Examples">
+          <button type="button" data-sample-mode="equation" data-sample="x^2 - 5x + 6 = 0">Quadratic</button>
+          <button type="button" data-sample-mode="simplify" data-sample="2x + 3x - 4 + 10">Like terms</button>
+          <button type="button" data-sample-mode="derivative" data-sample="x^3 + 2x^2 - 7x + 4">Derivative</button>
+          <button
+            type="button"
+            data-sample-mode="logic"
+            data-sample="(P and Q) -> R"
+            data-compare="not (P and Q) or R"
+          >Logic</button>
+        </div>
+
+        <div class="control-strip">
+          <div id="mathControls" class="small-control">
+            <label for="variableInput">Variable</label>
+            <input id="variableInput" type="text" value="x" spellcheck="false">
           </div>
 
-          <div id="errorBox" class="error-box" role="alert" hidden></div>
+          <div id="logicControls" class="logic-controls" hidden>
+            <div class="small-control compare-control">
+              <label for="compareInput">Compare with</label>
+              <input id="compareInput" type="text" spellcheck="false">
+            </div>
+            <button type="button" id="flipAllButton">Flip values</button>
+          </div>
+        </div>
 
-          <div class="values-header">
-            <h3>Values</h3>
-            <button type="button" id="flipAllButton">Flip all</button>
-          </div>
-          <div id="valuesPanel" class="values-panel" aria-live="polite"></div>
-        </section>
+        <div id="valuesPanel" class="values-panel" aria-live="polite"></div>
+        <div id="errorBox" class="error-box" role="alert" hidden></div>
 
-        <section class="result-panel" aria-labelledby="resultTitle">
-          <div class="panel-heading">
-            <h2 id="resultTitle">Evaluation</h2>
+        <section id="resultBanner" class="answer-band" aria-live="polite">
+          <div>
+            <span id="modeBadge">Equation</span>
+            <strong id="resultLabel">x = 2, x = 3</strong>
+            <p id="resultDetail">Solving for x</p>
           </div>
-          <div class="result-banner" id="resultBanner">
-            <span id="resultLabel">true</span>
+          <div class="summary-pill">
+            <span id="summaryBadge">quadratic solution</span>
           </div>
-          <dl class="metrics-list">
-            <div>
-              <dt>Nodes</dt>
-              <dd id="nodesMetric">0</dd>
-            </div>
-            <div>
-              <dt>Height</dt>
-              <dd id="heightMetric">0</dd>
-            </div>
-            <div>
-              <dt>Operators</dt>
-              <dd id="operatorsMetric">0</dd>
-            </div>
-            <div>
-              <dt>True rows</dt>
-              <dd id="trueRowsMetric">0</dd>
-            </div>
-          </dl>
         </section>
       </section>
 
-      <section class="analysis-grid" aria-label="Analysis output">
-        <section class="tree-panel" aria-labelledby="treeTitle">
+      <section class="insight-grid" aria-label="Visual explanation">
+        <section class="panel tree-panel" aria-labelledby="treeTitle">
           <div class="panel-heading">
             <h2 id="treeTitle">Expression Tree</h2>
+            <div class="metric-row">
+              <span><strong id="nodesMetric">0</strong> nodes</span>
+              <span><strong id="heightMetric">0</strong> high</span>
+              <span><strong id="operatorsMetric">0</strong> ops</span>
+              <span><strong id="variablesMetric">0</strong> vars</span>
+            </div>
           </div>
           <div class="tree-frame">
             <svg id="treeSvg" role="img" aria-label="Expression tree"></svg>
           </div>
         </section>
 
-        <section class="table-panel" aria-labelledby="tableTitle">
+        <section class="panel output-panel" aria-labelledby="outputTitle">
           <div class="panel-heading">
-            <h2 id="tableTitle">Truth Table</h2>
+            <h2 id="outputTitle">Result Details</h2>
+            <span class="variable-count"><strong id="variableCount">0</strong> variables</span>
           </div>
-          <div class="table-wrap">
-            <table id="truthTable"></table>
-          </div>
+          <div id="outputPanel"></div>
         </section>
       </section>
 
-      <section class="compare-panel" aria-labelledby="compareTitle">
+      <section class="panel steps-panel" aria-labelledby="stepsTitle">
         <div class="panel-heading">
-          <h2 id="compareTitle">Equivalence</h2>
+          <h2 id="stepsTitle">Steps</h2>
         </div>
-        <div class="compare-layout">
-          <input
-            id="compareInput"
-            type="text"
-            spellcheck="false"
-            aria-label="Statement to compare"
-            value="not (P and Q) or (R or not S)"
-          >
-          <div id="compareResult" class="compare-result" aria-live="polite">
-            equivalent
-          </div>
-        </div>
+        <ol id="stepsList" class="steps-list"></ol>
       </section>
     </main>
 
     <script src="app.js" type="module"></script>
   </body>
 </html>
-
