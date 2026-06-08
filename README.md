@@ -18,7 +18,8 @@ The frontend currently supports:
 - Matrix determinants, inverses, multiplication, row reduction, rank, null spaces,
   and 2x2 eigenvalues/eigenvectors
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
-- Polynomial indefinite and definite integrals
+- Polynomial and elementary indefinite/definite integrals, including trig,
+  exponential, logarithmic, square-root, and reciprocal forms
 - Polynomial critical points and local max/min classification
 - Function graphing with sampled SVG plots
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
@@ -79,6 +80,8 @@ The same idea works for algebra and calculus:
 - `eigenvectors [[2,1],[1,2]]` solves the 2x2 characteristic polynomial and then
   finds each eigenspace.
 - `integrate x^2 from 0 to 3` builds an antiderivative tree and evaluates the bounds.
+- `integrate sin(x)` uses a function node and returns `-cos(x) + C`.
+- `integrate exp(x) from 0 to 1` evaluates an elementary definite integral.
 - `maximize -x^2 + 4x + 1` differentiates, solves critical points, and classifies them.
 - `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
@@ -135,7 +138,8 @@ The demo includes:
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
   Poisson probability, normal probability, z-scores, one-sample/two-sample/paired
   t tests, ANOVA, and chi-square tests in Stats mode
-- Systems of equations, matrices, integrals, optimization, graphing, and numerical roots through Ask mode
+- Systems of equations, matrices, polynomial/elementary integrals, optimization,
+  graphing, and numerical roots through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
 
@@ -161,7 +165,7 @@ These are good ways to make the project more impressive mathematically:
 1. Add a formal problem-router grammar for more natural-language questions.
 2. Add exact radical output for quadratic equations with irrational roots.
 3. Add trigonometric simplification identities.
-4. Add more symbolic integration rules for trig, exponential, and logarithmic functions.
+4. Add substitution, integration by parts, and partial-fraction decomposition.
 5. Add post-hoc tests for ANOVA and nonparametric statistical tests.
 6. Add row-space bases, column-space bases, and larger-matrix eigenvalue approximation.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
