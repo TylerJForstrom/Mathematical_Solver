@@ -73,6 +73,29 @@ Show tree complexity metrics:
 python -m logic_solver "(P and Q) -> (R or not S)" --metrics --tree
 ```
 
+## Frontend Demo
+
+The repo includes a static browser demo in `web/`.
+
+Open this file in a browser:
+
+```text
+web/index.html
+```
+
+The demo includes:
+
+- A live propositional-logic statement editor
+- Variable toggles for one-case evaluation
+- Expression-tree visualization
+- Truth-table generation
+- Tautology, contradiction, and contingency classification
+- Logical-equivalence checking
+- Tree complexity metrics
+
+Because the frontend is static HTML, CSS, and JavaScript, it can be hosted on
+GitHub Pages without a backend.
+
 ## Run Tests
 
 ```powershell
