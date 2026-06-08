@@ -15,7 +15,8 @@ The frontend currently supports:
 - Linear and quadratic equation solving
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations through Universal Ask mode
-- Matrix determinants, inverses, multiplication, row reduction, rank, and 2x2 eigenvalues
+- Matrix determinants, inverses, multiplication, row reduction, rank, null spaces,
+  and 2x2 eigenvalues/eigenvectors
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
 - Polynomial indefinite and definite integrals
 - Polynomial critical points and local max/min classification
@@ -73,7 +74,9 @@ The same idea works for algebra and calculus:
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
 - `det [[1,2],[3,4]]` becomes a matrix-operation tree.
 - `rref [[1,2,1],[2,4,2],[1,1,0]]` becomes a row-operation tree with rank and pivots.
-- `eigen [[2,1],[1,2]]` solves the 2x2 characteristic polynomial.
+- `nullspace [[1,2,1],[2,4,2],[1,1,0]]` extracts a basis from the RREF free variables.
+- `eigenvectors [[2,1],[1,2]]` solves the 2x2 characteristic polynomial and then
+  finds each eigenspace.
 - `integrate x^2 from 0 to 3` builds an antiderivative tree and evaluates the bounds.
 - `maximize -x^2 + 4x + 1` differentiates, solves critical points, and classifies them.
 - `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
@@ -159,7 +162,7 @@ These are good ways to make the project more impressive mathematically:
 3. Add trigonometric simplification identities.
 4. Add more symbolic integration rules for trig, exponential, and logarithmic functions.
 5. Add exact t-distribution p-values and post-hoc tests for ANOVA.
-6. Add eigenvectors, row-space/null-space bases, and larger-matrix eigenvalue approximation.
+6. Add row-space bases, column-space bases, and larger-matrix eigenvalue approximation.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add multi-step natural-language explanations for word problems.
 9. Add exact symbolic roots for cubic and quartic equations when possible.
