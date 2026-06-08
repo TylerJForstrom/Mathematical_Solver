@@ -142,6 +142,27 @@ runTest("statistics mode computes Poisson probabilities", () => {
   assert.equal(result.answer, "P(X <= 2) = 0.42319");
 });
 
+runTest("statistics mode computes Mann-Whitney U tests", () => {
+  const result = analyzeStatistics("mann-whitney group1: 10, 12, 9; group2: 8, 7, 11");
+
+  assert.equal(result.summary, "Mann-Whitney U test");
+  assert.equal(result.answer, "U = 2, p = 0.275234");
+});
+
+runTest("statistics mode computes Wilcoxon signed-rank tests", () => {
+  const result = analyzeStatistics("wilcoxon signed-rank before: 10, 12, 9, 11; after: 11, 14, 10, 13");
+
+  assert.equal(result.summary, "Wilcoxon signed-rank test");
+  assert.equal(result.answer, "W = 0, p = 0.063318");
+});
+
+runTest("statistics mode computes Kruskal-Wallis tests", () => {
+  const result = analyzeStatistics("kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10");
+
+  assert.equal(result.summary, "Kruskal-Wallis test");
+  assert.equal(result.answer, "H = 6.056497, p = 0.047103");
+});
+
 runTest("system solver handles two-variable systems", () => {
   const result = analyzeSystem("2x + y = 5; x - y = 1");
 
@@ -320,6 +341,9 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
   assert.equal(analyzeUniversal("poisson lambda=3 k=2").summary, "Poisson probability");
+  assert.equal(analyzeUniversal("mann-whitney group1: 10,12,9; group2: 8,7,11").summary, "Mann-Whitney U test");
+  assert.equal(analyzeUniversal("wilcoxon signed-rank before: 10,12,9,11; after: 11,14,10,13").summary, "Wilcoxon signed-rank test");
+  assert.equal(analyzeUniversal("kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "Kruskal-Wallis test");
   assert.equal(analyzeUniversal("rank [[1,2],[2,4]]").summary, "matrix rank");
   assert.equal(analyzeUniversal("eigen [[2,1],[1,2]]").summary, "2x2 eigenvalues");
   assert.equal(analyzeUniversal("nullspace [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix null space");

@@ -260,6 +260,23 @@ export function analyzeDerivative(statement, variable = "x") {
 export function analyzeStatistics(statement) {
   const lower = statement.toLowerCase();
 
+  if (lower.includes("kruskal") || lower.includes("wallis")) {
+    return analyzeKruskalWallis(statement);
+  }
+
+  if (
+    lower.includes("mann-whitney") ||
+    lower.includes("mann whitney") ||
+    lower.includes("rank-sum") ||
+    lower.includes("rank sum")
+  ) {
+    return analyzeMannWhitney(statement);
+  }
+
+  if (lower.includes("wilcoxon") || lower.includes("signed-rank") || lower.includes("signed rank")) {
+    return analyzeWilcoxonSignedRank(statement);
+  }
+
   if (lower.includes("anova") || lower.includes("analysis of variance")) {
     return analyzeAnova(statement);
   }
@@ -1245,6 +1262,269 @@ function analyzeAnova(statement) {
     artifacts: [
       ["Grand mean", formatNumber(grandMean)],
       ["F statistic", formatNumber(fStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeMannWhitney(statement) {
+  const { left, right, alternative, alpha } = parseTwoSampleInput(statement);
+  if (left.length < 1 || right.length < 1) {
+    throw new Error("Mann-Whitney U needs at least one value in each group.");
+  }
+
+  const allValues = [...left, ...right];
+  const ranked = rankValues(allValues);
+  const leftRanks = ranked.ranks.slice(0, left.length);
+  const rightRanks = ranked.ranks.slice(left.length);
+  const leftRankSum = leftRanks.reduce((sum, rank) => sum + rank, 0);
+  const rightRankSum = rightRanks.reduce((sum, rank) => sum + rank, 0);
+  const u1 = leftRankSum - (left.length * (left.length + 1)) / 2;
+  const u2 = rightRankSum - (right.length * (right.length + 1)) / 2;
+  const statistic = Math.min(u1, u2);
+  const meanU = (left.length * right.length) / 2;
+  const varianceU = (left.length * right.length / 12) *
+    (allValues.length + 1 - ranked.tieCorrection / (allValues.length * (allValues.length - 1)));
+  if (!(varianceU > 0)) {
+    throw new Error("Mann-Whitney U needs rank variation across the combined samples.");
+  }
+
+  const z = (u1 - meanU) / Math.sqrt(varianceU);
+  const pValue = pValueForNormal(z, alternative);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(allValues, [
+      statsMetricNode("U", statistic),
+      statsMetricNode("Z", z),
+      statsMetricNode("P", pValue),
+    ], "MANN-WHITNEY"),
+    answer: `U = ${formatNumber(statistic)}, p = ${formatNumber(pValue)}`,
+    summary: "Mann-Whitney U test",
+    details: "Rank-sum test with normal-approximation p-value",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(allValues)),
+    steps: [
+      {
+        title: "Read independent samples",
+        expression: `n1 = ${left.length}, n2 = ${right.length}`,
+        detail: "Mann-Whitney U compares two independent groups using ranks instead of raw means.",
+      },
+      {
+        title: "Rank combined data",
+        expression: ranked.ranks.map(formatNumber).join(", "),
+        detail: "Tied values receive their average rank.",
+      },
+      {
+        title: "Compute U statistic",
+        expression: `U1 = ${formatNumber(u1)}, U2 = ${formatNumber(u2)}`,
+        detail: "The smaller U is reported; the signed z-score uses group 1 versus group 2.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `z = ${formatNumber(z)}, p = ${formatNumber(pValue)}`,
+        detail: "The p-value uses a tie-corrected normal approximation.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the two distributions are shifted relative to each other.",
+      },
+    ],
+    table: {
+      headers: ["Group", "Value", "Rank"],
+      rows: [
+        ...left.map((value, index) => ["1", formatNumber(value), formatNumber(leftRanks[index])]),
+        ...right.map((value, index) => ["2", formatNumber(value), formatNumber(rightRanks[index])]),
+      ],
+    },
+    artifacts: [
+      ["Group 1 rank sum", formatNumber(leftRankSum)],
+      ["Group 2 rank sum", formatNumber(rightRankSum)],
+      ["U1", formatNumber(u1)],
+      ["U2", formatNumber(u2)],
+      ["Reported U", formatNumber(statistic)],
+      ["z statistic", formatNumber(z)],
+      ["p-value", formatNumber(pValue)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeWilcoxonSignedRank(statement) {
+  const { left, right, alternative, alpha } = parsePairedInput(statement);
+  if (left.length !== right.length || left.length < 2) {
+    throw new Error("Wilcoxon signed-rank needs equal-length paired samples with at least two pairs.");
+  }
+
+  const pairedDifferences = right.map((value, index) => value - left[index]);
+  const nonzeroDifferences = pairedDifferences.filter((difference) => !nearlyEqual(difference, 0));
+  if (nonzeroDifferences.length < 2) {
+    throw new Error("Wilcoxon signed-rank needs at least two nonzero pair differences.");
+  }
+
+  const ranked = rankAbsoluteValues(nonzeroDifferences);
+  const wPlus = nonzeroDifferences.reduce((sum, difference, index) => difference > 0 ? sum + ranked.ranks[index] : sum, 0);
+  const wMinus = nonzeroDifferences.reduce((sum, difference, index) => difference < 0 ? sum + ranked.ranks[index] : sum, 0);
+  const statistic = Math.min(wPlus, wMinus);
+  const n = nonzeroDifferences.length;
+  const meanW = (n * (n + 1)) / 4;
+  const varianceW = (n * (n + 1) * (2 * n + 1) - ranked.tieCorrection / 2) / 24;
+  if (!(varianceW > 0)) {
+    throw new Error("Wilcoxon signed-rank needs rank variation in absolute differences.");
+  }
+
+  const z = (wPlus - meanW) / Math.sqrt(varianceW);
+  const pValue = pValueForNormal(z, alternative);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  let rankCursor = 0;
+  const pairRows = left.map((value, index) => {
+    const difference = pairedDifferences[index];
+    const rank = nearlyEqual(difference, 0) ? "zero" : formatNumber(ranked.ranks[rankCursor++]);
+    return [
+      String(index + 1),
+      formatNumber(value),
+      formatNumber(right[index]),
+      formatNumber(difference),
+      rank,
+    ];
+  });
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(nonzeroDifferences, [
+      statsMetricNode("W+", wPlus),
+      statsMetricNode("W-", wMinus),
+      statsMetricNode("P", pValue),
+    ], "WILCOXON"),
+    answer: `W = ${formatNumber(statistic)}, p = ${formatNumber(pValue)}`,
+    summary: "Wilcoxon signed-rank test",
+    details: "Paired nonparametric test with normal-approximation p-value",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(nonzeroDifferences)),
+    steps: [
+      {
+        title: "Read paired samples",
+        expression: `${left.length} pairs, ${nonzeroDifferences.length} nonzero differences`,
+        detail: "Wilcoxon signed-rank tests whether paired differences are centered at zero.",
+      },
+      {
+        title: "Rank absolute differences",
+        expression: ranked.ranks.map(formatNumber).join(", "),
+        detail: "The solver ranks the absolute nonzero differences and keeps the original signs.",
+      },
+      {
+        title: "Compute signed rank sums",
+        expression: `W+ = ${formatNumber(wPlus)}, W- = ${formatNumber(wMinus)}`,
+        detail: "Positive and negative differences contribute separate rank sums.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `z = ${formatNumber(z)}, p = ${formatNumber(pValue)}`,
+        detail: "The p-value uses a tie-corrected normal approximation.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest a systematic paired shift.",
+      },
+    ],
+    table: {
+      headers: ["Pair", "First", "Second", "Difference", "|Difference| rank"],
+      rows: pairRows,
+    },
+    artifacts: [
+      ["Nonzero pairs", formatNumber(n)],
+      ["W+", formatNumber(wPlus)],
+      ["W-", formatNumber(wMinus)],
+      ["Reported W", formatNumber(statistic)],
+      ["z statistic", formatNumber(z)],
+      ["p-value", formatNumber(pValue)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeKruskalWallis(statement) {
+  const { groups, alpha } = parseKruskalInput(statement);
+  if (groups.length < 2 || groups.some((group) => group.length < 1)) {
+    throw new Error("Kruskal-Wallis needs at least two groups with at least one value each.");
+  }
+
+  const allValues = groups.flat();
+  const ranked = rankValues(allValues);
+  let offset = 0;
+  const groupRankSums = groups.map((group) => {
+    const ranks = ranked.ranks.slice(offset, offset + group.length);
+    offset += group.length;
+    return ranks.reduce((sum, rank) => sum + rank, 0);
+  });
+  const totalCount = allValues.length;
+  const rawH = (12 / (totalCount * (totalCount + 1))) *
+    groupRankSums.reduce((sum, rankSum, index) => sum + (rankSum ** 2) / groups[index].length, 0) -
+    3 * (totalCount + 1);
+  const tieFactor = 1 - ranked.tieCorrection / (totalCount ** 3 - totalCount);
+  if (!(tieFactor > 0)) {
+    throw new Error("Kruskal-Wallis needs rank variation across groups.");
+  }
+  const hStatistic = rawH / tieFactor;
+  const degreesFreedom = groups.length - 1;
+  const pValue = chiSquareRightTailApprox(hStatistic, degreesFreedom);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(allValues, [
+      statsMetricNode("H", hStatistic),
+      statsMetricNode("DF", degreesFreedom),
+      statsMetricNode("P", pValue),
+    ], "KRUSKAL"),
+    answer: `H = ${formatNumber(hStatistic)}, p = ${formatNumber(pValue)}`,
+    summary: "Kruskal-Wallis test",
+    details: `${groups.length} groups, rank-based ANOVA alternative`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(allValues)),
+    steps: [
+      {
+        title: "Read independent groups",
+        expression: groups.map((group, index) => `group ${index + 1}: n=${group.length}`).join("; "),
+        detail: "Kruskal-Wallis compares three or more independent groups using ranks.",
+      },
+      {
+        title: "Rank combined data",
+        expression: ranked.ranks.map(formatNumber).join(", "),
+        detail: "All observations are ranked together, with tied values averaged.",
+      },
+      {
+        title: "Compute H statistic",
+        expression: `H = ${formatNumber(hStatistic)}, df = ${formatNumber(degreesFreedom)}`,
+        detail: "Large H values mean the group rank sums are farther apart than expected by chance.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `p = ${formatNumber(pValue)}`,
+        detail: "The p-value uses a chi-square approximation with tie correction.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest at least one group distribution is shifted.",
+      },
+    ],
+    table: {
+      headers: ["Group", "n", "Rank sum", "Mean rank"],
+      rows: groups.map((group, index) => [
+        String(index + 1),
+        formatNumber(group.length),
+        formatNumber(groupRankSums[index]),
+        formatNumber(groupRankSums[index] / group.length),
+      ]),
+    },
+    artifacts: [
+      ["H statistic", formatNumber(hStatistic)],
+      ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["p-value", formatNumber(pValue)],
       ["Decision", decision],
     ],
@@ -2634,6 +2914,60 @@ function parseNumbers(text) {
   return [...text.matchAll(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)].map((match) => Number(match[0]));
 }
 
+function rankValues(values) {
+  const ranked = values.map((value, index) => ({ value, index }))
+    .sort((left, right) => left.value - right.value);
+  const ranks = Array(values.length);
+  let tieCorrection = 0;
+
+  for (let start = 0; start < ranked.length;) {
+    let end = start + 1;
+    while (end < ranked.length && nearlyEqual(ranked[end].value, ranked[start].value)) {
+      end += 1;
+    }
+
+    const rank = (start + 1 + end) / 2;
+    for (let index = start; index < end; index += 1) {
+      ranks[ranked[index].index] = rank;
+    }
+
+    const tieSize = end - start;
+    if (tieSize > 1) {
+      tieCorrection += tieSize ** 3 - tieSize;
+    }
+    start = end;
+  }
+
+  return { ranks, tieCorrection };
+}
+
+function rankAbsoluteValues(values) {
+  const ranked = values.map((value, index) => ({ value: Math.abs(value), index }))
+    .sort((left, right) => left.value - right.value);
+  const ranks = Array(values.length);
+  let tieCorrection = 0;
+
+  for (let start = 0; start < ranked.length;) {
+    let end = start + 1;
+    while (end < ranked.length && nearlyEqual(ranked[end].value, ranked[start].value)) {
+      end += 1;
+    }
+
+    const rank = (start + 1 + end) / 2;
+    for (let index = start; index < end; index += 1) {
+      ranks[ranked[index].index] = rank;
+    }
+
+    const tieSize = end - start;
+    if (tieSize > 1) {
+      tieCorrection += tieSize ** 3 - tieSize;
+    }
+    start = end;
+  }
+
+  return { ranks, tieCorrection };
+}
+
 function parseHypothesisInput(text) {
   const numberPattern = "([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)";
   let dataText = text;
@@ -2779,6 +3113,24 @@ function parseAnovaInput(text) {
   return { alpha, groups };
 }
 
+function parseKruskalInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const groups = cleaned
+    .replace(/\bkruskal(?:-|\s*)wallis\b/gi, "")
+    .replace(/\bkruskal\b/gi, "")
+    .replace(/\bwallis\b/gi, "")
+    .replace(/\brank(?:-|\s*)based\b/gi, "")
+    .split(";")
+    .map((chunk) => chunk.trim().replace(/^[A-Za-z][A-Za-z0-9 _-]*\s*[:=]\s*/, ""))
+    .map((chunk) => parseNumbers(chunk))
+    .filter((values) => values.length > 0);
+
+  if (groups.length < 2) {
+    throw new Error("Use Kruskal-Wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10.");
+  }
+  return { alpha, groups };
+}
+
 function parseChiSquareInput(text) {
   const { alpha, cleaned } = extractAlpha(text);
   const observedMatch = cleaned.match(/\b(?:observed|obs)\s*[:=]?\s*([^;]+?)(?=\b(?:expected|exp)\b|$)/i);
@@ -2834,6 +3186,17 @@ function parseAlternative(text) {
 
 function pValueForT(statistic, degreesFreedom, alternative) {
   const cdf = studentTCdf(statistic, degreesFreedom);
+  if (alternative === "less") {
+    return cdf;
+  }
+  if (alternative === "greater") {
+    return 1 - cdf;
+  }
+  return Math.min(1, 2 * Math.min(cdf, 1 - cdf));
+}
+
+function pValueForNormal(statistic, alternative) {
+  const cdf = normalCdf(statistic);
   if (alternative === "less") {
     return cdf;
   }
@@ -3292,6 +3655,15 @@ function isStatisticsQuestion(lower) {
     "matched pairs",
     "anova",
     "analysis of variance",
+    "mann-whitney",
+    "mann whitney",
+    "rank-sum",
+    "rank sum",
+    "wilcoxon",
+    "signed-rank",
+    "signed rank",
+    "kruskal",
+    "wallis",
   ].some((word) => lower.includes(word)) || parsePairs(lower).length >= 2;
 }
 
