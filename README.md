@@ -12,10 +12,12 @@ The frontend currently supports:
 - Propositional logic evaluation and truth tables
 - Algebra simplification with constants and like terms
 - Linear and quadratic equation solving
+- Numerical real-root approximation for higher-degree one-variable polynomials
+- Systems of linear equations through Universal Ask mode
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression and correlation for coordinate pairs
-- Binomial probability, normal probability, and z-score calculations
+- Confidence intervals, binomial probability, normal probability, and z-score calculations
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
 
@@ -61,6 +63,7 @@ The same idea works for algebra and calculus:
 - `2x + 3x` becomes a tree with `+` at the root and multiplication below it.
 - `x^3` becomes a power node, so the derivative engine can apply the power rule.
 - `x^2 - 5x + 6 = 0` becomes an equation node with left and right expression trees.
+- `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
 
 ## Run It
@@ -112,7 +115,9 @@ The demo includes:
 - A clear answer area
 - Expression-tree visualization
 - Truth tables for logic mode
-- Dataset summaries, regression/correlation, binomial probability, normal probability, and z-scores in Stats mode
+- Dataset summaries, confidence intervals, regression/correlation, binomial probability,
+  normal probability, and z-scores in Stats mode
+- Systems of equations and higher-degree numerical roots through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
 
@@ -139,11 +144,11 @@ These are good ways to make the project more impressive mathematically:
 2. Add exact radical output for quadratic equations with irrational roots.
 3. Add trigonometric simplification identities.
 4. Add definite and indefinite integration for common functions.
-5. Add systems of linear equations with Gaussian elimination.
-6. Add hypothesis tests, confidence intervals, t-tests, and chi-square tests.
-7. Add matrix operations: determinants, inverses, eigenvalues, and row reduction.
-8. Add numerical methods such as Newton's method and bisection.
-9. Add graphing for functions, distributions, and regression lines.
+5. Add hypothesis tests, t-tests, and chi-square tests.
+6. Add matrix operations: determinants, inverses, eigenvalues, and row reduction.
+7. Add graphing for functions, distributions, and regression lines.
+8. Add multi-step natural-language explanations for word problems.
+9. Add exact symbolic roots for cubic and quartic equations when possible.
 10. Convert logic statements to negation normal form, conjunctive normal form, and
    disjunctive normal form.
 11. Add Boolean algebra simplification rules, such as idempotent laws,
