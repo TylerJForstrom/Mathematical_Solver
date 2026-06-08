@@ -260,6 +260,19 @@ export function analyzeDerivative(statement, variable = "x") {
 export function analyzeStatistics(statement) {
   const lower = statement.toLowerCase();
 
+  if (lower.includes("chi-square") || lower.includes("chi square") || lower.includes("chisquare")) {
+    return analyzeChiSquare(statement);
+  }
+
+  if (
+    lower.includes("two-sample") ||
+    lower.includes("two sample") ||
+    lower.includes("welch") ||
+    lower.includes("independent samples")
+  ) {
+    return analyzeTwoSampleTTest(statement);
+  }
+
   if (lower.includes("hypothesis") || lower.includes("t-test") || lower.includes("t test") || lower.includes("test mean")) {
     return analyzeHypothesisTest(statement);
   }
@@ -306,6 +319,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isIntegralQuestion(lower)) {
     routed = analyzeIntegral(question);
     routedLabel = "Integral";
+  } else if (isOptimizationQuestion(lower)) {
+    routed = analyzeOptimization(question);
+    routedLabel = "Optimization";
   } else if (isNumericalQuestion(lower)) {
     routed = analyzeNumerical(question);
     routedLabel = "Numerical";
@@ -520,6 +536,102 @@ export function analyzeMatrix(statement) {
   };
 }
 
+export function analyzeOptimization(statement, variableHint = "x") {
+  const request = extractOptimizationQuestion(statement, variableHint);
+  const expression = parseMath(request.expression);
+  if (expression.kind === "equation") {
+    throw new Error("Optimization mode expects a function expression, not an equation.");
+  }
+
+  const steps = [
+    {
+      title: "Parse function",
+      expression: `f(${request.variable}) = ${formatMath(expression)}`,
+      detail: "Optimization starts with the function tree.",
+    },
+  ];
+  const simplified = simplifyNode(expression, steps);
+  const polynomial = polynomialFrom(simplified);
+  if (!polynomial) {
+    throw new Error("Optimization mode currently supports polynomial functions.");
+  }
+
+  const coefficients = polynomialCoefficients(polynomial, request.variable);
+  if (coefficients.length === 0) {
+    throw new Error("Optimization mode currently supports one-variable polynomial functions.");
+  }
+
+  const derivativePoly = polynomialDerivative(polynomial, request.variable);
+  const derivativeCoefficients = polynomialCoefficients(derivativePoly, request.variable);
+  if (polynomialDegree(derivativeCoefficients) === 0 && nearlyEqual(derivativeCoefficients[0] ?? 0, 0)) {
+    throw new Error("Every point is critical for a constant function.");
+  }
+  const criticalPoints = approximateRealPolynomialRoots(derivativeCoefficients);
+  if (criticalPoints.length === 0) {
+    throw new Error("No real critical points found in the scan range.");
+  }
+
+  const secondDerivative = polynomialDerivative(derivativePoly, request.variable);
+  const secondDerivativeCoefficients = polynomialCoefficients(secondDerivative, request.variable);
+  const rows = criticalPoints.map((point) => {
+    const value = evaluatePolynomialCoefficients(coefficients, point);
+    const second = evaluatePolynomialCoefficients(secondDerivativeCoefficients, point);
+    const kind = second > EPSILON ? "local min" : second < -EPSILON ? "local max" : "critical";
+    return {
+      x: point,
+      y: value,
+      second,
+      kind,
+    };
+  });
+  const preferred = pickOptimizationResult(rows, request.goal);
+  const answer = `${preferred.kind} at ${request.variable} = ${formatNumber(preferred.x)}, f(${request.variable}) = ${formatNumber(preferred.y)}`;
+
+  steps.push(
+    {
+      title: "Differentiate",
+      expression: `f'(${request.variable}) = ${formatPolynomial(derivativePoly)}`,
+      detail: "Critical points happen where the first derivative is zero.",
+    },
+    {
+      title: "Solve derivative",
+      expression: criticalPoints.map(formatNumber).join(", "),
+      detail: "The solver approximates real roots of the derivative.",
+    },
+    {
+      title: "Classify critical points",
+      expression: rows.map((row) => `${formatNumber(row.x)}: ${row.kind}`).join("; "),
+      detail: "The sign of the second derivative distinguishes local maxima and minima.",
+    },
+  );
+
+  return {
+    mode: "optimization",
+    tree: expression,
+    answer,
+    summary: "critical points",
+    details: `${request.goal} polynomial optimization`,
+    variables: mathVariables(expression),
+    metrics: treeMetrics(expression),
+    steps,
+    artifacts: [
+      ["Function", `f(${request.variable}) = ${formatMath(expression)}`],
+      ["Derivative", `f'(${request.variable}) = ${formatPolynomial(derivativePoly)}`],
+      ["Critical points", rows.map((row) => `${request.variable}=${formatNumber(row.x)}, f=${formatNumber(row.y)}, ${row.kind}`).join("; ")],
+      ["Selected", answer],
+    ],
+    table: {
+      headers: [request.variable, `f(${request.variable})`, `f''(${request.variable})`, "Type"],
+      rows: rows.map((row) => [
+        formatNumber(row.x),
+        formatNumber(row.y),
+        formatNumber(row.second),
+        row.kind,
+      ]),
+    },
+  };
+}
+
 export function analyzeIntegral(statement, variableHint = "x") {
   const request = extractIntegralQuestion(statement, variableHint);
   const expression = parseMath(request.expression);
@@ -541,26 +653,46 @@ export function analyzeIntegral(statement, variableHint = "x") {
   }
 
   const integral = integratePolynomial(polynomial, request.variable);
-  const answer = `${formatPolynomial(integral)} + C`;
+  const antiderivative = formatPolynomial(integral);
+  const definite = Number.isFinite(request.lower) && Number.isFinite(request.upper);
+  const definiteValue = definite
+    ? evaluatePolynomialCoefficients(polynomialCoefficients(integral, request.variable), request.upper) -
+      evaluatePolynomialCoefficients(polynomialCoefficients(integral, request.variable), request.lower)
+    : null;
+  const answer = definite ? `integral = ${formatNumber(definiteValue)}` : `${antiderivative} + C`;
   steps.push({
     title: "Apply power rule for integrals",
-    expression: answer,
+    expression: `${antiderivative} + C`,
     detail: "Each x^n term becomes x^(n+1)/(n+1).",
   });
+  if (definite) {
+    steps.push({
+      title: "Evaluate bounds",
+      expression: `F(${formatNumber(request.upper)}) - F(${formatNumber(request.lower)}) = ${formatNumber(definiteValue)}`,
+      detail: "The definite integral uses the antiderivative at the upper and lower bounds.",
+    });
+  }
 
   return {
     mode: "integral",
     tree: expression,
     answer,
-    summary: "indefinite integral",
+    summary: definite ? "definite integral" : "indefinite integral",
     details: `with respect to ${request.variable}`,
     variables: mathVariables(expression),
     metrics: treeMetrics(expression),
     steps,
-    artifacts: [
-      ["Integrand", formatMath(expression)],
-      ["Antiderivative", answer],
-    ],
+    artifacts: definite
+      ? [
+          ["Integrand", formatMath(expression)],
+          ["Antiderivative", `${antiderivative} + C`],
+          ["Bounds", `[${formatNumber(request.lower)}, ${formatNumber(request.upper)}]`],
+          ["Value", formatNumber(definiteValue)],
+        ]
+      : [
+          ["Integrand", formatMath(expression)],
+          ["Antiderivative", answer],
+        ],
   };
 }
 
@@ -737,6 +869,155 @@ function analyzeHypothesisTest(statement) {
       ["Sample SD", formatNumber(summary.sampleStdDev)],
       ["Standard error", formatNumber(standardError)],
       ["t statistic", formatNumber(tStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeTwoSampleTTest(statement) {
+  const { left, right, alternative, alpha } = parseTwoSampleInput(statement);
+  if (left.length < 2 || right.length < 2) {
+    throw new Error("Two-sample t tests need at least two values in each group.");
+  }
+
+  const leftSummary = descriptiveSummary(left);
+  const rightSummary = descriptiveSummary(right);
+  if (!(leftSummary.sampleStdDev > 0) || !(rightSummary.sampleStdDev > 0)) {
+    throw new Error("Two-sample t tests need variation in both groups.");
+  }
+
+  const leftVarianceTerm = leftSummary.sampleVariance / leftSummary.count;
+  const rightVarianceTerm = rightSummary.sampleVariance / rightSummary.count;
+  const standardError = Math.sqrt(leftVarianceTerm + rightVarianceTerm);
+  const tStatistic = (leftSummary.mean - rightSummary.mean) / standardError;
+  const dfNumerator = (leftVarianceTerm + rightVarianceTerm) ** 2;
+  const dfDenominator =
+    (leftVarianceTerm ** 2) / (leftSummary.count - 1) +
+    (rightVarianceTerm ** 2) / (rightSummary.count - 1);
+  const degreesFreedom = dfNumerator / dfDenominator;
+  const pValue = pValueForAlternative(tStatistic, alternative);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode([...left, ...right], [
+      statsMetricNode("MEAN1", leftSummary.mean),
+      statsMetricNode("MEAN2", rightSummary.mean),
+      statsMetricNode("T", tStatistic),
+      statsMetricNode("P", pValue),
+    ], "2-SAMPLE"),
+    answer: `t = ${formatNumber(tStatistic)}, p = ${formatNumber(pValue)}`,
+    summary: "two-sample t test",
+    details: "Welch test with normal tail approximation",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([...left, ...right])),
+    steps: [
+      {
+        title: "Read two samples",
+        expression: `n1 = ${leftSummary.count}, n2 = ${rightSummary.count}`,
+        detail: "The solver separates two independent groups.",
+      },
+      {
+        title: "Compute group summaries",
+        expression: `mean1 = ${formatNumber(leftSummary.mean)}, mean2 = ${formatNumber(rightSummary.mean)}`,
+        detail: "Welch's t test compares the difference in group means.",
+      },
+      {
+        title: "Compute standard error",
+        expression: `SE = ${formatNumber(standardError)}`,
+        detail: "Welch's method combines the two sample variances without assuming equal variance.",
+      },
+      {
+        title: "Compute test statistic",
+        expression: `t = ${formatNumber(tStatistic)}, df = ${formatNumber(degreesFreedom)}`,
+        detail: "The browser demo reports Welch degrees of freedom and a normal-tail p-value approximation.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the group means differ more than expected by sampling noise.",
+      },
+    ],
+    artifacts: [
+      ["Group 1 mean", formatNumber(leftSummary.mean)],
+      ["Group 2 mean", formatNumber(rightSummary.mean)],
+      ["Mean difference", formatNumber(leftSummary.mean - rightSummary.mean)],
+      ["Standard error", formatNumber(standardError)],
+      ["Degrees of freedom", formatNumber(degreesFreedom)],
+      ["t statistic", formatNumber(tStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeChiSquare(statement) {
+  const { observed, expected, alpha } = parseChiSquareInput(statement);
+  if (observed.length !== expected.length || observed.length < 2) {
+    throw new Error("Chi-square tests need matching observed and expected lists.");
+  }
+  if (expected.some((value) => !(value > 0))) {
+    throw new Error("Expected chi-square counts must be positive.");
+  }
+
+  const contributions = observed.map((value, index) => (value - expected[index]) ** 2 / expected[index]);
+  const statistic = contributions.reduce((sum, value) => sum + value, 0);
+  const degreesFreedom = observed.length - 1;
+  const pValue = chiSquareRightTailApprox(statistic, degreesFreedom);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(observed, [
+      statsMetricNode("X2", statistic),
+      statsMetricNode("DF", degreesFreedom),
+      statsMetricNode("P", pValue),
+    ], "CHI2"),
+    answer: `chi-square = ${formatNumber(statistic)}, p = ${formatNumber(pValue)}`,
+    summary: "chi-square goodness-of-fit",
+    details: "Observed vs expected counts",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(observed)),
+    steps: [
+      {
+        title: "Read observed and expected counts",
+        expression: `${observed.length} categories`,
+        detail: "The goodness-of-fit test compares actual category counts to expected counts.",
+      },
+      {
+        title: "Compute contributions",
+        expression: contributions.map(formatNumber).join(", "),
+        detail: "Each category contributes (observed - expected)^2 / expected.",
+      },
+      {
+        title: "Sum chi-square statistic",
+        expression: `X^2 = ${formatNumber(statistic)}, df = ${formatNumber(degreesFreedom)}`,
+        detail: "The total statistic is compared to a chi-square reference curve.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `p = ${formatNumber(pValue)}`,
+        detail: "The browser demo uses the Wilson-Hilferty normal approximation.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the observed counts do not fit the expected pattern.",
+      },
+    ],
+    table: {
+      headers: ["Category", "Observed", "Expected", "Contribution"],
+      rows: observed.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(expected[index]),
+        formatNumber(contributions[index]),
+      ]),
+    },
+    artifacts: [
+      ["Chi-square", formatNumber(statistic)],
+      ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["p-value", formatNumber(pValue)],
       ["Decision", decision],
     ],
@@ -1257,10 +1538,19 @@ function invertMatrix(matrix) {
 
 function extractIntegralQuestion(statement, fallbackVariable) {
   let text = statement
-    .replace(/^(integrate|integral of|find the integral of|antiderivative of)\s+/i, "")
+    .replace(/^(integrate|definite integral of|definite integral|integral of|find the integral of|antiderivative of)\s+/i, "")
     .replace(/[?!.]+$/, "")
     .trim();
   let variable = fallbackVariable;
+  let lower = null;
+  let upper = null;
+
+  const boundsMatch = text.match(/\b(?:from|between)\s+([-+]?\d*\.?\d+)\s+(?:to|,)\s+([-+]?\d*\.?\d+)/i);
+  if (boundsMatch) {
+    lower = Number(boundsMatch[1]);
+    upper = Number(boundsMatch[2]);
+    text = text.replace(boundsMatch[0], "").trim();
+  }
 
   const respectMatch = text.match(/\b(?:with respect to|wrt)\s+([A-Za-z_]\w*)/i);
   const dxMatch = text.match(/\bd([A-Za-z_]\w*)\b/i);
@@ -1275,6 +1565,8 @@ function extractIntegralQuestion(statement, fallbackVariable) {
   return {
     expression: text,
     variable,
+    lower,
+    upper,
   };
 }
 
@@ -1292,6 +1584,61 @@ function integratePolynomial(poly, variable) {
     result.set(monomialKey(powers), coefficient / (currentPower + 1));
   }
   return cleanPolynomial(result);
+}
+
+function extractOptimizationQuestion(statement, fallbackVariable) {
+  let text = statement
+    .replace(/^(maximize|minimize|optimize|critical points of|critical point of|find critical points of|find the maximum of|find the minimum of|find max of|find min of)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  let variable = fallbackVariable;
+  let goal = "critical";
+
+  const lower = statement.toLowerCase();
+  if (lower.includes("maximize") || lower.includes("maximum") || /\bmax\b/.test(lower)) {
+    goal = "maximum";
+  } else if (lower.includes("minimize") || lower.includes("minimum") || /\bmin\b/.test(lower)) {
+    goal = "minimum";
+  }
+
+  const variableMatch = text.match(/\b(?:with respect to|wrt|for)\s+([A-Za-z_]\w*)\b/i);
+  if (variableMatch) {
+    variable = variableMatch[1];
+    text = text.replace(variableMatch[0], "").trim();
+  }
+  text = text.replace(/^f\s*\([A-Za-z_]\w*\)\s*=\s*/i, "").replace(/^y\s*=\s*/i, "").trim();
+  text = text.replace(/^-\s*/, "0 - ");
+
+  return { expression: text, variable, goal };
+}
+
+function polynomialDerivative(poly, variable) {
+  const result = new Map();
+  for (const [key, coefficient] of poly.entries()) {
+    const powers = powersFromKey(key);
+    const power = powers[variable] ?? 0;
+    if (power === 0) {
+      continue;
+    }
+    powers[variable] = power - 1;
+    if (powers[variable] === 0) {
+      delete powers[variable];
+    }
+    result.set(monomialKey(powers), (result.get(monomialKey(powers)) ?? 0) + coefficient * power);
+  }
+  return cleanPolynomial(result);
+}
+
+function pickOptimizationResult(rows, goal) {
+  if (goal === "maximum") {
+    const localMax = rows.filter((row) => row.kind === "local max");
+    return (localMax.length ? localMax : rows).reduce((best, row) => row.y > best.y ? row : best);
+  }
+  if (goal === "minimum") {
+    const localMin = rows.filter((row) => row.kind === "local min");
+    return (localMin.length ? localMin : rows).reduce((best, row) => row.y < best.y ? row : best);
+  }
+  return rows[0];
 }
 
 function extractGraphQuestion(statement) {
@@ -1545,6 +1892,95 @@ function parseHypothesisInput(text) {
   };
 }
 
+function parseTwoSampleInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const alternative = parseAlternative(text);
+  const labeledMatch = cleaned.match(
+    /\b(?:group|sample|data)?\s*1\s*[:=]\s*([^;]+);\s*(?:group|sample|data)?\s*2\s*[:=]\s*([^;]+)/i,
+  );
+  if (labeledMatch) {
+    return {
+      alpha,
+      alternative,
+      left: parseNumbers(labeledMatch[1]),
+      right: parseNumbers(labeledMatch[2]),
+    };
+  }
+
+  const chunks = cleaned
+    .replace(/\btwo-?sample\b/gi, "")
+    .replace(/\bwelch\b/gi, "")
+    .replace(/\bt-?test\b/gi, "")
+    .replace(/\bindependent samples\b/gi, "")
+    .split(";")
+    .map((chunk) => parseNumbers(chunk))
+    .filter((values) => values.length > 0);
+
+  if (chunks.length >= 2) {
+    return {
+      alpha,
+      alternative,
+      left: chunks[0],
+      right: chunks[1],
+    };
+  }
+
+  throw new Error("Use two-sample t-test group1: 10, 12, 9; group2: 8, 7, 11.");
+}
+
+function parseChiSquareInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const observedMatch = cleaned.match(/\b(?:observed|obs)\s*[:=]?\s*([^;]+?)(?=\b(?:expected|exp)\b|$)/i);
+  const expectedMatch = cleaned.match(/\b(?:expected|exp)\s*[:=]?\s*([^;]+)/i);
+  if (observedMatch && expectedMatch) {
+    return {
+      alpha,
+      observed: parseNumbers(observedMatch[1]),
+      expected: parseNumbers(expectedMatch[1]),
+    };
+  }
+
+  const chunks = cleaned
+    .replace(/\bchi-?square\b/gi, "")
+    .replace(/\bchisquare\b/gi, "")
+    .replace(/\bgoodness(?:-|\s*)of(?:-|\s*)fit\b/gi, "")
+    .split(";")
+    .map((chunk) => parseNumbers(chunk))
+    .filter((values) => values.length > 0);
+  if (chunks.length >= 2) {
+    return {
+      alpha,
+      observed: chunks[0],
+      expected: chunks[1],
+    };
+  }
+
+  throw new Error("Use chi-square observed 10, 20, 30 expected 15, 15, 30.");
+}
+
+function extractAlpha(text) {
+  const match = text.match(/\balpha\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
+  const alpha = match ? Number(match[1]) : 0.05;
+  if (!(alpha > 0 && alpha < 1)) {
+    throw new Error("Alpha must be between 0 and 1.");
+  }
+  return {
+    alpha,
+    cleaned: match ? text.replace(match[0], "") : text,
+  };
+}
+
+function parseAlternative(text) {
+  const lower = text.toLowerCase();
+  if (/\b(less|below|under)\b/.test(lower) || /<\s*[-+]?\d/.test(lower)) {
+    return "less";
+  }
+  if (/\b(greater|above|over|more)\b/.test(lower) || />\s*[-+]?\d/.test(lower)) {
+    return "greater";
+  }
+  return "two-sided";
+}
+
 function pValueForAlternative(statistic, alternative) {
   if (alternative === "less") {
     return normalCdf(statistic);
@@ -1553,6 +1989,18 @@ function pValueForAlternative(statistic, alternative) {
     return 1 - normalCdf(statistic);
   }
   return Math.min(1, 2 * (1 - normalCdf(Math.abs(statistic))));
+}
+
+function chiSquareRightTailApprox(statistic, degreesFreedom) {
+  if (!(degreesFreedom > 0)) {
+    return Number.NaN;
+  }
+  if (statistic <= 0) {
+    return 1;
+  }
+  const z = ((statistic / degreesFreedom) ** (1 / 3) - (1 - 2 / (9 * degreesFreedom))) /
+    Math.sqrt(2 / (9 * degreesFreedom));
+  return Math.max(0, Math.min(1, 1 - normalCdf(z)));
 }
 
 function parseConfidenceInput(text) {
@@ -1773,9 +2221,24 @@ function isGraphQuestion(lower) {
 
 function isIntegralQuestion(lower) {
   return lower.startsWith("integrate ") ||
+    lower.startsWith("definite integral ") ||
+    lower.startsWith("definite integral of ") ||
     lower.startsWith("integral of ") ||
     lower.startsWith("find the integral of ") ||
     lower.startsWith("antiderivative of ");
+}
+
+function isOptimizationQuestion(lower) {
+  return lower.startsWith("maximize ") ||
+    lower.startsWith("minimize ") ||
+    lower.startsWith("optimize ") ||
+    lower.startsWith("critical points of ") ||
+    lower.startsWith("critical point of ") ||
+    lower.startsWith("find critical points of ") ||
+    lower.startsWith("find the maximum of ") ||
+    lower.startsWith("find the minimum of ") ||
+    lower.startsWith("find max of ") ||
+    lower.startsWith("find min of ");
 }
 
 function isNumericalQuestion(lower) {
@@ -1813,6 +2276,12 @@ function isStatisticsQuestion(lower) {
     "t-test",
     "t test",
     "test mean",
+    "two-sample",
+    "two sample",
+    "welch",
+    "chi-square",
+    "chi square",
+    "chisquare",
   ].some((word) => lower.includes(word)) || parsePairs(lower).length >= 2;
 }
 

@@ -8,6 +8,7 @@ import {
   analyzeLogic,
   analyzeMatrix,
   analyzeNumerical,
+  analyzeOptimization,
   analyzeSimplification,
   analyzeStatistics,
   analyzeSystem,
@@ -106,6 +107,20 @@ runTest("statistics mode computes one-sample tests", () => {
   assert.equal(result.answer, "t = 0, p = 1");
 });
 
+runTest("statistics mode computes two-sample tests", () => {
+  const result = analyzeStatistics("two-sample t-test group1: 10, 12, 9; group2: 8, 7, 11");
+
+  assert.equal(result.summary, "two-sample t test");
+  assert.equal(result.answer, "t = 1.118034, p = 0.263553");
+});
+
+runTest("statistics mode computes chi-square goodness-of-fit", () => {
+  const result = analyzeStatistics("chi-square observed 10, 20, 30 expected 15, 15, 30");
+
+  assert.equal(result.summary, "chi-square goodness-of-fit");
+  assert.equal(result.answer, "chi-square = 3.333333, p = 0.186672");
+});
+
 runTest("system solver handles two-variable systems", () => {
   const result = analyzeSystem("2x + y = 5; x - y = 1");
 
@@ -139,6 +154,20 @@ runTest("integral mode applies polynomial power rules", () => {
 
   assert.equal(result.summary, "indefinite integral");
   assert.equal(result.answer, "0.333333x^3 + 1.5x^2 + C");
+});
+
+runTest("integral mode evaluates definite integrals", () => {
+  const result = analyzeIntegral("integrate x^2 from 0 to 3");
+
+  assert.equal(result.summary, "definite integral");
+  assert.equal(result.answer, "integral = 9");
+});
+
+runTest("optimization mode finds polynomial critical points", () => {
+  const result = analyzeOptimization("maximize -x^2 + 4x + 1");
+
+  assert.equal(result.summary, "critical points");
+  assert.equal(result.answer, "local max at x = 2, f(x) = 5");
 });
 
 runTest("graph mode samples functions", () => {
@@ -193,6 +222,9 @@ runTest("universal mode routes systems", () => {
 runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("det [[1,2],[3,4]]").summary, "determinant");
   assert.equal(analyzeUniversal("integrate x^2").summary, "indefinite integral");
+  assert.equal(analyzeUniversal("integrate x^2 from 0 to 3").summary, "definite integral");
+  assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
+  assert.equal(analyzeUniversal("chi-square observed 10,20,30 expected 15,15,30").summary, "chi-square goodness-of-fit");
 });
