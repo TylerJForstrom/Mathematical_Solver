@@ -257,6 +257,676 @@ export function analyzeDerivative(statement, variable = "x") {
   };
 }
 
+export function analyzeStatistics(statement) {
+  const lower = statement.toLowerCase();
+
+  if (lower.includes("z-score") || lower.includes("zscore")) {
+    return analyzeZScore(statement);
+  }
+
+  if (lower.includes("normal")) {
+    return analyzeNormalDistribution(statement);
+  }
+
+  if (lower.includes("binomial")) {
+    return analyzeBinomial(statement);
+  }
+
+  if (
+    lower.includes("regression") ||
+    lower.includes("correlation") ||
+    parsePairs(statement).length >= 2 ||
+    parseXYLists(statement)
+  ) {
+    return analyzeRegression(statement);
+  }
+
+  return analyzeDescriptiveStatistics(statement);
+}
+
+export function analyzeUniversal(question, values = {}) {
+  const lower = question.toLowerCase();
+  let routed;
+  let routedLabel;
+
+  if (isDerivativeQuestion(lower)) {
+    const request = extractDerivativeQuestion(question);
+    routed = analyzeDerivative(request.expression, request.variable);
+    routedLabel = "Derivative";
+  } else if (isStatisticsQuestion(lower)) {
+    routed = analyzeStatistics(question);
+    routedLabel = "Statistics";
+  } else if (isLogicQuestion(question)) {
+    routed = analyzeLogic(cleanLogicQuestion(question), values);
+    routedLabel = "Logic";
+  } else if (question.includes("=")) {
+    routed = analyzeEquation(cleanEquationQuestion(question));
+    routedLabel = "Equation";
+  } else if (isSimplifyQuestion(lower) || looksLikeMathExpression(question)) {
+    routed = analyzeSimplification(cleanSimplifyQuestion(question));
+    routedLabel = "Simplify";
+  } else {
+    throw new Error(
+      "Try a supported question, such as 'solve x^2 - 5x + 6 = 0', 'mean of 2,4,4,5,9', or 'differentiate x^3'.",
+    );
+  }
+
+  return {
+    ...routed,
+    details: `Universal Ask routed this to ${routedLabel}. ${routed.details}`,
+    steps: [
+      {
+        title: "Route question",
+        expression: routedLabel,
+        detail: "The universal solver detects the problem type, then uses the matching tree engine.",
+      },
+      ...routed.steps,
+    ],
+  };
+}
+
+function analyzeDescriptiveStatistics(statement) {
+  const values = parseNumbers(statement);
+  if (values.length === 0) {
+    throw new Error("Statistics mode needs at least one number.");
+  }
+
+  const sorted = [...values].sort((left, right) => left - right);
+  const summary = descriptiveSummary(values);
+  const steps = [
+    {
+      title: "Parse dataset",
+      expression: values.map(formatNumber).join(", "),
+      detail: `The dataset contains ${values.length} values.`,
+    },
+    {
+      title: "Sort values",
+      expression: sorted.map(formatNumber).join(", "),
+      detail: "Sorting supports median, quartile, and range calculations.",
+    },
+    {
+      title: "Compute center",
+      expression: `mean = ${formatNumber(summary.mean)}, median = ${formatNumber(summary.median)}`,
+      detail: "Mean uses the arithmetic average; median uses the middle sorted value.",
+    },
+    {
+      title: "Compute spread",
+      expression: `sample sd = ${formatNumber(summary.sampleStdDev)}`,
+      detail: "Variance and standard deviation measure how far the data are spread out.",
+    },
+  ];
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(values, [
+      statsMetricNode("MEAN", summary.mean),
+      statsMetricNode("MEDIAN", summary.median),
+      statsMetricNode("SD", summary.sampleStdDev),
+    ]),
+    answer: descriptiveAnswer(statement, summary),
+    summary: "descriptive statistics",
+    details: "Dataset summary",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(values)),
+    steps,
+    artifacts: [
+      ["Count", formatNumber(summary.count)],
+      ["Mean", formatNumber(summary.mean)],
+      ["Median", formatNumber(summary.median)],
+      ["Mode", summary.modes.length ? summary.modes.map(formatNumber).join(", ") : "none"],
+      ["Range", formatNumber(summary.range)],
+      ["Q1", formatNumber(summary.q1)],
+      ["Q3", formatNumber(summary.q3)],
+      ["IQR", formatNumber(summary.iqr)],
+      ["Population variance", formatNumber(summary.populationVariance)],
+      ["Population SD", formatNumber(summary.populationStdDev)],
+      ["Sample variance", formatNumber(summary.sampleVariance)],
+      ["Sample SD", formatNumber(summary.sampleStdDev)],
+    ],
+  };
+}
+
+function analyzeRegression(statement) {
+  const parsedLists = parseXYLists(statement);
+  const pairs = parsedLists ? zipPairs(parsedLists.x, parsedLists.y) : parsePairs(statement);
+
+  if (pairs.length < 2) {
+    throw new Error("Regression needs at least two coordinate pairs, such as (1,2), (2,3), (3,5).");
+  }
+
+  const xValues = pairs.map((pair) => pair.x);
+  const yValues = pairs.map((pair) => pair.y);
+  const meanX = mean(xValues);
+  const meanY = mean(yValues);
+  const sxx = xValues.reduce((sum, value) => sum + (value - meanX) ** 2, 0);
+  const syy = yValues.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
+  const sxy = pairs.reduce((sum, pair) => sum + (pair.x - meanX) * (pair.y - meanY), 0);
+  const slope = sxy / sxx;
+  const intercept = meanY - slope * meanX;
+  const r = sxy / Math.sqrt(sxx * syy);
+  const rSquared = r ** 2;
+  const wantsCorrelation = statement.toLowerCase().includes("correlation") && !statement.toLowerCase().includes("regression");
+
+  const steps = [
+    {
+      title: "Parse coordinate pairs",
+      expression: pairs.map((pair) => `(${formatNumber(pair.x)}, ${formatNumber(pair.y)})`).join(", "),
+      detail: "Each point contributes an x-value and a y-value.",
+    },
+    {
+      title: "Compute means",
+      expression: `xbar = ${formatNumber(meanX)}, ybar = ${formatNumber(meanY)}`,
+      detail: "Regression compares each point to the center of the data.",
+    },
+    {
+      title: "Compute slope and intercept",
+      expression: `slope = ${formatNumber(slope)}, intercept = ${formatNumber(intercept)}`,
+      detail: "The least-squares line minimizes squared vertical error.",
+    },
+    {
+      title: "Compute correlation",
+      expression: `r = ${formatNumber(r)}, r^2 = ${formatNumber(rSquared)}`,
+      detail: "Correlation measures linear association from -1 to 1.",
+    },
+  ];
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      children: [
+        statsDatasetNode(xValues, [], "X"),
+        statsDatasetNode(yValues, [], "Y"),
+        statsMetricNode("r", r),
+      ],
+    },
+    answer: wantsCorrelation
+      ? `r = ${formatNumber(r)}`
+      : `y = ${formatNumber(slope)}x ${formatSigned(intercept)}`,
+    summary: wantsCorrelation ? "correlation" : "linear regression",
+    details: `${pairs.length} paired observations`,
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsRegression",
+      children: [statsDatasetNode(xValues), statsDatasetNode(yValues)],
+    }),
+    steps,
+    artifacts: [
+      ["Mean x", formatNumber(meanX)],
+      ["Mean y", formatNumber(meanY)],
+      ["Slope", formatNumber(slope)],
+      ["Intercept", formatNumber(intercept)],
+      ["Correlation r", formatNumber(r)],
+      ["R squared", formatNumber(rSquared)],
+    ],
+  };
+}
+
+function analyzeBinomial(statement) {
+  const params = parseNamedProbabilityParams(statement);
+  const n = params.n;
+  const p = params.p;
+  const k = params.k;
+
+  if (!Number.isInteger(n) || !Number.isInteger(k) || n < 0 || k < 0 || k > n) {
+    throw new Error("Binomial probability needs integer values with 0 <= k <= n.");
+  }
+  if (!(p >= 0 && p <= 1)) {
+    throw new Error("Binomial probability needs p between 0 and 1.");
+  }
+
+  const exact = binomialProbability(n, p, k);
+  const atMost = sumRange(0, k, (value) => binomialProbability(n, p, value));
+  const atLeast = sumRange(k, n, (value) => binomialProbability(n, p, value));
+  const expected = n * p;
+  const variance = n * p * (1 - p);
+
+  const steps = [
+    {
+      title: "Read binomial parameters",
+      expression: `n = ${n}, p = ${formatNumber(p)}, k = ${k}`,
+      detail: "A binomial model counts successes in independent trials.",
+    },
+    {
+      title: "Apply probability formula",
+      expression: "P(X = k) = C(n,k) p^k (1-p)^(n-k)",
+      detail: "The combination counts which trials are successes.",
+    },
+    {
+      title: "Compute exact probability",
+      expression: `P(X = ${k}) = ${formatNumber(exact)}`,
+      detail: "This is the probability of exactly k successes.",
+    },
+  ];
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "BINOMIAL",
+      children: [
+        statsMetricNode("n", n),
+        statsMetricNode("p", p),
+        statsMetricNode("k", k),
+      ],
+    },
+    answer: `P(X = ${k}) = ${formatNumber(exact)}`,
+    summary: "binomial probability",
+    details: "Discrete probability distribution",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("n", n), statsMetricNode("p", p), statsMetricNode("k", k)],
+    }),
+    steps,
+    artifacts: [
+      [`P(X = ${k})`, formatNumber(exact)],
+      [`P(X <= ${k})`, formatNumber(atMost)],
+      [`P(X >= ${k})`, formatNumber(atLeast)],
+      ["Expected value", formatNumber(expected)],
+      ["Variance", formatNumber(variance)],
+      ["Standard deviation", formatNumber(Math.sqrt(variance))],
+    ],
+  };
+}
+
+function analyzeNormalDistribution(statement) {
+  const numbers = parseNumbers(statement);
+  const meanValue = readNamedNumber(statement, ["mean", "mu"], numbers[0] ?? 0);
+  const sdValue = readNamedNumber(statement, ["sd", "sigma", "std"], numbers.length >= 3 ? numbers[1] : 1);
+  const xValue = readNamedNumber(statement, ["x", "value"], numbers.length >= 3 ? numbers[2] : numbers[0]);
+
+  if (!Number.isFinite(xValue)) {
+    throw new Error("Normal distribution needs a value, such as normal mean=0 sd=1 x=1.96.");
+  }
+  if (!(sdValue > 0)) {
+    throw new Error("Normal distribution needs a positive standard deviation.");
+  }
+
+  const z = (xValue - meanValue) / sdValue;
+  const leftTail = normalCdf(z);
+  const rightTail = 1 - leftTail;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "NORMAL",
+      children: [
+        statsMetricNode("mu", meanValue),
+        statsMetricNode("sd", sdValue),
+        statsMetricNode("x", xValue),
+        statsMetricNode("z", z),
+      ],
+    },
+    answer: `P(X <= ${formatNumber(xValue)}) = ${formatNumber(leftTail)}`,
+    summary: "normal probability",
+    details: "Continuous probability distribution",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("mu", meanValue), statsMetricNode("sd", sdValue), statsMetricNode("x", xValue)],
+    }),
+    steps: [
+      {
+        title: "Read normal parameters",
+        expression: `mean = ${formatNumber(meanValue)}, sd = ${formatNumber(sdValue)}, x = ${formatNumber(xValue)}`,
+        detail: "A normal model uses a mean and standard deviation.",
+      },
+      {
+        title: "Convert to z-score",
+        expression: `z = (x - mean) / sd = ${formatNumber(z)}`,
+        detail: "The z-score measures how many standard deviations x is from the mean.",
+      },
+      {
+        title: "Evaluate normal CDF",
+        expression: `P(X <= ${formatNumber(xValue)}) = ${formatNumber(leftTail)}`,
+        detail: "The cumulative distribution function gives left-tail probability.",
+      },
+    ],
+    artifacts: [
+      ["z-score", formatNumber(z)],
+      [`P(X <= ${formatNumber(xValue)})`, formatNumber(leftTail)],
+      [`P(X > ${formatNumber(xValue)})`, formatNumber(rightTail)],
+    ],
+  };
+}
+
+function analyzeZScore(statement) {
+  const numbers = parseNumbers(statement);
+  const value = readNamedNumber(statement, ["value", "x"], numbers[0]);
+  const meanValue = readNamedNumber(statement, ["mean", "mu"], numbers[1]);
+  const sdValue = readNamedNumber(statement, ["sd", "sigma", "std"], numbers[2]);
+
+  if (![value, meanValue, sdValue].every(Number.isFinite)) {
+    throw new Error("Use zscore value=85 mean=70 sd=10.");
+  }
+  if (!(sdValue > 0)) {
+    throw new Error("z-score needs a positive standard deviation.");
+  }
+
+  const z = (value - meanValue) / sdValue;
+  const percentile = normalCdf(z);
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "ZSCORE",
+      children: [
+        statsMetricNode("x", value),
+        statsMetricNode("mu", meanValue),
+        statsMetricNode("sd", sdValue),
+        statsMetricNode("z", z),
+      ],
+    },
+    answer: `z = ${formatNumber(z)}`,
+    summary: "z-score",
+    details: "Standardized value",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("x", value), statsMetricNode("mu", meanValue), statsMetricNode("sd", sdValue)],
+    }),
+    steps: [
+      {
+        title: "Read z-score inputs",
+        expression: `x = ${formatNumber(value)}, mean = ${formatNumber(meanValue)}, sd = ${formatNumber(sdValue)}`,
+        detail: "A z-score standardizes a value relative to a distribution.",
+      },
+      {
+        title: "Standardize",
+        expression: `z = (x - mean) / sd = ${formatNumber(z)}`,
+        detail: "Positive z-scores are above the mean; negative z-scores are below it.",
+      },
+    ],
+    artifacts: [
+      ["z-score", formatNumber(z)],
+      ["Approx percentile", formatNumber(percentile)],
+    ],
+  };
+}
+
+function descriptiveSummary(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const count = values.length;
+  const valueMean = mean(values);
+  const valueMedian = median(sorted);
+  const lowerHalf = sorted.slice(0, Math.floor(count / 2));
+  const upperHalf = sorted.slice(Math.ceil(count / 2));
+  const populationVariance = values.reduce((sum, value) => sum + (value - valueMean) ** 2, 0) / count;
+  const sampleVariance = count > 1
+    ? values.reduce((sum, value) => sum + (value - valueMean) ** 2, 0) / (count - 1)
+    : 0;
+
+  return {
+    count,
+    mean: valueMean,
+    median: valueMedian,
+    modes: modes(values),
+    range: sorted[count - 1] - sorted[0],
+    q1: lowerHalf.length ? median(lowerHalf) : sorted[0],
+    q3: upperHalf.length ? median(upperHalf) : sorted[count - 1],
+    iqr: (upperHalf.length ? median(upperHalf) : sorted[count - 1]) -
+      (lowerHalf.length ? median(lowerHalf) : sorted[0]),
+    populationVariance,
+    populationStdDev: Math.sqrt(populationVariance),
+    sampleVariance,
+    sampleStdDev: Math.sqrt(sampleVariance),
+  };
+}
+
+function descriptiveAnswer(statement, summary) {
+  const lower = statement.toLowerCase();
+  if (lower.includes("median")) return `median = ${formatNumber(summary.median)}`;
+  if (lower.includes("mode")) {
+    const value = summary.modes.length ? summary.modes.map(formatNumber).join(", ") : "none";
+    return `mode = ${value}`;
+  }
+  if (lower.includes("variance")) return `sample variance = ${formatNumber(summary.sampleVariance)}`;
+  if (lower.includes("standard deviation") || lower.includes("std") || lower.includes("sd")) {
+    return `sample sd = ${formatNumber(summary.sampleStdDev)}`;
+  }
+  if (lower.includes("mean") || lower.includes("average")) return `mean = ${formatNumber(summary.mean)}`;
+  return `mean = ${formatNumber(summary.mean)}, median = ${formatNumber(summary.median)}, sample sd = ${formatNumber(summary.sampleStdDev)}`;
+}
+
+function parseNumbers(text) {
+  return [...text.matchAll(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)].map((match) => Number(match[0]));
+}
+
+function parseNumberList(text) {
+  return parseNumbers(text);
+}
+
+function parsePairs(text) {
+  return [...text.matchAll(/\(\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s*,\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s*\)/gi)]
+    .map((match) => ({ x: Number(match[1]), y: Number(match[2]) }));
+}
+
+function parseXYLists(text) {
+  const match = text.match(/x\s*[:=]\s*([^;]+);\s*y\s*[:=]\s*([^;]+)/i);
+  if (!match) return null;
+  const x = parseNumberList(match[1]);
+  const y = parseNumberList(match[2]);
+  if (x.length !== y.length || x.length < 2) {
+    throw new Error("x and y lists must have the same length and at least two values.");
+  }
+  return { x, y };
+}
+
+function zipPairs(xValues, yValues) {
+  return xValues.map((x, index) => ({ x, y: yValues[index] }));
+}
+
+function parseNamedProbabilityParams(text) {
+  const named = {};
+  for (const [, key, value] of text.matchAll(/\b([npk])\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/gi)) {
+    named[key.toLowerCase()] = Number(value);
+  }
+
+  if (named.n !== undefined && named.p !== undefined && named.k !== undefined) {
+    return named;
+  }
+
+  const numbers = parseNumbers(text);
+  if (numbers.length >= 3) {
+    return {
+      n: numbers[0],
+      p: numbers[1],
+      k: numbers[2],
+    };
+  }
+
+  throw new Error("Use binomial n=10 p=0.5 k=3.");
+}
+
+function readNamedNumber(text, names, fallback) {
+  for (const name of names) {
+    const match = text.match(new RegExp(`\\b${name}\\s*=\\s*([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)`, "i"));
+    if (match) {
+      return Number(match[1]);
+    }
+  }
+  return fallback;
+}
+
+function mean(values) {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function median(sortedValues) {
+  const middle = Math.floor(sortedValues.length / 2);
+  if (sortedValues.length % 2 === 1) {
+    return sortedValues[middle];
+  }
+  return (sortedValues[middle - 1] + sortedValues[middle]) / 2;
+}
+
+function modes(values) {
+  const counts = new Map();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  const maxCount = Math.max(...counts.values());
+  if (maxCount <= 1) {
+    return [];
+  }
+
+  return [...counts.entries()]
+    .filter(([, count]) => count === maxCount)
+    .map(([value]) => value)
+    .sort((left, right) => left - right);
+}
+
+function binomialProbability(n, p, k) {
+  return combination(n, k) * p ** k * (1 - p) ** (n - k);
+}
+
+function combination(n, k) {
+  const limit = Math.min(k, n - k);
+  let result = 1;
+  for (let index = 1; index <= limit; index += 1) {
+    result = (result * (n - limit + index)) / index;
+  }
+  return result;
+}
+
+function sumRange(start, end, callback) {
+  let total = 0;
+  for (let value = start; value <= end; value += 1) {
+    total += callback(value);
+  }
+  return total;
+}
+
+function normalCdf(z) {
+  return 0.5 * (1 + erf(z / Math.SQRT2));
+}
+
+function erf(value) {
+  const sign = value < 0 ? -1 : 1;
+  const x = Math.abs(value);
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const p = 0.3275911;
+  const t = 1 / (1 + p * x);
+  const approximation = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+  return sign * approximation;
+}
+
+function statsDatasetNode(values, children = [], label = "DATA") {
+  return {
+    kind: "statsDataset",
+    label,
+    values,
+    children: children.length
+      ? children
+      : values.slice(0, 6).map((value) => statsMetricNode("VALUE", value)),
+  };
+}
+
+function statsMetricNode(label, value) {
+  return {
+    kind: "statsMetric",
+    label,
+    value,
+  };
+}
+
+function isDerivativeQuestion(lower) {
+  return lower.includes("derivative") || lower.includes("differentiate") || /d\s*\/\s*d[a-z]\w*/i.test(lower);
+}
+
+function isStatisticsQuestion(lower) {
+  return [
+    "mean",
+    "average",
+    "median",
+    "mode",
+    "variance",
+    "standard deviation",
+    "std",
+    "regression",
+    "correlation",
+    "binomial",
+    "normal",
+    "z-score",
+    "zscore",
+    "probability",
+    "statistics",
+    "dataset",
+  ].some((word) => lower.includes(word)) || parsePairs(lower).length >= 2;
+}
+
+function isLogicQuestion(question) {
+  return /\b(and|or|not|xor|implies|iff)\b|->|<->|=>|&&|\|\|/i.test(question);
+}
+
+function isSimplifyQuestion(lower) {
+  return lower.includes("simplify") || lower.includes("combine like terms");
+}
+
+function looksLikeMathExpression(question) {
+  return /[a-zA-Z0-9)]\s*[\+\-\*\/\^]\s*[-a-zA-Z0-9(]/.test(question);
+}
+
+function extractDerivativeQuestion(question) {
+  const dMatch = question.match(/d\s*\/\s*d([A-Za-z_]\w*)\s+(.+)/i);
+  if (dMatch) {
+    return {
+      variable: dMatch[1],
+      expression: dMatch[2].replace(/[?!.]+$/, "").trim(),
+    };
+  }
+
+  const wordMatch = question.match(/(?:derivative of|differentiate)\s+(.+?)(?:\s+with respect to\s+([A-Za-z_]\w*))?[?!.]*$/i);
+  if (wordMatch) {
+    return {
+      variable: wordMatch[2] ?? "x",
+      expression: wordMatch[1].trim(),
+    };
+  }
+
+  return {
+    variable: "x",
+    expression: cleanSimplifyQuestion(question),
+  };
+}
+
+function cleanLogicQuestion(question) {
+  return question
+    .replace(/^(is|check|evaluate|determine)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+}
+
+function cleanEquationQuestion(question) {
+  return question
+    .replace(/^(solve|find|calculate|compute)\s+/i, "")
+    .replace(/\s+for\s+[A-Za-z_]\w*\s*$/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+}
+
+function cleanSimplifyQuestion(question) {
+  return question
+    .replace(/^(simplify|combine like terms|calculate|compute|what is|find)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+}
+
+function formatSigned(value) {
+  if (value < 0) {
+    return `- ${formatNumber(Math.abs(value))}`;
+  }
+  return `+ ${formatNumber(value)}`;
+}
+
 export function parseLogic(statement) {
   return new LogicParser(tokenizeLogic(statement)).parse();
 }
@@ -1430,6 +2100,7 @@ function isOperatorNode(node) {
 }
 
 export function nodeChildren(node) {
+  if (Array.isArray(node.children)) return node.children;
   if (node.kind === "logicNot") return [node.operand];
   if (node.kind === "logicBinary") return [node.left, node.right];
   if (node.kind === "mathUnary") return [node.operand];
@@ -1450,11 +2121,16 @@ export function nodeLabel(node) {
   if (node.kind === "mathBinary") return node.operator;
   if (node.kind === "mathFunction") return node.name.toUpperCase();
   if (node.kind === "equation") return "=";
+  if (node.kind === "statsDataset") return node.label ?? "DATA";
+  if (node.kind === "statsMetric") return `${node.label}`;
+  if (node.kind === "statsRegression") return "REG";
+  if (node.kind === "statsDistribution") return node.label ?? "DIST";
   return "?";
 }
 
 export function nodeTone(node) {
   if (node.kind.startsWith("logic")) return "logic";
+  if (node.kind.startsWith("stats")) return "statistics";
   if (node.kind === "mathNumber") return "number";
   if (node.kind === "mathSymbol") return "symbol";
   if (node.kind === "mathFunction") return "function";
