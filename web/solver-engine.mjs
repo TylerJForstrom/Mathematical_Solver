@@ -260,6 +260,10 @@ export function analyzeDerivative(statement, variable = "x") {
 export function analyzeStatistics(statement) {
   const lower = statement.toLowerCase();
 
+  if (lower.includes("confidence") || /\bci\b/i.test(statement)) {
+    return analyzeConfidenceInterval(statement);
+  }
+
   if (lower.includes("z-score") || lower.includes("zscore")) {
     return analyzeZScore(statement);
   }
@@ -289,7 +293,10 @@ export function analyzeUniversal(question, values = {}) {
   let routed;
   let routedLabel;
 
-  if (isDerivativeQuestion(lower)) {
+  if (isSystemQuestion(lower)) {
+    routed = analyzeSystem(question);
+    routedLabel = "System";
+  } else if (isDerivativeQuestion(lower)) {
     const request = extractDerivativeQuestion(question);
     routed = analyzeDerivative(request.expression, request.variable);
     routedLabel = "Derivative";
@@ -321,6 +328,82 @@ export function analyzeUniversal(question, values = {}) {
         detail: "The universal solver detects the problem type, then uses the matching tree engine.",
       },
       ...routed.steps,
+    ],
+  };
+}
+
+export function analyzeSystem(statement) {
+  const cleaned = cleanSystemQuestion(statement);
+  const parts = cleaned
+    .split(/[;\n]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length < 2) {
+    throw new Error("System solving needs at least two equations separated by semicolons.");
+  }
+
+  const equations = parts.map((part) => parseMath(part));
+  if (equations.some((equation) => equation.kind !== "equation")) {
+    throw new Error("Every system part must be an equation, such as 2x + y = 5.");
+  }
+
+  const polynomials = equations.map((equation) => polynomialFrom(mathBinary("-", equation.left, equation.right)));
+  if (polynomials.some((polynomial) => !polynomial)) {
+    throw new Error("System solving currently supports linear polynomial equations.");
+  }
+
+  const variables = [...new Set(polynomials.flatMap((polynomial) => polynomialVariables(polynomial)))].sort();
+  if (variables.length === 0) {
+    throw new Error("The system must contain variables.");
+  }
+  if (parts.length !== variables.length) {
+    throw new Error("This solver needs the same number of independent equations as variables.");
+  }
+
+  const rows = polynomials.map((polynomial) => linearPolynomialRow(polynomial, variables));
+  const matrix = rows.map((row) => row.coefficients);
+  const constants = rows.map((row) => row.constant);
+  const solution = solveLinearSystem(matrix, constants);
+
+  const answer = variables
+    .map((variable, index) => `${variable} = ${formatNumber(solution[index])}`)
+    .join(", ");
+
+  const tree = {
+    kind: "system",
+    children: equations,
+  };
+
+  return {
+    mode: "system",
+    tree,
+    answer,
+    summary: "linear system",
+    details: `${variables.length} variables`,
+    variables,
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Parse equations",
+        expression: parts.join("; "),
+        detail: "Each equation is parsed and moved into coefficient form.",
+      },
+      {
+        title: "Build augmented matrix",
+        expression: formatAugmentedMatrix(matrix, constants),
+        detail: "The coefficients become a matrix and the constants become the right-hand side.",
+      },
+      {
+        title: "Use Gaussian elimination",
+        expression: answer,
+        detail: "Row operations isolate each variable.",
+      },
+    ],
+    artifacts: [
+      ["Variables", variables.join(", ")],
+      ["Augmented matrix", formatAugmentedMatrix(matrix, constants)],
+      ["Solution", answer],
     ],
   };
 }
@@ -647,6 +730,67 @@ function analyzeZScore(statement) {
   };
 }
 
+function analyzeConfidenceInterval(statement) {
+  const { level, values } = parseConfidenceInput(statement);
+  if (values.length < 2) {
+    throw new Error("Confidence intervals need at least two data values.");
+  }
+
+  const summary = descriptiveSummary(values);
+  const critical = zCriticalForLevel(level);
+  const standardError = summary.sampleStdDev / Math.sqrt(summary.count);
+  const margin = critical * standardError;
+  const lower = summary.mean - margin;
+  const upper = summary.mean + margin;
+  const percent = formatNumber(level * 100);
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(values, [
+      statsMetricNode("MEAN", summary.mean),
+      statsMetricNode("SE", standardError),
+      statsMetricNode("CI", margin),
+    ]),
+    answer: `${percent}% CI = [${formatNumber(lower)}, ${formatNumber(upper)}]`,
+    summary: "confidence interval",
+    details: "Mean confidence interval using a normal critical value",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(values)),
+    steps: [
+      {
+        title: "Parse confidence request",
+        expression: `${percent}% confidence, n = ${summary.count}`,
+        detail: "The solver extracts the confidence level and dataset.",
+      },
+      {
+        title: "Compute center and spread",
+        expression: `mean = ${formatNumber(summary.mean)}, sample sd = ${formatNumber(summary.sampleStdDev)}`,
+        detail: "The confidence interval is centered at the sample mean.",
+      },
+      {
+        title: "Compute standard error",
+        expression: `SE = sd / sqrt(n) = ${formatNumber(standardError)}`,
+        detail: "Standard error estimates the variability of the sample mean.",
+      },
+      {
+        title: "Build interval",
+        expression: `${formatNumber(summary.mean)} +/- ${formatNumber(margin)}`,
+        detail: "The margin of error is critical value times standard error.",
+      },
+    ],
+    artifacts: [
+      ["Confidence level", `${percent}%`],
+      ["Mean", formatNumber(summary.mean)],
+      ["Sample SD", formatNumber(summary.sampleStdDev)],
+      ["Standard error", formatNumber(standardError)],
+      ["Critical value", formatNumber(critical)],
+      ["Margin of error", formatNumber(margin)],
+      ["Lower bound", formatNumber(lower)],
+      ["Upper bound", formatNumber(upper)],
+    ],
+  };
+}
+
 function descriptiveSummary(values) {
   const sorted = [...values].sort((left, right) => left - right);
   const count = values.length;
@@ -693,6 +837,36 @@ function descriptiveAnswer(statement, summary) {
 
 function parseNumbers(text) {
   return [...text.matchAll(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)].map((match) => Number(match[0]));
+}
+
+function parseConfidenceInput(text) {
+  let level = 0.95;
+  let dataText = text;
+
+  const percentMatch = text.match(/\b(8[0-9]|9[0-9](?:\.\d+)?)\s*%?\s*(?:confidence|ci)\b/i);
+  const equalsMatch = text.match(/\b(?:confidence|ci)\s*(?:level)?\s*=\s*(0?\.\d+|\d+(?:\.\d+)?)/i);
+  if (percentMatch) {
+    level = Number(percentMatch[1]) / 100;
+    dataText = dataText.replace(percentMatch[0], "");
+  } else if (equalsMatch) {
+    const raw = Number(equalsMatch[1]);
+    level = raw > 1 ? raw / 100 : raw;
+    dataText = dataText.replace(equalsMatch[0], "");
+  }
+
+  dataText = dataText
+    .replace(/\bconfidence\b/gi, "")
+    .replace(/\binterval\b/gi, "")
+    .replace(/\bci\b/gi, "")
+    .replace(/\bfor\b/gi, "")
+    .replace(/\bdata\b/gi, "");
+
+  const values = parseNumbers(dataText);
+  if (!(level > 0 && level < 1)) {
+    throw new Error("Confidence level must be between 0 and 1.");
+  }
+
+  return { level, values };
 }
 
 function parseNumberList(text) {
@@ -801,6 +975,31 @@ function sumRange(start, end, callback) {
   return total;
 }
 
+function zCriticalForLevel(level) {
+  if (Math.abs(level - 0.9) < 0.001) return 1.644854;
+  if (Math.abs(level - 0.95) < 0.001) return 1.959964;
+  if (Math.abs(level - 0.99) < 0.001) return 2.575829;
+  const tail = (1 + level) / 2;
+  return inverseNormalCdf(tail);
+}
+
+function inverseNormalCdf(probability) {
+  if (!(probability > 0 && probability < 1)) {
+    throw new Error("Probability must be between 0 and 1.");
+  }
+  let low = -8;
+  let high = 8;
+  for (let index = 0; index < 80; index += 1) {
+    const mid = (low + high) / 2;
+    if (normalCdf(mid) < probability) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return (low + high) / 2;
+}
+
 function normalCdf(z) {
   return 0.5 * (1 + erf(z / Math.SQRT2));
 }
@@ -840,6 +1039,10 @@ function statsMetricNode(label, value) {
 
 function isDerivativeQuestion(lower) {
   return lower.includes("derivative") || lower.includes("differentiate") || /d\s*\/\s*d[a-z]\w*/i.test(lower);
+}
+
+function isSystemQuestion(lower) {
+  return lower.includes("system") || lower.includes("simultaneous equations");
 }
 
 function isStatisticsQuestion(lower) {
@@ -909,6 +1112,15 @@ function cleanEquationQuestion(question) {
   return question
     .replace(/^(solve|find|calculate|compute)\s+/i, "")
     .replace(/\s+for\s+[A-Za-z_]\w*\s*$/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+}
+
+function cleanSystemQuestion(question) {
+  return question
+    .replace(/^(solve|find|calculate|compute)\s+/i, "")
+    .replace(/\bsystem\s*(?:of equations)?\s*:?\s*/i, "")
+    .replace(/\bsimultaneous equations\s*:?\s*/i, "")
     .replace(/[?!.]+$/, "")
     .trim();
 }
@@ -1756,6 +1968,72 @@ function polynomialVariables(poly) {
   return [...names].sort();
 }
 
+function linearPolynomialRow(poly, variables) {
+  const coefficients = Object.fromEntries(variables.map((variable) => [variable, 0]));
+  let constant = 0;
+
+  for (const [key, coefficient] of poly.entries()) {
+    if (!key) {
+      constant += coefficient;
+      continue;
+    }
+
+    const powers = powersFromKey(key);
+    const entries = Object.entries(powers);
+    if (entries.length !== 1 || entries[0][1] !== 1) {
+      throw new Error("System solving currently supports linear equations only.");
+    }
+
+    const [variable] = entries[0];
+    coefficients[variable] += coefficient;
+  }
+
+  return {
+    coefficients: variables.map((variable) => normalizeNumber(coefficients[variable])),
+    constant: normalizeNumber(-constant),
+  };
+}
+
+function solveLinearSystem(matrix, constants) {
+  const size = matrix.length;
+  const augmented = matrix.map((row, index) => [...row, constants[index]]);
+
+  for (let column = 0; column < size; column += 1) {
+    let pivot = column;
+    for (let row = column + 1; row < size; row += 1) {
+      if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) {
+        pivot = row;
+      }
+    }
+
+    if (nearlyEqual(augmented[pivot][column], 0)) {
+      throw new Error("The system has no unique solution.");
+    }
+
+    [augmented[column], augmented[pivot]] = [augmented[pivot], augmented[column]];
+    const pivotValue = augmented[column][column];
+    for (let col = column; col <= size; col += 1) {
+      augmented[column][col] /= pivotValue;
+    }
+
+    for (let row = 0; row < size; row += 1) {
+      if (row === column) continue;
+      const factor = augmented[row][column];
+      for (let col = column; col <= size; col += 1) {
+        augmented[row][col] -= factor * augmented[column][col];
+      }
+    }
+  }
+
+  return augmented.map((row) => normalizeNumber(row[size]));
+}
+
+function formatAugmentedMatrix(matrix, constants) {
+  return matrix
+    .map((row, index) => `[${row.map(formatNumber).join(", ")} | ${formatNumber(constants[index])}]`)
+    .join("; ");
+}
+
 function chooseVariable(variableNames, hint) {
   if (variableNames.includes(hint)) {
     return hint;
@@ -1825,14 +2103,24 @@ function solvePolynomial(poly, variable) {
     };
   }
 
+  const numericRoots = approximateRealPolynomialRoots(coefficients);
   return {
-    answer: `degree ${degree} polynomial`,
-    summary: "unsupported degree",
+    answer: numericRoots.length
+      ? numericRoots.map((root) => `${variable} ≈ ${formatNumber(root)}`).join(", ")
+      : "no real roots found",
+    summary: numericRoots.length ? "numeric roots" : "no real roots found",
     steps: [
       {
         title: "Detect polynomial degree",
         expression: `degree ${degree}`,
-        detail: "The browser demo currently solves constant, linear, and quadratic equations.",
+        detail: "For degree three and higher, the browser solver switches to numerical approximation.",
+      },
+      {
+        title: "Search for sign changes",
+        expression: numericRoots.length
+          ? numericRoots.map((root) => formatNumber(root)).join(", ")
+          : "none found",
+        detail: "The solver scans real-number intervals and refines roots with bisection.",
       },
     ],
   };
@@ -1859,6 +2147,67 @@ function polynomialDegree(coefficients) {
     }
   }
   return 0;
+}
+
+function approximateRealPolynomialRoots(coefficients) {
+  const roots = [];
+  const min = -50;
+  const max = 50;
+  const step = 0.25;
+  let previousX = min;
+  let previousY = evaluatePolynomialCoefficients(coefficients, previousX);
+
+  for (let x = min + step; x <= max; x += step) {
+    const y = evaluatePolynomialCoefficients(coefficients, x);
+    if (nearlyEqual(y, 0)) {
+      roots.push(x);
+    } else if (previousY * y < 0) {
+      roots.push(bisectPolynomialRoot(coefficients, previousX, x));
+    }
+    previousX = x;
+    previousY = y;
+  }
+
+  return uniqueSortedNumbers(roots.map((root) => normalizeNumber(root)));
+}
+
+function evaluatePolynomialCoefficients(coefficients, x) {
+  return coefficients.reduce((sum, coefficient, power) => sum + (coefficient ?? 0) * x ** power, 0);
+}
+
+function bisectPolynomialRoot(coefficients, lowStart, highStart) {
+  let low = lowStart;
+  let high = highStart;
+  let lowValue = evaluatePolynomialCoefficients(coefficients, low);
+
+  for (let index = 0; index < 80; index += 1) {
+    const mid = (low + high) / 2;
+    const midValue = evaluatePolynomialCoefficients(coefficients, mid);
+    if (nearlyEqual(midValue, 0)) {
+      return mid;
+    }
+    if (lowValue * midValue < 0) {
+      high = mid;
+    } else {
+      low = mid;
+      lowValue = midValue;
+    }
+  }
+
+  return (low + high) / 2;
+}
+
+function uniqueSortedNumbers(values) {
+  const sorted = values
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right);
+  const unique = [];
+  for (const value of sorted) {
+    if (unique.every((existing) => Math.abs(existing - value) > 1e-5)) {
+      unique.push(value);
+    }
+  }
+  return unique;
 }
 
 function quadraticRoots(a, b, c, discriminant) {
@@ -2125,12 +2474,14 @@ export function nodeLabel(node) {
   if (node.kind === "statsMetric") return `${node.label}`;
   if (node.kind === "statsRegression") return "REG";
   if (node.kind === "statsDistribution") return node.label ?? "DIST";
+  if (node.kind === "system") return "SYSTEM";
   return "?";
 }
 
 export function nodeTone(node) {
   if (node.kind.startsWith("logic")) return "logic";
   if (node.kind.startsWith("stats")) return "statistics";
+  if (node.kind === "system") return "equation";
   if (node.kind === "mathNumber") return "number";
   if (node.kind === "mathSymbol") return "symbol";
   if (node.kind === "mathFunction") return "function";

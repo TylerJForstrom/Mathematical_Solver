@@ -6,6 +6,7 @@ import {
   analyzeLogic,
   analyzeSimplification,
   analyzeStatistics,
+  analyzeSystem,
   analyzeUniversal,
 } from "./solver-engine.mjs";
 
@@ -87,6 +88,27 @@ runTest("statistics mode computes z-scores", () => {
   assert.equal(result.answer, "z = 1.5");
 });
 
+runTest("statistics mode computes confidence intervals", () => {
+  const result = analyzeStatistics("95 confidence interval for 10, 12, 14, 16, 18");
+
+  assert.equal(result.summary, "confidence interval");
+  assert.equal(result.answer, "95% CI = [11.228192, 16.771808]");
+});
+
+runTest("system solver handles two-variable systems", () => {
+  const result = analyzeSystem("2x + y = 5; x - y = 1");
+
+  assert.equal(result.summary, "linear system");
+  assert.equal(result.answer, "x = 2, y = 1");
+});
+
+runTest("equation mode approximates higher-degree real roots", () => {
+  const result = analyzeEquation("x^3 - x - 2 = 0", "x");
+
+  assert.equal(result.summary, "numeric roots");
+  assert.equal(result.answer, "x ≈ 1.52138");
+});
+
 runTest("universal mode routes statistics questions", () => {
   const result = analyzeUniversal("what is the median of 1, 7, 9?");
 
@@ -99,4 +121,11 @@ runTest("universal mode routes derivative questions", () => {
 
   assert.equal(result.summary, "derivative");
   assert.equal(result.answer, "3x^2");
+});
+
+runTest("universal mode routes systems", () => {
+  const result = analyzeUniversal("solve system 2x + y = 5; x - y = 1");
+
+  assert.equal(result.summary, "linear system");
+  assert.equal(result.answer, "x = 2, y = 1");
 });
