@@ -15,15 +15,15 @@ The frontend currently supports:
 - Linear and quadratic equation solving
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations through Universal Ask mode
-- Matrix determinants, inverses, and multiplication
+- Matrix determinants, inverses, multiplication, row reduction, rank, and 2x2 eigenvalues
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
 - Polynomial indefinite and definite integrals
 - Polynomial critical points and local max/min classification
 - Function graphing with sampled SVG plots
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression and correlation for coordinate pairs
-- Confidence intervals, one-sample and two-sample t tests, chi-square goodness-of-fit,
-  binomial probability, normal probability, and z-score calculations
+- Confidence intervals, one-sample/two-sample/paired t tests, one-way ANOVA,
+  chi-square goodness-of-fit, binomial probability, normal probability, and z-score calculations
 - Newton and bisection numerical root solvers
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
@@ -72,6 +72,8 @@ The same idea works for algebra and calculus:
 - `x^2 - 5x + 6 = 0` becomes an equation node with left and right expression trees.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
 - `det [[1,2],[3,4]]` becomes a matrix-operation tree.
+- `rref [[1,2,1],[2,4,2],[1,1,0]]` becomes a row-operation tree with rank and pivots.
+- `eigen [[2,1],[1,2]]` solves the 2x2 characteristic polynomial.
 - `integrate x^2 from 0 to 3` builds an antiderivative tree and evaluates the bounds.
 - `maximize -x^2 + 4x + 1` differentiates, solves critical points, and classifies them.
 - `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
@@ -127,7 +129,8 @@ The demo includes:
 - Expression-tree visualization
 - Truth tables for logic mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
-  normal probability, z-scores, one-sample/two-sample t tests, and chi-square tests in Stats mode
+  normal probability, z-scores, one-sample/two-sample/paired t tests, ANOVA,
+  and chi-square tests in Stats mode
 - Systems of equations, matrices, integrals, optimization, graphing, and numerical roots through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
@@ -155,8 +158,8 @@ These are good ways to make the project more impressive mathematically:
 2. Add exact radical output for quadratic equations with irrational roots.
 3. Add trigonometric simplification identities.
 4. Add more symbolic integration rules for trig, exponential, and logarithmic functions.
-5. Add ANOVA, paired t-tests, and exact t-distribution p-values.
-6. Add eigenvalues, eigenvectors, row reduction, and matrix rank.
+5. Add exact t-distribution p-values and post-hoc tests for ANOVA.
+6. Add eigenvectors, row-space/null-space bases, and larger-matrix eigenvalue approximation.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add multi-step natural-language explanations for word problems.
 9. Add exact symbolic roots for cubic and quartic equations when possible.
