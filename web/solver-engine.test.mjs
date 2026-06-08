@@ -160,12 +160,36 @@ runTest("statistics mode computes confidence intervals", () => {
   assert.equal(result.answer, "95% CI = [11.228192, 16.771808]");
 });
 
+runTest("statistics mode computes one-proportion confidence intervals", () => {
+  const result = analyzeStatistics("proportion ci successes=42 n=100 confidence=95");
+
+  assert.equal(result.summary, "one-proportion confidence interval");
+  assert.equal(result.answer, "95% CI for p = [0.323264, 0.516736]");
+  assert.equal(artifactValue(result, "Sample proportion"), "0.42");
+});
+
 runTest("statistics mode computes one-sample tests", () => {
   const result = analyzeStatistics("t-test mean=10 data 8, 9, 11, 12, 10");
 
   assert.equal(result.summary, "one-sample t test");
   assert.equal(result.answer, "t = 0, p = 1");
   assert.equal(artifactValue(result, "Cohen's d"), "0");
+});
+
+runTest("statistics mode computes one-proportion z tests", () => {
+  const result = analyzeStatistics("one-proportion z-test successes=56 n=100 p0=0.5");
+
+  assert.equal(result.summary, "one-proportion z test");
+  assert.equal(result.answer, "z = 1.2, p = 0.230139");
+  assert.equal(artifactValue(result, "Cohen's h"), "0.12029");
+});
+
+runTest("statistics mode computes two-proportion z tests", () => {
+  const result = analyzeStatistics("two-proportion z-test successes1=56 n1=100 successes2=44 n2=100");
+
+  assert.equal(result.summary, "two-proportion z test");
+  assert.equal(result.answer, "z = 1.697056, p = 0.089686");
+  assert.equal(artifactValue(result, "95% CI for difference"), "[-0.017589, 0.257589]");
 });
 
 runTest("statistics mode computes two-sample tests", () => {
@@ -425,6 +449,9 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
+  assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
+  assert.equal(analyzeUniversal("one-proportion z-test successes=56 n=100 p0=0.5").summary, "one-proportion z test");
+  assert.equal(analyzeUniversal("two-proportion z-test successes1=56 n1=100 successes2=44 n2=100").summary, "two-proportion z test");
   assert.equal(analyzeUniversal("chi-square observed 10,20,30 expected 15,15,30").summary, "chi-square goodness-of-fit");
   assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");

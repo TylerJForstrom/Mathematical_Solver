@@ -411,6 +411,18 @@ export function analyzeStatistics(statement) {
     return analyzeChiSquare(statement);
   }
 
+  if (lower.includes("proportion")) {
+    if (lower.includes("two-proportion") || lower.includes("two proportion") || lower.includes("two-sample") || lower.includes("two sample")) {
+      return analyzeTwoProportionZTest(statement);
+    }
+    if (lower.includes("confidence") || /\bci\b/i.test(statement)) {
+      return analyzeProportionConfidenceInterval(statement);
+    }
+    if (lower.includes("test") || lower.includes("z-test") || lower.includes("z test") || lower.includes("hypothesis")) {
+      return analyzeOneProportionZTest(statement);
+    }
+  }
+
   if (
     lower.includes("two-sample") ||
     lower.includes("two sample") ||
@@ -1828,6 +1840,209 @@ function analyzeChiSquare(statement) {
       ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["p-value", formatNumber(pValue)],
       ["Cohen's w", formatNumber(cohensW)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeProportionConfidenceInterval(statement) {
+  const { successes, total, level } = parseOneProportionInput(statement, { needsNull: false });
+  const proportion = successes / total;
+  const critical = zCriticalForLevel(level);
+  const standardError = Math.sqrt((proportion * (1 - proportion)) / total);
+  const margin = critical * standardError;
+  const lower = Math.max(0, proportion - margin);
+  const upper = Math.min(1, proportion + margin);
+  const percent = formatNumber(level * 100);
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode([successes, total], [
+      statsMetricNode("p-hat", proportion),
+      statsMetricNode("SE", standardError),
+      statsMetricNode("CI", margin),
+    ], "PROP CI"),
+    answer: `${percent}% CI for p = [${formatNumber(lower)}, ${formatNumber(upper)}]`,
+    summary: "one-proportion confidence interval",
+    details: "Normal approximation for a population proportion",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([successes, total])),
+    steps: [
+      {
+        title: "Read sample proportion",
+        expression: `${formatNumber(successes)} successes out of ${formatNumber(total)}`,
+        detail: "The sample proportion estimates the population proportion.",
+      },
+      {
+        title: "Compute standard error",
+        expression: `SE = sqrt(p-hat(1 - p-hat) / n) = ${formatNumber(standardError)}`,
+        detail: "The normal approximation uses the estimated sampling variation of p-hat.",
+      },
+      {
+        title: "Build confidence interval",
+        expression: `${formatNumber(proportion)} +/- ${formatNumber(margin)}`,
+        detail: "The margin of error is z critical value times standard error.",
+      },
+    ],
+    table: {
+      headers: ["Successes", "n", "p-hat", "Standard error"],
+      rows: [[formatNumber(successes), formatNumber(total), formatNumber(proportion), formatNumber(standardError)]],
+    },
+    artifacts: [
+      ["Confidence level", `${percent}%`],
+      ["Sample proportion", formatNumber(proportion)],
+      ["Standard error", formatNumber(standardError)],
+      ["Critical value", formatNumber(critical)],
+      ["Margin of error", formatNumber(margin)],
+      ["Lower bound", formatNumber(lower)],
+      ["Upper bound", formatNumber(upper)],
+    ],
+  };
+}
+
+function analyzeOneProportionZTest(statement) {
+  const { successes, total, nullProportion, alternative, alpha } = parseOneProportionInput(statement, { needsNull: true });
+  const proportion = successes / total;
+  const standardError = Math.sqrt((nullProportion * (1 - nullProportion)) / total);
+  if (!(standardError > 0)) {
+    throw new Error("One-proportion z tests need a null proportion strictly between 0 and 1.");
+  }
+  const zStatistic = (proportion - nullProportion) / standardError;
+  const pValue = pValueForNormal(zStatistic, alternative);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const cohensH = proportionEffectSize(proportion, nullProportion);
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode([successes, total], [
+      statsMetricNode("p-hat", proportion),
+      statsMetricNode("p0", nullProportion),
+      statsMetricNode("Z", zStatistic),
+      statsMetricNode("P", pValue),
+    ], "PROP TEST"),
+    answer: `z = ${formatNumber(zStatistic)}, p = ${formatNumber(pValue)}`,
+    summary: "one-proportion z test",
+    details: `${alternative} alternative for a population proportion`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([successes, total])),
+    steps: [
+      {
+        title: "Read proportion test",
+        expression: `H0: p = ${formatNumber(nullProportion)}, p-hat = ${formatNumber(proportion)}`,
+        detail: "The solver compares the observed sample proportion to a null proportion.",
+      },
+      {
+        title: "Compute null standard error",
+        expression: `SE0 = sqrt(p0(1 - p0) / n) = ${formatNumber(standardError)}`,
+        detail: "The test statistic uses the sampling variation expected under the null hypothesis.",
+      },
+      {
+        title: "Compute z statistic",
+        expression: `z = (p-hat - p0) / SE0 = ${formatNumber(zStatistic)}`,
+        detail: "The z statistic measures how far the sample proportion is from the null.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `p = ${formatNumber(pValue)}`,
+        detail: "The p-value uses the standard normal distribution.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values give evidence against the null proportion.",
+      },
+    ],
+    artifacts: [
+      ["Successes", formatNumber(successes)],
+      ["Sample size", formatNumber(total)],
+      ["Sample proportion", formatNumber(proportion)],
+      ["Null proportion", formatNumber(nullProportion)],
+      ["Standard error under H0", formatNumber(standardError)],
+      ["z statistic", formatNumber(zStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Cohen's h", formatNumber(cohensH)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeTwoProportionZTest(statement) {
+  const { leftSuccesses, leftTotal, rightSuccesses, rightTotal, alternative, alpha } = parseTwoProportionInput(statement);
+  const leftProportion = leftSuccesses / leftTotal;
+  const rightProportion = rightSuccesses / rightTotal;
+  const difference = leftProportion - rightProportion;
+  const pooled = (leftSuccesses + rightSuccesses) / (leftTotal + rightTotal);
+  const pooledStandardError = Math.sqrt(pooled * (1 - pooled) * (1 / leftTotal + 1 / rightTotal));
+  if (!(pooledStandardError > 0)) {
+    throw new Error("Two-proportion z tests need pooled sample variation.");
+  }
+  const zStatistic = difference / pooledStandardError;
+  const pValue = pValueForNormal(zStatistic, alternative);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const unpooledStandardError = Math.sqrt(
+    (leftProportion * (1 - leftProportion)) / leftTotal +
+    (rightProportion * (1 - rightProportion)) / rightTotal,
+  );
+  const margin = zCriticalForLevel(0.95) * unpooledStandardError;
+  const cohensH = proportionEffectSize(leftProportion, rightProportion);
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode([leftSuccesses, leftTotal, rightSuccesses, rightTotal], [
+      statsMetricNode("p1", leftProportion),
+      statsMetricNode("p2", rightProportion),
+      statsMetricNode("Z", zStatistic),
+      statsMetricNode("P", pValue),
+    ], "2 PROP"),
+    answer: `z = ${formatNumber(zStatistic)}, p = ${formatNumber(pValue)}`,
+    summary: "two-proportion z test",
+    details: `${alternative} alternative for two population proportions`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([leftSuccesses, leftTotal, rightSuccesses, rightTotal])),
+    steps: [
+      {
+        title: "Read two proportions",
+        expression: `p1-hat = ${formatNumber(leftProportion)}, p2-hat = ${formatNumber(rightProportion)}`,
+        detail: "The solver compares two independent sample proportions.",
+      },
+      {
+        title: "Pool under H0",
+        expression: `pooled p = ${formatNumber(pooled)}`,
+        detail: "The null hypothesis assumes the population proportions are equal.",
+      },
+      {
+        title: "Compute z statistic",
+        expression: `z = (${formatNumber(leftProportion)} - ${formatNumber(rightProportion)}) / ${formatNumber(pooledStandardError)} = ${formatNumber(zStatistic)}`,
+        detail: "The statistic measures the observed difference in pooled-standard-error units.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `p = ${formatNumber(pValue)}`,
+        detail: "The p-value uses the standard normal distribution.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the two population proportions differ.",
+      },
+    ],
+    table: {
+      headers: ["Group", "Successes", "n", "p-hat"],
+      rows: [
+        ["1", formatNumber(leftSuccesses), formatNumber(leftTotal), formatNumber(leftProportion)],
+        ["2", formatNumber(rightSuccesses), formatNumber(rightTotal), formatNumber(rightProportion)],
+      ],
+    },
+    artifacts: [
+      ["Group 1 proportion", formatNumber(leftProportion)],
+      ["Group 2 proportion", formatNumber(rightProportion)],
+      ["Difference", formatNumber(difference)],
+      ["Pooled proportion", formatNumber(pooled)],
+      ["Pooled standard error", formatNumber(pooledStandardError)],
+      ["z statistic", formatNumber(zStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Cohen's h", formatNumber(cohensH)],
+      ["95% CI for difference", `[${formatNumber(difference - margin)}, ${formatNumber(difference + margin)}]`],
       ["Decision", decision],
     ],
   };
@@ -3532,6 +3747,81 @@ function parseChiSquareInput(text) {
   throw new Error("Use chi-square observed 10, 20, 30 expected 15, 15, 30.");
 }
 
+function parseOneProportionInput(text, { needsNull }) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const numbers = parseNumbers(cleaned);
+  const successes = readNamedNumber(cleaned, ["successes", "success", "x", "count"], numbers[0]);
+  const total = readNamedNumber(cleaned, ["n", "trials", "total", "sample"], numbers[1]);
+  validateProportionCount(successes, total, "One-proportion statistics");
+
+  const nullFallback = numbers.length >= 3 ? numbers[2] : Number.NaN;
+  const nullProportion = readNamedNumber(cleaned, ["p0", "null", "hypothesized", "p"], nullFallback);
+  if (needsNull && !(nullProportion >= 0 && nullProportion <= 1)) {
+    throw new Error("One-proportion z tests need a null proportion, such as p0=0.5.");
+  }
+
+  return {
+    successes,
+    total,
+    nullProportion,
+    alpha,
+    alternative: parseAlternative(text),
+    level: parseConfidenceLevel(text, 0.95),
+  };
+}
+
+function parseTwoProportionInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const numbers = parseNumbers(cleaned);
+  const leftSuccesses = readNamedNumber(cleaned, ["successes1", "success1", "x1", "count1"], numbers[0]);
+  const leftTotal = readNamedNumber(cleaned, ["n1", "trials1", "total1", "sample1"], numbers[1]);
+  const rightSuccesses = readNamedNumber(cleaned, ["successes2", "success2", "x2", "count2"], numbers[2]);
+  const rightTotal = readNamedNumber(cleaned, ["n2", "trials2", "total2", "sample2"], numbers[3]);
+  validateProportionCount(leftSuccesses, leftTotal, "Two-proportion z tests group 1");
+  validateProportionCount(rightSuccesses, rightTotal, "Two-proportion z tests group 2");
+
+  return {
+    leftSuccesses,
+    leftTotal,
+    rightSuccesses,
+    rightTotal,
+    alpha,
+    alternative: parseAlternative(text),
+  };
+}
+
+function parseConfidenceLevel(text, fallback) {
+  const named = readNamedNumber(text, ["confidence", "level"], Number.NaN);
+  if (Number.isFinite(named)) {
+    const level = named > 1 ? named / 100 : named;
+    if (!(level > 0 && level < 1)) {
+      throw new Error("Confidence level must be between 0 and 1, or between 0 and 100 percent.");
+    }
+    return level;
+  }
+
+  const phraseMatch = text.match(/\b([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s*%?\s*(?:confidence|ci)\b/i);
+  if (phraseMatch) {
+    const raw = Number(phraseMatch[1]);
+    const level = raw > 1 ? raw / 100 : raw;
+    if (!(level > 0 && level < 1)) {
+      throw new Error("Confidence level must be between 0 and 1, or between 0 and 100 percent.");
+    }
+    return level;
+  }
+
+  return fallback;
+}
+
+function validateProportionCount(successes, total, context) {
+  if (!Number.isInteger(successes) || !Number.isInteger(total)) {
+    throw new Error(`${context} need integer successes and sample size.`);
+  }
+  if (total <= 0 || successes < 0 || successes > total) {
+    throw new Error(`${context} need 0 <= successes <= n and n > 0.`);
+  }
+}
+
 function extractAlpha(text) {
   const match = text.match(/\balpha\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
   const alpha = match ? Number(match[1]) : 0.05;
@@ -3575,6 +3865,10 @@ function pValueForNormal(statistic, alternative) {
     return 1 - cdf;
   }
   return Math.min(1, 2 * Math.min(cdf, 1 - cdf));
+}
+
+function proportionEffectSize(leftProportion, rightProportion) {
+  return 2 * Math.asin(Math.sqrt(leftProportion)) - 2 * Math.asin(Math.sqrt(rightProportion));
 }
 
 function pooledSampleStdDev(leftSummary, rightSummary) {
@@ -4152,6 +4446,11 @@ function isStatisticsQuestion(lower) {
     "prior",
     "sensitivity",
     "specificity",
+    "proportion",
+    "successes",
+    "p0",
+    "z-test",
+    "z test",
     "probability",
     "statistics",
     "dataset",

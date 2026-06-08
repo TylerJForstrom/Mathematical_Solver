@@ -28,6 +28,7 @@ The frontend currently supports:
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression and correlation for coordinate pairs
 - Confidence intervals, one-sample/two-sample/paired t tests with Student t p-values,
+  one-proportion/two-proportion z tests, proportion confidence intervals,
   one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis,
   chi-square goodness-of-fit, binomial probability, Poisson probability, normal
   probability, discrete expected value/variance, Bayes theorem, and z-score
@@ -102,6 +103,8 @@ The same idea works for algebra and calculus:
   and computes a nonparametric U test.
 - `ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10` reports F,
   p-value, eta squared, omega squared, and pairwise comparisons.
+- `two-proportion z-test successes1=56 n1=100 successes2=44 n2=100` compares
+  two sample proportions and reports `z = 1.697056, p = 0.089686`.
 - `expected value values: 0,1,2 probabilities: 0.2,0.5,0.3` treats the
   inputs as a probability mass function and returns `E(X) = 1.1`.
 - `bayes prior=0.01 sensitivity=0.99 specificity=0.95` updates the prior and
@@ -160,9 +163,9 @@ The demo includes:
 - Polynomial inequalities with interval answers through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
   Poisson probability, normal probability, z-scores, discrete expected value,
-  Bayes theorem, one-sample/two-sample/paired t tests, ANOVA, chi-square tests,
-  nonparametric rank tests, effect sizes, and pairwise follow-up summaries in
-  Stats mode
+  Bayes theorem, one-sample/two-sample/paired t tests, one-proportion/two-proportion
+  z tests, proportion confidence intervals, ANOVA, chi-square tests, nonparametric
+  rank tests, effect sizes, and pairwise follow-up summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
   graphing, and numerical roots through Ask mode
 - Step-by-step explanation cards
