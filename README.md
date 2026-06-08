@@ -1,16 +1,21 @@
 # Mathematical Solver
 
-Mathematical Solver is a browser-based symbolic math and logic workbench. It
-parses problems into expression trees, then uses those trees to evaluate logic,
-simplify algebra, solve equations, compute derivatives, and explain the work
-step by step.
+Mathematical Solver is a browser-based symbolic math, statistics, and logic
+workbench. It parses problems into expression trees or statistical models, then
+uses those structures to evaluate logic, simplify algebra, solve equations,
+compute derivatives, summarize datasets, run regression, compute probability,
+and explain the work step by step.
 
 The frontend currently supports:
 
+- Universal Ask mode that routes common math questions to the right solver
 - Propositional logic evaluation and truth tables
 - Algebra simplification with constants and like terms
 - Linear and quadratic equation solving
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
+- Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
+- Linear regression and correlation for coordinate pairs
+- Binomial probability, normal probability, and z-score calculations
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
 
@@ -56,6 +61,7 @@ The same idea works for algebra and calculus:
 - `2x + 3x` becomes a tree with `+` at the root and multiplication below it.
 - `x^3` becomes a power node, so the derivative engine can apply the power rule.
 - `x^2 - 5x + 6 = 0` becomes an equation node with left and right expression trees.
+- `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
 
 ## Run It
 
@@ -101,11 +107,12 @@ web/index.html
 
 The demo includes:
 
-- Four simple modes: Equation, Simplify, Derivative, and Logic
+- Six simple modes: Ask, Equation, Simplify, Derivative, Stats, and Logic
 - A single problem input with example buttons
 - A clear answer area
 - Expression-tree visualization
 - Truth tables for logic mode
+- Dataset summaries, regression/correlation, binomial probability, normal probability, and z-scores in Stats mode
 - Step-by-step explanation cards
 - Tree complexity metrics
 
@@ -128,22 +135,27 @@ node web/solver-engine.test.mjs
 
 These are good ways to make the project more impressive mathematically:
 
-1. Add exact radical output for quadratic equations with irrational roots.
-2. Add trigonometric simplification identities.
-3. Add definite and indefinite integration for common functions.
-4. Add systems of linear equations with Gaussian elimination.
-5. Convert logic statements to negation normal form, conjunctive normal form, and
+1. Add a formal problem-router grammar for more natural-language questions.
+2. Add exact radical output for quadratic equations with irrational roots.
+3. Add trigonometric simplification identities.
+4. Add definite and indefinite integration for common functions.
+5. Add systems of linear equations with Gaussian elimination.
+6. Add hypothesis tests, confidence intervals, t-tests, and chi-square tests.
+7. Add matrix operations: determinants, inverses, eigenvalues, and row reduction.
+8. Add numerical methods such as Newton's method and bisection.
+9. Add graphing for functions, distributions, and regression lines.
+10. Convert logic statements to negation normal form, conjunctive normal form, and
    disjunctive normal form.
-6. Add Boolean algebra simplification rules, such as idempotent laws,
+11. Add Boolean algebra simplification rules, such as idempotent laws,
    absorption laws, De Morgan's laws, and double-negation elimination.
-7. Build a small SAT solver using the DPLL algorithm instead of checking every
+12. Build a small SAT solver using the DPLL algorithm instead of checking every
    truth-table row.
-8. Generate formal proof steps for tautologies using natural deduction or
+13. Generate formal proof steps for tautologies using natural deduction or
    sequent calculus.
-9. Add semantic tableaux, which are also tree-based, to prove whether a
+14. Add semantic tableaux, which are also tree-based, to prove whether a
    statement is satisfiable.
-10. Add Karnaugh maps for statements with two to four variables.
-11. Export expression trees to Graphviz DOT so the parse tree can be visualized.
-12. Add binary decision diagrams to represent equivalent formulas compactly.
-13. Add probability or fuzzy truth values so statements can evaluate beyond
+15. Add Karnaugh maps for statements with two to four variables.
+16. Export expression trees to Graphviz DOT so the parse tree can be visualized.
+17. Add binary decision diagrams to represent equivalent formulas compactly.
+18. Add probability or fuzzy truth values so statements can evaluate beyond
     simple true/false logic.
