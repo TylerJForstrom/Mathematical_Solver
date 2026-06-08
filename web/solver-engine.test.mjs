@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   analyzeDerivative,
   analyzeEquation,
+  analyzeFactoring,
   analyzeGraph,
   analyzeIntegral,
   analyzeLogic,
@@ -35,6 +36,34 @@ runTest("simplify mode combines like terms", () => {
   const result = analyzeSimplification("2x + 3x - 4 + 10");
 
   assert.equal(result.answer, "5x + 6");
+});
+
+runTest("factoring mode factors quadratics over rationals", () => {
+  const result = analyzeFactoring("factor x^2 - 5x + 6");
+
+  assert.equal(result.summary, "rational factorization");
+  assert.equal(result.answer, "(x - 2)(x - 3)");
+});
+
+runTest("factoring mode handles leading coefficients", () => {
+  const result = analyzeFactoring("factor 2x^2 + 7x + 3");
+
+  assert.equal(result.summary, "rational factorization");
+  assert.equal(result.answer, "(2x + 1)(x + 3)");
+});
+
+runTest("factoring mode handles cubic rational roots", () => {
+  const result = analyzeFactoring("factor x^3 - 6x^2 + 11x - 6");
+
+  assert.equal(result.summary, "rational factorization");
+  assert.equal(result.answer, "(x - 1)(x - 2)(x - 3)");
+});
+
+runTest("factoring mode leaves irreducible factors", () => {
+  const result = analyzeFactoring("factor x^4 - 1");
+
+  assert.equal(result.summary, "rational factorization");
+  assert.equal(result.answer, "(x + 1)(x - 1)(x^2 + 1)");
 });
 
 runTest("equation mode solves quadratics", () => {
@@ -345,6 +374,7 @@ runTest("universal mode routes systems", () => {
 
 runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("det [[1,2],[3,4]]").summary, "determinant");
+  assert.equal(analyzeUniversal("factor x^2 - 5x + 6").answer, "(x - 2)(x - 3)");
   assert.equal(analyzeUniversal("integrate x^2").summary, "indefinite integral");
   assert.equal(analyzeUniversal("integrate x^2 from 0 to 3").summary, "definite integral");
   assert.equal(analyzeUniversal("integrate sin(x)").answer, "-cos(x) + C");

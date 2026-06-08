@@ -151,6 +151,59 @@ export function analyzeSimplification(statement) {
   };
 }
 
+export function analyzeFactoring(statement, variableHint = "x") {
+  const parsed = parseMath(cleanFactorQuestion(statement));
+  const expression = parsed.kind === "equation" ? mathBinary("-", parsed.left, parsed.right) : parsed;
+  const steps = [
+    {
+      title: "Parse expression",
+      expression: parsed.kind === "equation"
+        ? `${formatMath(parsed.left)} - (${formatMath(parsed.right)})`
+        : formatMath(parsed),
+      detail: "The input is converted into a polynomial expression tree.",
+    },
+  ];
+
+  const simplified = simplifyNode(expression, steps);
+  const polynomial = polynomialFrom(simplified);
+  if (!polynomial) {
+    throw new Error("Factoring mode currently supports one-variable polynomials.");
+  }
+
+  const variableNames = polynomialVariables(polynomial);
+  const variable = chooseVariable(variableNames, variableHint);
+  if (variableNames.length > 1) {
+    throw new Error("Factoring mode currently supports one-variable polynomials.");
+  }
+
+  const polynomialText = formatPolynomial(polynomial);
+  steps.push({
+    title: "Collect polynomial terms",
+    expression: polynomialText,
+    detail: "Constants and like terms are combined before factoring.",
+  });
+
+  const factorization = factorPolynomialOverRationals(polynomial, variable);
+  steps.push(...factorization.steps);
+
+  return {
+    mode: "factor",
+    tree: parsed,
+    answer: factorization.answer,
+    summary: factorization.summary,
+    details: `Factoring over rational roots${variable ? ` in ${variable}` : ""}`,
+    variables: variableNames,
+    metrics: treeMetrics(parsed),
+    steps,
+    artifacts: [
+      ["Polynomial", polynomialText],
+      ["Factored form", factorization.answer],
+      ["Rational roots", factorization.roots.length ? factorization.roots.map((root) => formatNumber(root.value)).join(", ") : "none"],
+      ["Remaining factor", factorization.remaining],
+    ],
+  };
+}
+
 export function analyzeEquation(statement, variableHint = "x") {
   const parsed = parseMath(statement);
   if (parsed.kind !== "equation") {
@@ -361,6 +414,9 @@ export function analyzeUniversal(question, values = {}) {
     const request = extractDerivativeQuestion(question);
     routed = analyzeDerivative(request.expression, request.variable);
     routedLabel = "Derivative";
+  } else if (isFactorQuestion(lower)) {
+    routed = analyzeFactoring(question);
+    routedLabel = "Factor";
   } else if (isStatisticsQuestion(lower)) {
     routed = analyzeStatistics(question);
     routedLabel = "Statistics";
@@ -3835,6 +3891,14 @@ function isSimplifyQuestion(lower) {
   return lower.includes("simplify") || lower.includes("combine like terms");
 }
 
+function isFactorQuestion(lower) {
+  return lower.startsWith("factor ") ||
+    lower.startsWith("factorize ") ||
+    lower.startsWith("factorise ") ||
+    lower.startsWith("fully factor ") ||
+    lower.startsWith("factor the ");
+}
+
 function looksLikeMathExpression(question) {
   return /[a-zA-Z0-9)]\s*[\+\-\*\/\^]\s*[-a-zA-Z0-9(]/.test(question);
 }
@@ -3889,6 +3953,13 @@ function cleanSystemQuestion(question) {
 function cleanSimplifyQuestion(question) {
   return question
     .replace(/^(simplify|combine like terms|calculate|compute|what is|find)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+}
+
+function cleanFactorQuestion(question) {
+  return question
+    .replace(/^(factorize|factorise|fully factor|factor)\s+(?:the\s+)?/i, "")
     .replace(/[?!.]+$/, "")
     .trim();
 }
@@ -4885,6 +4956,249 @@ function solvePolynomial(poly, variable) {
       },
     ],
   };
+}
+
+function factorPolynomialOverRationals(poly, variable) {
+  const coefficients = trimPolynomialCoefficients(polynomialCoefficients(poly, variable));
+  const degree = polynomialDegree(coefficients);
+  if (degree === 0) {
+    return {
+      answer: formatNumber(coefficients[0] ?? 0),
+      summary: "constant factor",
+      roots: [],
+      remaining: "constant",
+      steps: [
+        {
+          title: "Check degree",
+          expression: "degree 0",
+          detail: "A constant polynomial has no variable factors.",
+        },
+      ],
+    };
+  }
+
+  const content = polynomialContent(coefficients);
+  let working = coefficients.map((coefficient) => normalizeNumber(coefficient / content));
+  const roots = [];
+  let denominatorProduct = 1;
+
+  while (polynomialDegree(working) > 0) {
+    const root = findRationalRoot(working);
+    if (!root) {
+      break;
+    }
+    roots.push(root);
+    denominatorProduct *= root.denominator;
+    working = syntheticDivide(working, root.value);
+  }
+
+  const residualCoefficients = denominatorProduct > 1
+    ? working.map((coefficient) => normalizeNumber(coefficient / denominatorProduct))
+    : working;
+  const residualDegree = polynomialDegree(residualCoefficients);
+  const rootFactors = roots.map((root) => formatLinearRootFactor(variable, root));
+  const factors = [...rootFactors];
+  let numericFactor = content;
+  let remaining = "1";
+
+  if (residualDegree === 0) {
+    numericFactor = normalizeNumber(numericFactor * (residualCoefficients[0] ?? 1));
+  } else {
+    remaining = formatPolynomialFromCoefficients(residualCoefficients, variable);
+    factors.push(formatParenthesizedFactor(remaining));
+  }
+
+  const answer = formatFactorProduct(numericFactor, factors);
+  const summary = roots.length || !nearlyEqual(Math.abs(content), 1)
+    ? "rational factorization"
+    : "irreducible over rationals";
+
+  return {
+    answer,
+    summary,
+    roots,
+    remaining,
+    steps: [
+      {
+        title: "Detect polynomial degree",
+        expression: `degree ${degree}`,
+        detail: "Factoring starts from the one-variable polynomial degree.",
+      },
+      {
+        title: "Extract numeric content",
+        expression: `content = ${formatNumber(content)}`,
+        detail: "A common numeric factor is separated before searching for roots.",
+      },
+      {
+        title: "Search rational roots",
+        expression: roots.length ? roots.map((root) => formatNumber(root.value)).join(", ") : "none found",
+        detail: "The solver applies the rational root theorem and synthetic division.",
+      },
+      {
+        title: roots.length ? "Build factor product" : "Check irreducibility",
+        expression: answer,
+        detail: roots.length
+          ? "Each rational root r contributes a factor (x - r)."
+          : "No rational roots were found, so the remaining polynomial is left as one factor.",
+      },
+    ],
+  };
+}
+
+function trimPolynomialCoefficients(coefficients) {
+  const trimmed = [...coefficients].map((coefficient) => normalizeNumber(coefficient ?? 0));
+  while (trimmed.length > 1 && nearlyEqual(trimmed[trimmed.length - 1] ?? 0, 0)) {
+    trimmed.pop();
+  }
+  return trimmed.length ? trimmed : [0];
+}
+
+function polynomialContent(coefficients) {
+  const integerized = integerizeCoefficients(coefficients);
+  if (!integerized) {
+    return 1;
+  }
+  const nonzero = integerized.coefficients.filter((coefficient) => coefficient !== 0);
+  if (nonzero.length === 0) {
+    return 1;
+  }
+  const gcd = nonzero.map((coefficient) => Math.abs(coefficient)).reduce(gcdIntegers);
+  const leading = integerized.coefficients[polynomialDegree(integerized.coefficients)];
+  const sign = leading < 0 ? -1 : 1;
+  return normalizeNumber((sign * gcd) / integerized.scale);
+}
+
+function integerizeCoefficients(coefficients) {
+  for (let scale = 1; scale <= 1_000_000; scale *= 10) {
+    const scaled = coefficients.map((coefficient) => Math.round((coefficient ?? 0) * scale));
+    if (coefficients.every((coefficient, index) => nearlyEqual((coefficient ?? 0) * scale, scaled[index]))) {
+      return { coefficients: scaled, scale };
+    }
+  }
+  return null;
+}
+
+function findRationalRoot(coefficients) {
+  const degree = polynomialDegree(coefficients);
+  if (degree <= 0) {
+    return null;
+  }
+  if (nearlyEqual(coefficients[0] ?? 0, 0)) {
+    return { numerator: 0, denominator: 1, value: 0 };
+  }
+
+  const integerized = integerizeCoefficients(coefficients);
+  if (!integerized) {
+    return null;
+  }
+
+  const constant = Math.abs(integerized.coefficients[0] ?? 0);
+  const leading = Math.abs(integerized.coefficients[degree] ?? 0);
+  if (constant === 0 || leading === 0) {
+    return null;
+  }
+
+  for (const candidate of rationalRootCandidates(constant, leading)) {
+    if (nearlyEqual(evaluatePolynomialCoefficients(coefficients, candidate.value), 0)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function rationalRootCandidates(constant, leading) {
+  const candidates = new Map();
+  for (const numerator of integerDivisors(constant)) {
+    for (const denominator of integerDivisors(leading)) {
+      const divisor = gcdIntegers(numerator, denominator);
+      const baseNumerator = numerator / divisor;
+      const baseDenominator = denominator / divisor;
+      for (const sign of [1, -1]) {
+        const signedNumerator = sign * baseNumerator;
+        const key = `${signedNumerator}/${baseDenominator}`;
+        candidates.set(key, {
+          numerator: signedNumerator,
+          denominator: baseDenominator,
+          value: signedNumerator / baseDenominator,
+        });
+      }
+    }
+  }
+  return [...candidates.values()].sort((left, right) =>
+    Math.abs(left.value) - Math.abs(right.value) || left.value - right.value,
+  );
+}
+
+function integerDivisors(value) {
+  const divisors = [];
+  for (let candidate = 1; candidate <= Math.sqrt(value); candidate += 1) {
+    if (value % candidate === 0) {
+      divisors.push(candidate);
+      if (candidate !== value / candidate) {
+        divisors.push(value / candidate);
+      }
+    }
+  }
+  return divisors.sort((left, right) => left - right);
+}
+
+function gcdIntegers(left, right) {
+  let a = Math.abs(left);
+  let b = Math.abs(right);
+  while (b !== 0) {
+    [a, b] = [b, a % b];
+  }
+  return a;
+}
+
+function syntheticDivide(coefficients, root) {
+  const degree = polynomialDegree(coefficients);
+  const quotient = Array(degree).fill(0);
+  quotient[degree - 1] = coefficients[degree];
+  for (let index = degree - 2; index >= 0; index -= 1) {
+    quotient[index] = coefficients[index + 1] + root * quotient[index + 1];
+  }
+  return trimPolynomialCoefficients(quotient.map(normalizeNumber));
+}
+
+function formatLinearRootFactor(variable, root) {
+  if (root.numerator === 0) {
+    return formatParenthesizedFactor(variable);
+  }
+
+  const coefficient = root.denominator === 1 ? variable : `${root.denominator}${variable}`;
+  const constantText = formatNumber(Math.abs(root.numerator));
+  const operator = root.numerator > 0 ? "-" : "+";
+  return formatParenthesizedFactor(`${coefficient} ${operator} ${constantText}`);
+}
+
+function formatPolynomialFromCoefficients(coefficients, variable) {
+  const poly = new Map();
+  coefficients.forEach((coefficient, power) => {
+    if (nearlyEqual(coefficient ?? 0, 0)) {
+      return;
+    }
+    poly.set(power === 0 ? "" : monomialKey({ [variable]: power }), coefficient);
+  });
+  return formatPolynomial(cleanPolynomial(poly));
+}
+
+function formatParenthesizedFactor(text) {
+  return `(${text})`;
+}
+
+function formatFactorProduct(coefficient, factors) {
+  const normalized = normalizeNumber(coefficient);
+  if (factors.length === 0) {
+    return formatNumber(normalized);
+  }
+  if (nearlyEqual(normalized, 1)) {
+    return factors.join("");
+  }
+  if (nearlyEqual(normalized, -1)) {
+    return `-${factors.join("")}`;
+  }
+  return `${formatNumber(normalized)}${factors.join("")}`;
 }
 
 function polynomialCoefficients(poly, variable) {
