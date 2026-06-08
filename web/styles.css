@@ -129,7 +129,7 @@ h3 {
 
 .mode-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
   gap: 8px;
 }
 
@@ -398,6 +398,11 @@ input {
   fill: var(--amber);
 }
 
+.tree-node.statistics circle,
+.tree-node.statistics rect {
+  fill: var(--teal-dark);
+}
+
 .tree-node.equation circle,
 .tree-node.equation rect {
   fill: var(--red);
@@ -576,4 +581,3 @@ td.false {
     min-height: 340px;
   }
 }
-

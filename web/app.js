@@ -3,6 +3,8 @@ import {
   analyzeEquation,
   analyzeLogic,
   analyzeSimplification,
+  analyzeStatistics,
+  analyzeUniversal,
   formatTruth,
   nodeChildren,
   nodeLabel,
@@ -10,6 +12,12 @@ import {
 } from "./solver-engine.mjs";
 
 const MODE_CONFIG = {
+  ask: {
+    label: "Ask",
+    input: "solve x^2 - 5x + 6 = 0",
+    compare: "",
+    detail: "Route common math questions automatically.",
+  },
   equation: {
     label: "Equation",
     input: "x^2 - 5x + 6 = 0",
@@ -27,6 +35,12 @@ const MODE_CONFIG = {
     input: "x^3 + 2x^2 - 7x + 4",
     compare: "",
     detail: "Apply calculus rules to expression trees.",
+  },
+  statistics: {
+    label: "Stats",
+    input: "mean, median, and standard deviation of 2, 4, 4, 5, 9",
+    compare: "",
+    detail: "Summarize data, regression, correlation, and binomial probability.",
   },
   logic: {
     label: "Logic",
@@ -85,7 +99,7 @@ function setMode(mode, shouldUseDefault = false) {
   }
 
   elements.logicControls.hidden = mode !== "logic";
-  elements.mathControls.hidden = mode === "logic";
+  elements.mathControls.hidden = !["ask", "equation", "derivative"].includes(mode);
   elements.statementInput.setAttribute("aria-label", `${config.label} input`);
   update();
 }
@@ -107,6 +121,9 @@ function runAnalysis() {
     throw new Error("Enter a statement or expression to analyze.");
   }
 
+  if (state.mode === "ask") {
+    return analyzeUniversal(input, Object.fromEntries(state.logicValues.entries()));
+  }
   if (state.mode === "logic") {
     return analyzeLogic(input, Object.fromEntries(state.logicValues.entries()), elements.compareInput.value);
   }
@@ -116,6 +133,9 @@ function runAnalysis() {
   if (state.mode === "derivative") {
     return analyzeDerivative(input, elements.variableInput.value);
   }
+  if (state.mode === "statistics") {
+    return analyzeStatistics(input);
+  }
   return analyzeEquation(input, elements.variableInput.value);
 }
 
@@ -123,11 +143,13 @@ function renderAnalysis(analysis) {
   if (analysis.mode === "logic") {
     syncLogicValues(analysis.variables);
     if (!sameVariables(analysis.variables, state.logicVariables)) {
-      const refreshed = analyzeLogic(
-        elements.statementInput.value,
-        Object.fromEntries(state.logicValues.entries()),
-        elements.compareInput.value,
-      );
+      const refreshed = state.mode === "ask"
+        ? analyzeUniversal(elements.statementInput.value, Object.fromEntries(state.logicValues.entries()))
+        : analyzeLogic(
+            elements.statementInput.value,
+            Object.fromEntries(state.logicValues.entries()),
+            elements.compareInput.value,
+          );
       renderAnalysis(refreshed);
       return;
     }
@@ -370,4 +392,4 @@ for (const button of elements.sampleButtons) {
   });
 }
 
-setMode("equation", true);
+setMode("ask", true);
