@@ -260,6 +260,14 @@ export function analyzeDerivative(statement, variable = "x") {
 export function analyzeStatistics(statement) {
   const lower = statement.toLowerCase();
 
+  if (lower.includes("anova") || lower.includes("analysis of variance")) {
+    return analyzeAnova(statement);
+  }
+
+  if (lower.includes("paired") || lower.includes("matched pairs")) {
+    return analyzePairedTTest(statement);
+  }
+
   if (lower.includes("chi-square") || lower.includes("chi square") || lower.includes("chisquare")) {
     return analyzeChiSquare(statement);
   }
@@ -453,7 +461,78 @@ export function analyzeMatrix(statement) {
   let children;
   let steps;
 
-  if (lower.includes("multiply") || lower.includes("product")) {
+  if (lower.includes("rref") || lower.includes("row reduce") || lower.includes("row-reduce")) {
+    const result = rowReduceMatrix(matrices[0]);
+    answer = formatMatrix(result.rref);
+    summary = "row-reduced echelon form";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["RREF", answer],
+      ["Rank", formatNumber(result.rank)],
+      ["Pivot columns", result.pivots.map((index) => String(index + 1)).join(", ") || "none"],
+    ];
+    children = [matrixNode("A", matrices[0]), matrixNode("RREF", result.rref), statsMetricNode("rank", result.rank)];
+    steps = [
+      {
+        title: "Read matrix",
+        expression: matrixShape(matrices[0]),
+        detail: "Row reduction works for rectangular and square matrices.",
+      },
+      {
+        title: "Use Gauss-Jordan elimination",
+        expression: answer,
+        detail: "Each pivot column is normalized, then cleared above and below the pivot.",
+      },
+    ];
+  } else if (lower.includes("rank")) {
+    const result = rowReduceMatrix(matrices[0]);
+    answer = `rank = ${formatNumber(result.rank)}`;
+    summary = "matrix rank";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["RREF", formatMatrix(result.rref)],
+      ["Rank", formatNumber(result.rank)],
+      ["Pivot columns", result.pivots.map((index) => String(index + 1)).join(", ") || "none"],
+    ];
+    children = [matrixNode("A", matrices[0]), matrixNode("RREF", result.rref), statsMetricNode("rank", result.rank)];
+    steps = [
+      {
+        title: "Row reduce matrix",
+        expression: formatMatrix(result.rref),
+        detail: "The rank is the number of pivot rows in row-reduced echelon form.",
+      },
+      {
+        title: "Count pivots",
+        expression: answer,
+        detail: "Pivot count measures the dimension of the column space.",
+      },
+    ];
+  } else if (lower.includes("eigen")) {
+    const eigenvalues = eigenvalues2x2(matrices[0]);
+    const trace = matrices[0][0][0] + matrices[0][1][1];
+    const determinantValue = determinant(matrices[0]);
+    answer = `lambda = ${eigenvalues.join(", ")}`;
+    summary = "2x2 eigenvalues";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["Trace", formatNumber(trace)],
+      ["Determinant", formatNumber(determinantValue)],
+      ["Eigenvalues", eigenvalues.join(", ")],
+    ];
+    children = [matrixNode("A", matrices[0]), statsMetricNode("lambda1", eigenvalues[0]), statsMetricNode("lambda2", eigenvalues[1])];
+    steps = [
+      {
+        title: "Read 2x2 matrix",
+        expression: formatMatrix(matrices[0]),
+        detail: "The demo computes eigenvalues from the characteristic polynomial.",
+      },
+      {
+        title: "Solve characteristic equation",
+        expression: `lambda = ${eigenvalues.join(", ")}`,
+        detail: "For 2x2 matrices, lambda^2 - trace(A)lambda + det(A) = 0.",
+      },
+    ];
+  } else if (lower.includes("multiply") || lower.includes("product")) {
     if (matrices.length < 2) {
       throw new Error("Matrix multiplication needs two matrices.");
     }
@@ -946,6 +1025,160 @@ function analyzeTwoSampleTTest(statement) {
       ["Standard error", formatNumber(standardError)],
       ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["t statistic", formatNumber(tStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzePairedTTest(statement) {
+  const { left, right, alternative, alpha } = parsePairedInput(statement);
+  if (left.length !== right.length || left.length < 2) {
+    throw new Error("Paired t tests need equal-length before/after lists with at least two pairs.");
+  }
+
+  const differences = right.map((value, index) => value - left[index]);
+  const summary = descriptiveSummary(differences);
+  if (!(summary.sampleStdDev > 0)) {
+    throw new Error("Paired t tests need variation in the pair differences.");
+  }
+
+  const standardError = summary.sampleStdDev / Math.sqrt(summary.count);
+  const tStatistic = summary.mean / standardError;
+  const pValue = pValueForAlternative(tStatistic, alternative);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(differences, [
+      statsMetricNode("MEAN DIFF", summary.mean),
+      statsMetricNode("T", tStatistic),
+      statsMetricNode("P", pValue),
+    ], "PAIRED"),
+    answer: `t = ${formatNumber(tStatistic)}, p = ${formatNumber(pValue)}`,
+    summary: "paired t test",
+    details: "Mean of paired differences with normal tail approximation",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(differences)),
+    steps: [
+      {
+        title: "Read paired samples",
+        expression: `${left.length} matched pairs`,
+        detail: "The solver compares each second value to the matching first value.",
+      },
+      {
+        title: "Compute differences",
+        expression: differences.map(formatNumber).join(", "),
+        detail: "A paired test reduces the problem to a one-sample test on differences.",
+      },
+      {
+        title: "Compute test statistic",
+        expression: `t = ${formatNumber(tStatistic)}`,
+        detail: "The statistic measures mean difference relative to standard error.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the matched differences are not centered at zero.",
+      },
+    ],
+    table: {
+      headers: ["Pair", "First", "Second", "Difference"],
+      rows: left.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(right[index]),
+        formatNumber(differences[index]),
+      ]),
+    },
+    artifacts: [
+      ["Mean difference", formatNumber(summary.mean)],
+      ["Sample SD of differences", formatNumber(summary.sampleStdDev)],
+      ["Standard error", formatNumber(standardError)],
+      ["t statistic", formatNumber(tStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeAnova(statement) {
+  const { groups, alpha } = parseAnovaInput(statement);
+  if (groups.length < 2 || groups.some((group) => group.length < 2)) {
+    throw new Error("ANOVA needs at least two groups with at least two values each.");
+  }
+
+  const allValues = groups.flat();
+  const grandMean = mean(allValues);
+  const groupSummaries = groups.map(descriptiveSummary);
+  const ssBetween = groups.reduce((sum, group, index) =>
+    sum + group.length * (groupSummaries[index].mean - grandMean) ** 2,
+  0);
+  const ssWithin = groups.reduce((sum, group, index) =>
+    sum + group.reduce((inner, value) => inner + (value - groupSummaries[index].mean) ** 2, 0),
+  0);
+  const dfBetween = groups.length - 1;
+  const dfWithin = allValues.length - groups.length;
+  const msBetween = ssBetween / dfBetween;
+  const msWithin = ssWithin / dfWithin;
+  if (!(msWithin > 0)) {
+    throw new Error("ANOVA needs within-group variation.");
+  }
+  const fStatistic = msBetween / msWithin;
+  const pValue = fRightTail(fStatistic, dfBetween, dfWithin);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(allValues, [
+      statsMetricNode("F", fStatistic),
+      statsMetricNode("DF1", dfBetween),
+      statsMetricNode("DF2", dfWithin),
+      statsMetricNode("P", pValue),
+    ], "ANOVA"),
+    answer: `F = ${formatNumber(fStatistic)}, p = ${formatNumber(pValue)}`,
+    summary: "one-way ANOVA",
+    details: `${groups.length} groups`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(allValues)),
+    steps: [
+      {
+        title: "Read groups",
+        expression: groups.map((group, index) => `group ${index + 1}: n=${group.length}`).join("; "),
+        detail: "One-way ANOVA compares the means of two or more independent groups.",
+      },
+      {
+        title: "Compute sums of squares",
+        expression: `SSB = ${formatNumber(ssBetween)}, SSW = ${formatNumber(ssWithin)}`,
+        detail: "Between-group variation is compared with within-group variation.",
+      },
+      {
+        title: "Compute F statistic",
+        expression: `F = ${formatNumber(fStatistic)} with df ${dfBetween}, ${dfWithin}`,
+        detail: "A larger F means group means are farther apart relative to within-group spread.",
+      },
+      {
+        title: "Compute p-value",
+        expression: `p = ${formatNumber(pValue)}`,
+        detail: "The solver evaluates the F distribution using the regularized beta function.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest at least one group mean differs.",
+      },
+    ],
+    table: {
+      headers: ["Source", "SS", "df", "MS", "F"],
+      rows: [
+        ["Between", formatNumber(ssBetween), formatNumber(dfBetween), formatNumber(msBetween), formatNumber(fStatistic)],
+        ["Within", formatNumber(ssWithin), formatNumber(dfWithin), formatNumber(msWithin), ""],
+        ["Total", formatNumber(ssBetween + ssWithin), formatNumber(allValues.length - 1), "", ""],
+      ],
+    },
+    artifacts: [
+      ["Grand mean", formatNumber(grandMean)],
+      ["F statistic", formatNumber(fStatistic)],
       ["p-value", formatNumber(pValue)],
       ["Decision", decision],
     ],
@@ -1536,6 +1769,73 @@ function invertMatrix(matrix) {
   return augmented.map((row) => row.slice(size).map(normalizeNumber));
 }
 
+function rowReduceMatrix(matrix) {
+  const rref = matrix.map((row) => row.map((value) => Number(value)));
+  const rowCount = rref.length;
+  const columnCount = rref[0].length;
+  const pivots = [];
+  let leadRow = 0;
+
+  for (let column = 0; column < columnCount && leadRow < rowCount; column += 1) {
+    let pivot = leadRow;
+    for (let row = leadRow + 1; row < rowCount; row += 1) {
+      if (Math.abs(rref[row][column]) > Math.abs(rref[pivot][column])) {
+        pivot = row;
+      }
+    }
+    if (nearlyEqual(rref[pivot][column], 0)) {
+      continue;
+    }
+
+    [rref[leadRow], rref[pivot]] = [rref[pivot], rref[leadRow]];
+    const pivotValue = rref[leadRow][column];
+    for (let col = 0; col < columnCount; col += 1) {
+      rref[leadRow][col] /= pivotValue;
+    }
+
+    for (let row = 0; row < rowCount; row += 1) {
+      if (row === leadRow) continue;
+      const factor = rref[row][column];
+      for (let col = 0; col < columnCount; col += 1) {
+        rref[row][col] -= factor * rref[leadRow][col];
+      }
+    }
+
+    pivots.push(column);
+    leadRow += 1;
+  }
+
+  return {
+    rref: rref.map((row) => row.map(normalizeNumber)),
+    rank: pivots.length,
+    pivots,
+  };
+}
+
+function eigenvalues2x2(matrix) {
+  if (matrix.length !== 2 || matrix[0].length !== 2) {
+    throw new Error("Eigenvalue mode currently supports 2x2 matrices.");
+  }
+
+  const trace = matrix[0][0] + matrix[1][1];
+  const det = determinant(matrix);
+  const discriminant = trace ** 2 - 4 * det;
+  if (discriminant >= -EPSILON) {
+    const root = Math.sqrt(Math.max(0, discriminant));
+    return [
+      formatNumber((trace + root) / 2),
+      formatNumber((trace - root) / 2),
+    ];
+  }
+
+  const real = trace / 2;
+  const imaginary = Math.sqrt(-discriminant) / 2;
+  return [
+    `${formatNumber(real)} + ${formatNumber(imaginary)}i`,
+    `${formatNumber(real)} - ${formatNumber(imaginary)}i`,
+  ];
+}
+
 function extractIntegralQuestion(statement, fallbackVariable) {
   let text = statement
     .replace(/^(integrate|definite integral of|definite integral|integral of|find the integral of|antiderivative of)\s+/i, "")
@@ -1928,6 +2228,58 @@ function parseTwoSampleInput(text) {
   throw new Error("Use two-sample t-test group1: 10, 12, 9; group2: 8, 7, 11.");
 }
 
+function parsePairedInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const alternative = parseAlternative(text);
+  const labeledMatch = cleaned.match(
+    /\b(?:before|pre|first|left|group1|sample1)\s*[:=]\s*([^;]+);\s*(?:after|post|second|right|group2|sample2)\s*[:=]\s*([^;]+)/i,
+  );
+  if (labeledMatch) {
+    return {
+      alpha,
+      alternative,
+      left: parseNumbers(labeledMatch[1]),
+      right: parseNumbers(labeledMatch[2]),
+    };
+  }
+
+  const chunks = cleaned
+    .replace(/\bpaired\b/gi, "")
+    .replace(/\bmatched pairs\b/gi, "")
+    .replace(/\bt-?test\b/gi, "")
+    .split(";")
+    .map((chunk) => parseNumbers(chunk))
+    .filter((values) => values.length > 0);
+  if (chunks.length >= 2) {
+    return {
+      alpha,
+      alternative,
+      left: chunks[0],
+      right: chunks[1],
+    };
+  }
+
+  throw new Error("Use paired t-test before: 10, 12, 9; after: 11, 14, 10.");
+}
+
+function parseAnovaInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const groups = cleaned
+    .replace(/\banova\b/gi, "")
+    .replace(/\banalysis of variance\b/gi, "")
+    .replace(/\bone-way\b/gi, "")
+    .replace(/\bone way\b/gi, "")
+    .split(";")
+    .map((chunk) => chunk.trim().replace(/^[A-Za-z][A-Za-z0-9 _-]*\s*[:=]\s*/, ""))
+    .map((chunk) => parseNumbers(chunk))
+    .filter((values) => values.length > 0);
+
+  if (groups.length < 2) {
+    throw new Error("Use ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10.");
+  }
+  return { alpha, groups };
+}
+
 function parseChiSquareInput(text) {
   const { alpha, cleaned } = extractAlpha(text);
   const observedMatch = cleaned.match(/\b(?:observed|obs)\s*[:=]?\s*([^;]+?)(?=\b(?:expected|exp)\b|$)/i);
@@ -2001,6 +2353,93 @@ function chiSquareRightTailApprox(statistic, degreesFreedom) {
   const z = ((statistic / degreesFreedom) ** (1 / 3) - (1 - 2 / (9 * degreesFreedom))) /
     Math.sqrt(2 / (9 * degreesFreedom));
   return Math.max(0, Math.min(1, 1 - normalCdf(z)));
+}
+
+function fRightTail(statistic, dfNumerator, dfDenominator) {
+  if (!(statistic >= 0) || !(dfNumerator > 0) || !(dfDenominator > 0)) {
+    return Number.NaN;
+  }
+  const x = (dfNumerator * statistic) / (dfNumerator * statistic + dfDenominator);
+  return Math.max(0, Math.min(1, 1 - regularizedBeta(x, dfNumerator / 2, dfDenominator / 2)));
+}
+
+function regularizedBeta(x, a, b) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+
+  const logFront = logGamma(a + b) - logGamma(a) - logGamma(b) +
+    a * Math.log(x) + b * Math.log(1 - x);
+  const front = Math.exp(logFront);
+
+  if (x < (a + 1) / (a + b + 2)) {
+    return front * betaContinuedFraction(x, a, b) / a;
+  }
+  return 1 - front * betaContinuedFraction(1 - x, b, a) / b;
+}
+
+function betaContinuedFraction(x, a, b) {
+  const maxIterations = 120;
+  const tiny = 1e-30;
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < tiny) d = tiny;
+  d = 1 / d;
+  let h = d;
+
+  for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+    const m2 = 2 * iteration;
+    let aa = (iteration * (b - iteration) * x) /
+      ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = 1 + aa / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    h *= d * c;
+
+    aa = -((a + iteration) * (qab + iteration) * x) /
+      ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = 1 + aa / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    const delta = d * c;
+    h *= delta;
+    if (Math.abs(delta - 1) < 1e-10) {
+      break;
+    }
+  }
+
+  return h;
+}
+
+function logGamma(value) {
+  const coefficients = [
+    676.5203681218851,
+    -1259.1392167224028,
+    771.3234287776531,
+    -176.6150291621406,
+    12.507343278686905,
+    -0.13857109526572012,
+    9.984369578019572e-6,
+    1.5056327351493116e-7,
+  ];
+
+  if (value < 0.5) {
+    return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * value)) - logGamma(1 - value);
+  }
+
+  let x = 0.99999999999980993;
+  const shifted = value - 1;
+  for (let index = 0; index < coefficients.length; index += 1) {
+    x += coefficients[index] / (shifted + index + 1);
+  }
+  const t = shifted + coefficients.length - 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (shifted + 0.5) * Math.log(t) - t + Math.log(x);
 }
 
 function parseConfidenceInput(text) {
@@ -2210,6 +2649,11 @@ function isMatrixQuestion(lower) {
     lower.includes("determinant") ||
     lower.startsWith("det ") ||
     lower.includes(" det ") ||
+    lower.startsWith("rref ") ||
+    lower.includes("row reduce") ||
+    lower.startsWith("rank ") ||
+    lower.startsWith("eigen ") ||
+    lower.includes("eigenvalue") ||
     lower.includes("inverse [[") ||
     lower.includes("multiply [[") ||
     lower.includes("product [[");
@@ -2282,6 +2726,10 @@ function isStatisticsQuestion(lower) {
     "chi-square",
     "chi square",
     "chisquare",
+    "paired",
+    "matched pairs",
+    "anova",
+    "analysis of variance",
   ].some((word) => lower.includes(word)) || parsePairs(lower).length >= 2;
 }
 

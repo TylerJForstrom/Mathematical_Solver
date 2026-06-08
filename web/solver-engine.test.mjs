@@ -121,6 +121,20 @@ runTest("statistics mode computes chi-square goodness-of-fit", () => {
   assert.equal(result.answer, "chi-square = 3.333333, p = 0.186672");
 });
 
+runTest("statistics mode computes paired t-tests", () => {
+  const result = analyzeStatistics("paired t-test before: 10, 12, 9; after: 11, 14, 10");
+
+  assert.equal(result.summary, "paired t test");
+  assert.equal(result.answer, "t = 4, p = 0.000063");
+});
+
+runTest("statistics mode computes one-way ANOVA", () => {
+  const result = analyzeStatistics("ANOVA group1: 8, 9, 10; group2: 12, 13, 14; group3: 9, 11, 10");
+
+  assert.equal(result.summary, "one-way ANOVA");
+  assert.equal(result.answer, "F = 13, p = 0.006592");
+});
+
 runTest("system solver handles two-variable systems", () => {
   const result = analyzeSystem("2x + y = 5; x - y = 1");
 
@@ -147,6 +161,27 @@ runTest("matrix mode computes inverses", () => {
 
   assert.equal(result.summary, "matrix inverse");
   assert.equal(result.answer, "[[-2, 1], [1.5, -0.5]]");
+});
+
+runTest("matrix mode row reduces matrices", () => {
+  const result = analyzeMatrix("rref [[1,2,1],[2,4,2],[1,1,0]]");
+
+  assert.equal(result.summary, "row-reduced echelon form");
+  assert.equal(result.answer, "[[1, 0, -1], [0, 1, 1], [0, 0, 0]]");
+});
+
+runTest("matrix mode computes rank", () => {
+  const result = analyzeMatrix("rank [[1,2],[2,4]]");
+
+  assert.equal(result.summary, "matrix rank");
+  assert.equal(result.answer, "rank = 1");
+});
+
+runTest("matrix mode computes 2x2 eigenvalues", () => {
+  const result = analyzeMatrix("eigen [[2,1],[1,2]]");
+
+  assert.equal(result.summary, "2x2 eigenvalues");
+  assert.equal(result.answer, "lambda = 3, 1");
 });
 
 runTest("integral mode applies polynomial power rules", () => {
@@ -227,4 +262,8 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
   assert.equal(analyzeUniversal("chi-square observed 10,20,30 expected 15,15,30").summary, "chi-square goodness-of-fit");
+  assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
+  assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
+  assert.equal(analyzeUniversal("rank [[1,2],[2,4]]").summary, "matrix rank");
+  assert.equal(analyzeUniversal("eigen [[2,1],[1,2]]").summary, "2x2 eigenvalues");
 });
