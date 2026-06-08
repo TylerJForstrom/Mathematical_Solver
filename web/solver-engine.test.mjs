@@ -219,6 +219,39 @@ runTest("integral mode evaluates definite integrals", () => {
   assert.equal(result.answer, "integral = 9");
 });
 
+runTest("integral mode handles elementary trig antiderivatives", () => {
+  const result = analyzeIntegral("integrate sin(x)");
+
+  assert.equal(result.summary, "indefinite integral");
+  assert.equal(result.answer, "-cos(x) + C");
+});
+
+runTest("integral mode handles scalar multiples of elementary functions", () => {
+  const result = analyzeIntegral("integrate 2sin(x) + 3cos(x)");
+
+  assert.equal(result.summary, "indefinite integral");
+  assert.equal(result.answer, "-2cos(x) + 3sin(x) + C");
+});
+
+runTest("integral mode evaluates elementary definite integrals", () => {
+  const result = analyzeIntegral("integrate exp(x) from 0 to 1");
+
+  assert.equal(result.summary, "definite integral");
+  assert.equal(result.answer, "integral = 1.718282");
+});
+
+runTest("integral mode handles reciprocal antiderivatives", () => {
+  const result = analyzeIntegral("integrate 1/x");
+
+  assert.equal(result.summary, "indefinite integral");
+  assert.equal(result.answer, "ln(abs(x)) + C");
+});
+
+runTest("integral mode handles logarithmic and square-root antiderivatives", () => {
+  assert.equal(analyzeIntegral("integrate ln(x)").answer, "xln(abs(x)) - x + C");
+  assert.equal(analyzeIntegral("integrate sqrt(x)").answer, "0.666667x^(3/2) + C");
+});
+
 runTest("optimization mode finds polynomial critical points", () => {
   const result = analyzeOptimization("maximize -x^2 + 4x + 1");
 
@@ -279,6 +312,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("det [[1,2],[3,4]]").summary, "determinant");
   assert.equal(analyzeUniversal("integrate x^2").summary, "indefinite integral");
   assert.equal(analyzeUniversal("integrate x^2 from 0 to 3").summary, "definite integral");
+  assert.equal(analyzeUniversal("integrate sin(x)").answer, "-cos(x) + C");
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");

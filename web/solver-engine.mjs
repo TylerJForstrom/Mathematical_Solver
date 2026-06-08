@@ -785,23 +785,26 @@ export function analyzeIntegral(statement, variableHint = "x") {
     },
   ];
 
-  const polynomial = polynomialFrom(simplifyNode(expression, steps));
-  if (!polynomial) {
-    throw new Error("Integral mode currently supports polynomial expressions.");
+  const simplifiedExpression = simplifyNode(expression, steps);
+  const integral = integrateSymbolic(simplifiedExpression, request.variable);
+  if (!integral) {
+    throw new Error("Integral mode supports polynomials, scalar multiples, sin, cos, tan, exp, ln, sqrt, and 1/x forms.");
   }
 
-  const integral = integratePolynomial(polynomial, request.variable);
-  const antiderivative = formatPolynomial(integral);
+  const antiderivative = integral.antiderivative;
   const definite = Number.isFinite(request.lower) && Number.isFinite(request.upper);
-  const definiteValue = definite
-    ? evaluatePolynomialCoefficients(polynomialCoefficients(integral, request.variable), request.upper) -
-      evaluatePolynomialCoefficients(polynomialCoefficients(integral, request.variable), request.lower)
-    : null;
+  if (definite && integral.validateBounds) {
+    integral.validateBounds(request.lower, request.upper);
+  }
+  const definiteValue = definite ? integral.evaluate(request.upper) - integral.evaluate(request.lower) : null;
+  if (definite && !Number.isFinite(definiteValue)) {
+    throw new Error("The antiderivative is not finite at one of the requested bounds.");
+  }
   const answer = definite ? `integral = ${formatNumber(definiteValue)}` : `${antiderivative} + C`;
   steps.push({
-    title: "Apply power rule for integrals",
+    title: integral.title,
     expression: `${antiderivative} + C`,
-    detail: "Each x^n term becomes x^(n+1)/(n+1).",
+    detail: integral.detail,
   });
   if (definite) {
     steps.push({
@@ -2096,6 +2099,290 @@ function integratePolynomial(poly, variable) {
     result.set(monomialKey(powers), coefficient / (currentPower + 1));
   }
   return cleanPolynomial(result);
+}
+
+function integrateSymbolic(node, variable) {
+  const polynomial = polynomialFrom(node);
+  if (polynomial) {
+    return integratePolynomialSymbolic(polynomial, variable);
+  }
+
+  if (node.kind === "mathUnary") {
+    const inner = integrateSymbolic(node.operand, variable);
+    return inner ? scaleIntegral(inner, -1) : null;
+  }
+
+  if (node.kind === "mathFunction") {
+    return integrateFunction(node, variable);
+  }
+
+  if (node.kind !== "mathBinary") {
+    return null;
+  }
+
+  if (node.operator === "+" || node.operator === "-") {
+    const left = integrateSymbolic(node.left, variable);
+    const right = integrateSymbolic(node.right, variable);
+    return left && right ? combineIntegrals(left, right, node.operator) : null;
+  }
+
+  if (node.operator === "*") {
+    const leftConstant = numericConstantValue(node.left);
+    if (Number.isFinite(leftConstant)) {
+      const right = integrateSymbolic(node.right, variable);
+      return right ? scaleIntegral(right, leftConstant) : null;
+    }
+
+    const rightConstant = numericConstantValue(node.right);
+    if (Number.isFinite(rightConstant)) {
+      const left = integrateSymbolic(node.left, variable);
+      return left ? scaleIntegral(left, rightConstant) : null;
+    }
+  }
+
+  if (node.operator === "/") {
+    const denominatorConstant = numericConstantValue(node.right);
+    if (Number.isFinite(denominatorConstant) && !nearlyEqual(denominatorConstant, 0)) {
+      const numerator = integrateSymbolic(node.left, variable);
+      return numerator ? scaleIntegral(numerator, 1 / denominatorConstant) : null;
+    }
+
+    return integrateReciprocal(node.left, node.right, variable);
+  }
+
+  if (node.operator === "^" && isMinusOnePowerOfVariable(node, variable)) {
+    return integrateReciprocal(mathNumber(1), node.left, variable);
+  }
+
+  return null;
+}
+
+function integratePolynomialSymbolic(poly, variable) {
+  const integral = integratePolynomial(poly, variable);
+  const coefficients = polynomialCoefficients(integral, variable);
+  return {
+    antiderivative: formatPolynomial(integral),
+    evaluate: (x) => evaluatePolynomialCoefficients(coefficients, x),
+    title: "Apply power rule for integrals",
+    detail: "Each x^n term becomes x^(n+1)/(n+1).",
+  };
+}
+
+function integrateFunction(node, variable) {
+  const argument = linearArgumentInfo(node.argument, variable);
+  if (!argument) {
+    return null;
+  }
+
+  const scale = 1 / argument.slope;
+  const text = argument.text;
+  const valueAt = (x) => argument.slope * x + argument.intercept;
+
+  if (node.name === "sin") {
+    return elementaryIntegral(formatScaledAntiderivative(-scale, `cos(${text})`), (x) => -scale * Math.cos(valueAt(x)));
+  }
+  if (node.name === "cos") {
+    return elementaryIntegral(formatScaledAntiderivative(scale, `sin(${text})`), (x) => scale * Math.sin(valueAt(x)));
+  }
+  if (node.name === "tan") {
+    return elementaryIntegral(
+      formatScaledAntiderivative(-scale, `ln(abs(cos(${text})))`),
+      (x) => -scale * Math.log(Math.abs(Math.cos(valueAt(x)))),
+    );
+  }
+  if (node.name === "exp") {
+    return elementaryIntegral(formatScaledAntiderivative(scale, `exp(${text})`), (x) => scale * Math.exp(valueAt(x)));
+  }
+  if (node.name === "ln") {
+    const body = `${formatProductFactor(text)}ln(abs(${text})) - ${formatProductFactor(text)}`;
+    return elementaryIntegral(
+      formatScaledAntiderivative(scale, body),
+      (x) => scale * (valueAt(x) * Math.log(Math.abs(valueAt(x))) - valueAt(x)),
+      reciprocalBoundsValidator(argument.singularity, "ln has a domain break where its argument is 0."),
+    );
+  }
+  if (node.name === "sqrt") {
+    return elementaryIntegral(
+      formatScaledAntiderivative((2 * scale) / 3, `${formatPowerBase(text)}^(3/2)`),
+      (x) => ((2 * scale) / 3) * valueAt(x) ** 1.5,
+      (lower, upper) => {
+        if (valueAt(lower) < 0 || valueAt(upper) < 0) {
+          throw new Error("sqrt integrals need bounds where the linear argument stays nonnegative.");
+        }
+      },
+    );
+  }
+
+  return null;
+}
+
+function integrateReciprocal(numeratorNode, denominatorNode, variable) {
+  const numerator = numericConstantValue(numeratorNode);
+  const denominator = linearArgumentInfo(denominatorNode, variable);
+  if (!Number.isFinite(numerator) || !denominator) {
+    return null;
+  }
+
+  const scale = numerator / denominator.slope;
+  return elementaryIntegral(
+    formatScaledAntiderivative(scale, `ln(abs(${denominator.text}))`),
+    (x) => scale * Math.log(Math.abs(denominator.slope * x + denominator.intercept)),
+    reciprocalBoundsValidator(denominator.singularity, "Definite reciprocal integrals cannot cross a zero denominator."),
+  );
+}
+
+function elementaryIntegral(antiderivative, evaluate, validateBounds = null) {
+  return {
+    antiderivative,
+    evaluate,
+    validateBounds,
+    title: "Apply elementary integral rules",
+    detail: "Use linearity plus standard antiderivatives for trig, exponential, logarithmic, square-root, and reciprocal forms.",
+  };
+}
+
+function combineIntegrals(left, right, operator) {
+  return {
+    antiderivative: formatAntiderivativeSum(left.antiderivative, right.antiderivative, operator),
+    evaluate: (x) => operator === "+" ? left.evaluate(x) + right.evaluate(x) : left.evaluate(x) - right.evaluate(x),
+    validateBounds: combineBoundsValidators(left, right),
+    title: "Apply linearity of integrals",
+    detail: "Integrate sums, differences, and constant multiples term by term.",
+  };
+}
+
+function scaleIntegral(integral, scalar) {
+  return {
+    antiderivative: formatScaledAntiderivative(scalar, integral.antiderivative),
+    evaluate: (x) => scalar * integral.evaluate(x),
+    validateBounds: integral.validateBounds,
+    title: "Apply constant multiple rule",
+    detail: "A numeric coefficient can be pulled outside the integral.",
+  };
+}
+
+function linearArgumentInfo(node, variable) {
+  const polynomial = polynomialFrom(node);
+  if (!polynomial) {
+    return null;
+  }
+
+  const coefficients = polynomialCoefficients(polynomial, variable);
+  if (
+    coefficients.length === 0 ||
+    coefficients.length > 2 ||
+    coefficients.slice(2).some((coefficient) => !nearlyEqual(coefficient, 0))
+  ) {
+    return null;
+  }
+
+  const intercept = coefficients[0] ?? 0;
+  const slope = coefficients[1] ?? 0;
+  if (nearlyEqual(slope, 0)) {
+    return null;
+  }
+
+  return {
+    slope,
+    intercept,
+    singularity: -intercept / slope,
+    text: formatMath(node),
+  };
+}
+
+function numericConstantValue(node) {
+  if (node.kind === "mathNumber") {
+    return node.value;
+  }
+  if (node.kind === "mathUnary") {
+    const value = numericConstantValue(node.operand);
+    return Number.isFinite(value) ? -value : Number.NaN;
+  }
+  return Number.NaN;
+}
+
+function isMinusOnePowerOfVariable(node, variable) {
+  return isVariableNode(node.left, variable) && nearlyEqual(numericConstantValue(node.right), -1);
+}
+
+function isVariableNode(node, variable) {
+  return node.kind === "mathSymbol" && node.name === variable;
+}
+
+function combineBoundsValidators(left, right) {
+  if (!left.validateBounds && !right.validateBounds) {
+    return null;
+  }
+  return (lower, upper) => {
+    if (left.validateBounds) left.validateBounds(lower, upper);
+    if (right.validateBounds) right.validateBounds(lower, upper);
+  };
+}
+
+function reciprocalBoundsValidator(singularity, message) {
+  return (lower, upper) => {
+    if (isBetweenInclusive(singularity, lower, upper)) {
+      throw new Error(message);
+    }
+  };
+}
+
+function isBetweenInclusive(value, left, right) {
+  const low = Math.min(left, right);
+  const high = Math.max(left, right);
+  return value >= low - EPSILON && value <= high + EPSILON;
+}
+
+function formatAntiderivativeSum(left, right, operator) {
+  if (right === "0") return left;
+  if (left === "0") return operator === "+" ? right : formatScaledAntiderivative(-1, right);
+
+  if (operator === "+") {
+    if (right.startsWith("-") && isSimpleAntiderivative(right.slice(1))) {
+      return `${left} - ${right.slice(1)}`;
+    }
+    return `${left} + ${right}`;
+  }
+
+  if (right.startsWith("-") && isSimpleAntiderivative(right.slice(1))) {
+    return `${left} + ${right.slice(1)}`;
+  }
+  return `${left} - ${needsAntiderivativeParens(right) ? `(${right})` : right}`;
+}
+
+function formatScaledAntiderivative(scalar, text) {
+  const normalized = normalizeNumber(scalar);
+  if (nearlyEqual(normalized, 0)) {
+    return "0";
+  }
+  if (text.startsWith("-") && isSimpleAntiderivative(text.slice(1))) {
+    return formatScaledAntiderivative(-normalized, text.slice(1));
+  }
+
+  const body = needsAntiderivativeParens(text) ? `(${text})` : text;
+  if (nearlyEqual(normalized, 1)) {
+    return text;
+  }
+  if (nearlyEqual(normalized, -1)) {
+    return `-${body}`;
+  }
+  return `${formatNumber(normalized)}${body}`;
+}
+
+function needsAntiderivativeParens(text) {
+  return / \+ | - /.test(text);
+}
+
+function isSimpleAntiderivative(text) {
+  return !needsAntiderivativeParens(text);
+}
+
+function formatProductFactor(text) {
+  return needsAntiderivativeParens(text) ? `(${text})` : text;
+}
+
+function formatPowerBase(text) {
+  return /^[A-Za-z_]\w*$/.test(text) ? text : `(${text})`;
 }
 
 function extractOptimizationQuestion(statement, fallbackVariable) {
