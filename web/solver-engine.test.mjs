@@ -248,6 +248,20 @@ runTest("statistics mode computes one-proportion confidence intervals", () => {
   assert.equal(artifactValue(result, "Sample proportion"), "0.42");
 });
 
+runTest("statistics mode computes power and sample-size analysis", () => {
+  const meanPower = analyzeStatistics("power mean effect=0.5 n=64 alpha=0.05");
+  const meanSampleSize = analyzeStatistics("sample size mean effect=0.5 power=0.8 alpha=0.05");
+  const proportionPower = analyzeStatistics("power proportion p0=0.5 p1=0.6 n=200 alpha=0.05");
+  const twoSampleSize = analyzeStatistics("sample size two-sample effect=0.5 power=0.8 alpha=0.05");
+
+  assert.equal(meanPower.summary, "statistical power");
+  assert.equal(meanPower.answer, "power = 0.979327");
+  assert.equal(meanSampleSize.summary, "sample size analysis");
+  assert.equal(meanSampleSize.answer, "n = 32 for power ~= 0.807431");
+  assert.equal(proportionPower.answer, "power = 0.812292");
+  assert.equal(twoSampleSize.answer, "n per group = 63 for power ~= 0.801303");
+});
+
 runTest("statistics mode computes one-sample tests", () => {
   const result = analyzeStatistics("t-test mean=10 data 8, 9, 11, 12, 10");
 
@@ -579,6 +593,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("ode dy/dt = 0.3y y0=2 t=5").summary, "exponential ODE");
   assert.equal(analyzeUniversal("newton cooling ambient=70 initial=100 k=0.2 t=10").summary, "Newton cooling");
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
+  assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("one-proportion z-test successes=56 n=100 p0=0.5").summary, "one-proportion z test");
   assert.equal(analyzeUniversal("two-proportion z-test successes1=56 n1=100 successes2=44 n2=100").summary, "two-proportion z test");
   assert.equal(analyzeUniversal("chi-square observed 10,20,30 expected 15,15,30").summary, "chi-square goodness-of-fit");

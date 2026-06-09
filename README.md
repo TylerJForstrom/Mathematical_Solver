@@ -48,6 +48,8 @@ The frontend currently supports:
   probability, inverse-normal percentiles, geometric probability, exponential
   probability, uniform probability, hypergeometric probability, discrete expected
   value/variance, Bayes theorem, and z-score calculations
+- Statistical power and sample-size planning for one-sample means,
+  one-proportion z designs, and equal-size two-sample mean designs
 - Effect sizes and follow-up comparisons, including Cohen's d/dz, Hedges g,
   eta squared, omega squared, rank-biserial correlation, epsilon squared,
   Cohen's w, Bonferroni-adjusted ANOVA pairwise comparisons, and Dunn-style
@@ -148,6 +150,8 @@ The same idea works for algebra and calculus:
   distribution trees.
 - `two-proportion z-test successes1=56 n1=100 successes2=44 n2=100` compares
   two sample proportions and reports `z = 1.697056, p = 0.089686`.
+- `power mean effect=0.5 n=64 alpha=0.05` estimates statistical power, while
+  `sample size mean effect=0.5 power=0.8 alpha=0.05` finds a required sample size.
 - `expected value values: 0,1,2 probabilities: 0.2,0.5,0.3` treats the
   inputs as a probability mass function and returns `E(X) = 1.1`.
 - `bayes prior=0.01 sensitivity=0.99 specificity=0.95` updates the prior and
@@ -215,7 +219,8 @@ The demo includes:
   percentiles, z-scores, discrete expected value, Bayes theorem,
   one-sample/two-sample/paired t tests, one-proportion/two-proportion z tests,
   proportion confidence intervals, ANOVA, chi-square tests, nonparametric rank
-  tests, effect sizes, and pairwise follow-up summaries in Stats mode
+  tests, power/sample-size analysis, effect sizes, and pairwise follow-up
+  summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
   vector geometry, geometry formulas, sequences/series, graphing, differential
   equations, and numerical roots through Ask mode

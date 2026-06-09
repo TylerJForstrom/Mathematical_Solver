@@ -752,6 +752,17 @@ export function analyzeNumberTheory(statement) {
 export function analyzeStatistics(statement) {
   const lower = statement.toLowerCase();
 
+  if (
+    lower.includes("power analysis") ||
+    lower.includes("statistical power") ||
+    lower.includes("sample size") ||
+    lower.includes("required n") ||
+    lower.includes("needed n") ||
+    lower.startsWith("power ")
+  ) {
+    return analyzePowerAnalysis(statement);
+  }
+
   if (lower.includes("kruskal") || lower.includes("wallis")) {
     return analyzeKruskalWallis(statement);
   }
@@ -4158,6 +4169,79 @@ function analyzeZScore(statement) {
   };
 }
 
+function analyzePowerAnalysis(statement) {
+  const request = parsePowerAnalysisInput(statement);
+  const sampleSizeMode = request.mode === "sample-size";
+  const sampleSize = sampleSizeMode
+    ? solvePowerSampleSize(request)
+    : request.n;
+  const achievedPower = powerForDesign({ ...request, n: sampleSize });
+  const critical = criticalValueForPower(request.alpha, request.alternative);
+  const answer = sampleSizeMode
+    ? formatPowerSampleSizeAnswer(request, sampleSize, achievedPower)
+    : `power = ${formatNumber(achievedPower)}`;
+  const tree = {
+    kind: "statsDistribution",
+    label: "POWER",
+    children: [
+      statsMetricNode("effect", request.effect),
+      statsMetricNode("alpha", request.alpha),
+      statsMetricNode("n", sampleSize),
+      statsMetricNode("power", achievedPower),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer,
+    summary: sampleSizeMode ? "sample size analysis" : "statistical power",
+    details: `${request.modelLabel}, ${request.alternative} alternative`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Choose design model",
+        expression: request.modelLabel,
+        detail: "Power analysis uses the planned effect size, alpha level, and test direction.",
+      },
+      {
+        title: "Set rejection cutoff",
+        expression: `z critical = ${formatNumber(critical)}`,
+        detail: "The critical value is the normal cutoff implied by alpha and the alternative.",
+      },
+      sampleSizeMode
+        ? {
+            title: "Search sample size",
+            expression: `${formatPowerSampleUnit(request)} = ${formatNumber(sampleSize)}`,
+            detail: "The solver increases the planned sample size until predicted power reaches the target.",
+          }
+        : {
+            title: "Use planned sample size",
+            expression: `${formatPowerSampleUnit(request)} = ${formatNumber(sampleSize)}`,
+            detail: "The planned sample size determines the distribution shift under the alternative.",
+          },
+      {
+        title: "Compute power",
+        expression: `power = ${formatNumber(achievedPower)}`,
+        detail: "Power is the probability of rejecting the null when the specified alternative is true.",
+      },
+    ],
+    table: {
+      headers: ["Quantity", "Value"],
+      rows: [
+        ["Model", request.modelLabel],
+        ["Alternative", request.alternative],
+        ["Effect size", formatNumber(request.effect)],
+        ["Alpha", formatNumber(request.alpha)],
+        [formatPowerSampleUnit(request), formatNumber(sampleSize)],
+        ["Power", formatNumber(achievedPower)],
+      ],
+    },
+    artifacts: powerAnalysisArtifacts(request, sampleSize, achievedPower, critical),
+  };
+}
+
 function analyzeConfidenceInterval(statement) {
   const { level, values } = parseConfidenceInput(statement);
   if (values.length < 2) {
@@ -6395,6 +6479,203 @@ function pValueForNormal(statistic, alternative) {
   return Math.min(1, 2 * Math.min(cdf, 1 - cdf));
 }
 
+function parsePowerAnalysisInput(text) {
+  const lower = text.toLowerCase();
+  const { alpha, cleaned } = extractAlpha(text);
+  const mode = lower.includes("sample size") || lower.includes("required n") || lower.includes("needed n")
+    ? "sample-size"
+    : "power";
+  const alternative = parseAlternative(text);
+  const model = lower.includes("proportion")
+    ? "one-proportion"
+    : lower.includes("two-sample") || lower.includes("two sample") || lower.includes("two-group") || lower.includes("two group")
+      ? "two-sample-mean"
+      : "one-sample-mean";
+  const targetPower = readPowerNamedNumber(cleaned, ["power", "target power", "target"], Number.NaN);
+  const n = readPowerNamedNumber(cleaned, ["n", "sample", "sample size", "per group", "n per group"], Number.NaN);
+  const request = {
+    mode,
+    model,
+    alpha,
+    alternative,
+    targetPower,
+    n,
+  };
+
+  if (model === "one-proportion") {
+    const p0 = readPowerNamedNumber(cleaned, ["p0", "null", "baseline"], Number.NaN);
+    const p1 = readPowerNamedNumber(cleaned, ["p1", "alt", "alternative"], Number.NaN);
+    if (!(p0 > 0 && p0 < 1) || !(p1 > 0 && p1 < 1) || nearlyEqual(p0, p1)) {
+      throw new Error("Proportion power needs p0 and p1 between 0 and 1, such as power proportion p0=0.5 p1=0.6 n=200.");
+    }
+    return validatePowerRequest({
+      ...request,
+      p0,
+      p1,
+      effect: p1 - p0,
+      modelLabel: "one-proportion z design",
+    });
+  }
+
+  const effect = readPowerEffect(cleaned, model);
+  if (!(Math.abs(effect) > EPSILON)) {
+    throw new Error("Power analysis needs a nonzero effect size, such as effect=0.5.");
+  }
+  return validatePowerRequest({
+    ...request,
+    effect,
+    modelLabel: model === "two-sample-mean" ? "two-sample mean z design" : "one-sample mean z design",
+  });
+}
+
+function readPowerEffect(text, model) {
+  const explicit = readPowerNamedNumber(text, ["effect", "effect size", "d", "cohens d", "cohen d"], Number.NaN);
+  if (Number.isFinite(explicit)) {
+    return explicit;
+  }
+
+  const sd = readPowerNamedNumber(text, ["sd", "sigma", "std"], Number.NaN);
+  if (!(sd > 0)) {
+    return Number.NaN;
+  }
+
+  if (model === "two-sample-mean") {
+    const mean1 = readPowerNamedNumber(text, ["mean1", "mu1", "m1"], Number.NaN);
+    const mean2 = readPowerNamedNumber(text, ["mean2", "mu2", "m2"], Number.NaN);
+    return Number.isFinite(mean1) && Number.isFinite(mean2) ? (mean1 - mean2) / sd : Number.NaN;
+  }
+
+  const meanValue = readPowerNamedNumber(text, ["mean", "mu1", "alt", "alternative"], Number.NaN);
+  const nullMean = readPowerNamedNumber(text, ["mu", "mu0", "null"], Number.NaN);
+  return Number.isFinite(meanValue) && Number.isFinite(nullMean) ? (meanValue - nullMean) / sd : Number.NaN;
+}
+
+function validatePowerRequest(request) {
+  if (request.mode === "sample-size") {
+    if (!(request.targetPower > 0 && request.targetPower < 1)) {
+      throw new Error("Sample-size analysis needs target power between 0 and 1, such as power=0.8.");
+    }
+  } else if (!Number.isInteger(request.n) || request.n < 2) {
+    throw new Error("Power analysis needs an integer sample size n >= 2.");
+  }
+  return request;
+}
+
+function powerForDesign(request) {
+  if (request.model === "one-proportion") {
+    return oneProportionDesignPower(request.p0, request.p1, request.n, request.alpha, request.alternative);
+  }
+
+  const signedEffect = signedEffectForAlternative(request.effect, request.alternative);
+  const shift = request.model === "two-sample-mean"
+    ? signedEffect * Math.sqrt(request.n / 2)
+    : signedEffect * Math.sqrt(request.n);
+  return shiftedNormalPower(shift, 1, request.alpha, request.alternative);
+}
+
+function oneProportionDesignPower(p0, p1, n, alpha, alternative) {
+  const nullStandardError = Math.sqrt((p0 * (1 - p0)) / n);
+  const altStandardError = Math.sqrt((p1 * (1 - p1)) / n);
+  const meanShift = (p1 - p0) / nullStandardError;
+  const scale = altStandardError / nullStandardError;
+  return shiftedNormalPower(meanShift, scale, alpha, alternative);
+}
+
+function shiftedNormalPower(meanShift, scale, alpha, alternative) {
+  const critical = criticalValueForPower(alpha, alternative);
+  if (alternative === "greater") {
+    return clampProbability(1 - normalCdf((critical - meanShift) / scale));
+  }
+  if (alternative === "less") {
+    return clampProbability(normalCdf((-critical - meanShift) / scale));
+  }
+  return clampProbability(
+    normalCdf((-critical - meanShift) / scale) +
+      (1 - normalCdf((critical - meanShift) / scale)),
+  );
+}
+
+function solvePowerSampleSize(request) {
+  let low = 2;
+  let high = 2;
+  while (powerForDesign({ ...request, n: high }) < request.targetPower) {
+    high *= 2;
+    if (high > 1000000) {
+      throw new Error("Required sample size is above 1,000,000 for this design.");
+    }
+  }
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (powerForDesign({ ...request, n: mid }) >= request.targetPower) {
+      high = mid;
+    } else {
+      low = mid + 1;
+    }
+  }
+  return low;
+}
+
+function criticalValueForPower(alpha, alternative) {
+  return alternative === "two-sided"
+    ? inverseNormalCdf(1 - alpha / 2)
+    : inverseNormalCdf(1 - alpha);
+}
+
+function signedEffectForAlternative(effect, alternative) {
+  if (alternative === "less") {
+    return -Math.abs(effect);
+  }
+  if (alternative === "greater") {
+    return Math.abs(effect);
+  }
+  return Math.abs(effect);
+}
+
+function formatPowerSampleSizeAnswer(request, sampleSize, achievedPower) {
+  const unit = formatPowerSampleUnit(request);
+  return `${unit} = ${formatNumber(sampleSize)} for power ~= ${formatNumber(achievedPower)}`;
+}
+
+function formatPowerSampleUnit(request) {
+  return request.model === "two-sample-mean" ? "n per group" : "n";
+}
+
+function powerAnalysisArtifacts(request, sampleSize, achievedPower, critical) {
+  const artifacts = [
+    ["Model", request.modelLabel],
+    ["Alternative", request.alternative],
+    ["Alpha", formatNumber(request.alpha)],
+    ["z critical", formatNumber(critical)],
+    [formatPowerSampleUnit(request), formatNumber(sampleSize)],
+    ["Power", formatNumber(achievedPower)],
+  ];
+  if (request.mode === "sample-size") {
+    artifacts.splice(5, 0, ["Target power", formatNumber(request.targetPower)]);
+  }
+  if (request.model === "one-proportion") {
+    artifacts.splice(2, 0, ["Null proportion", formatNumber(request.p0)], ["Alternative proportion", formatNumber(request.p1)]);
+  } else {
+    artifacts.splice(2, 0, ["Effect size", formatNumber(request.effect)]);
+  }
+  return artifacts;
+}
+
+function readPowerNamedNumber(text, names, fallback) {
+  const numberPattern = "([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)";
+  for (const name of names) {
+    const escaped = name
+      .trim()
+      .split(/\s+/)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\s_-]+");
+    const match = text.match(new RegExp(`\\b${escaped}\\s*=\\s*${numberPattern}`, "i"));
+    if (match) {
+      return Number(match[1]);
+    }
+  }
+  return fallback;
+}
+
 function proportionEffectSize(leftProportion, rightProportion) {
   return 2 * Math.asin(Math.sqrt(leftProportion)) - 2 * Math.asin(Math.sqrt(rightProportion));
 }
@@ -7348,6 +7629,11 @@ function isStatisticsQuestion(lower) {
     "probability",
     "statistics",
     "dataset",
+    "statistical power",
+    "power analysis",
+    "sample size",
+    "required n",
+    "needed n",
     "hypothesis",
     "t-test",
     "t test",
