@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  analyzeCombinatorics,
   analyzeDerivative,
   analyzeEquation,
   analyzeFactoring,
@@ -65,6 +66,12 @@ runTest("factoring mode leaves irreducible factors", () => {
 
   assert.equal(result.summary, "rational factorization");
   assert.equal(result.answer, "(x + 1)(x - 1)(x^2 + 1)");
+});
+
+runTest("combinatorics mode computes exact counts", () => {
+  assert.equal(analyzeCombinatorics("10 choose 3").answer, "C(10, 3) = 120");
+  assert.equal(analyzeCombinatorics("permutation n=10 k=3").answer, "P(10, 3) = 720");
+  assert.equal(analyzeCombinatorics("6!").answer, "6! = 720");
 });
 
 runTest("inequality mode solves strict quadratic inequalities", () => {
@@ -230,6 +237,14 @@ runTest("statistics mode computes Poisson probabilities", () => {
 
   assert.equal(result.summary, "Poisson probability");
   assert.equal(result.answer, "P(X <= 2) = 0.42319");
+});
+
+runTest("statistics mode computes hypergeometric probabilities", () => {
+  const result = analyzeStatistics("hypergeometric population=50 successes=5 draws=10 k=2");
+
+  assert.equal(result.summary, "hypergeometric probability");
+  assert.equal(result.answer, "P(X = 2) = 0.20984");
+  assert.equal(artifactValue(result, "Expected value"), "1");
 });
 
 runTest("statistics mode computes discrete expected value", () => {
@@ -442,6 +457,7 @@ runTest("universal mode routes systems", () => {
 runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("det [[1,2],[3,4]]").summary, "determinant");
   assert.equal(analyzeUniversal("factor x^2 - 5x + 6").answer, "(x - 2)(x - 3)");
+  assert.equal(analyzeUniversal("10 choose 3").answer, "C(10, 3) = 120");
   assert.equal(analyzeUniversal("solve x^2 - 5x + 6 > 0").answer, "x in (-inf, 2) U (3, inf)");
   assert.equal(analyzeUniversal("integrate x^2").summary, "indefinite integral");
   assert.equal(analyzeUniversal("integrate x^2 from 0 to 3").summary, "definite integral");
@@ -456,6 +472,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
   assert.equal(analyzeUniversal("poisson lambda=3 k=2").summary, "Poisson probability");
+  assert.equal(analyzeUniversal("hypergeometric population=50 successes=5 draws=10 k=2").summary, "hypergeometric probability");
   assert.equal(analyzeUniversal("expected value values: 0, 1, 2 probabilities: 0.2, 0.5, 0.3").summary, "discrete expected value");
   assert.equal(analyzeUniversal("bayes prior=0.01 sensitivity=0.99 specificity=0.95").summary, "Bayes theorem");
   assert.equal(analyzeUniversal("mann-whitney group1: 10,12,9; group2: 8,7,11").summary, "Mann-Whitney U test");

@@ -14,6 +14,7 @@ The frontend currently supports:
 - Algebra simplification with constants and like terms
 - Rational-root polynomial factoring for quadratics, cubics, and higher-degree
   one-variable polynomials with rational roots
+- Exact combinatorics for factorials, permutations, and combinations
 - One-variable polynomial inequalities with sign charts and interval notation
 - Linear and quadratic equation solving
 - Numerical real-root approximation for higher-degree one-variable polynomials
@@ -31,8 +32,8 @@ The frontend currently supports:
   one-proportion/two-proportion z tests, proportion confidence intervals,
   one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis,
   chi-square goodness-of-fit, binomial probability, Poisson probability, normal
-  probability, discrete expected value/variance, Bayes theorem, and z-score
-  calculations
+  probability, hypergeometric probability, discrete expected value/variance,
+  Bayes theorem, and z-score calculations
 - Effect sizes and follow-up comparisons, including Cohen's d/dz, Hedges g,
   eta squared, omega squared, rank-biserial correlation, epsilon squared,
   Cohen's w, Bonferroni-adjusted ANOVA pairwise comparisons, and Dunn-style
@@ -83,6 +84,7 @@ The same idea works for algebra and calculus:
 - `2x + 3x` becomes a tree with `+` at the root and multiplication below it.
 - `factor x^3 - 6x^2 + 11x - 6` uses rational roots and synthetic division
   to produce `(x - 1)(x - 2)(x - 3)`.
+- `10 choose 3` uses exact integer combinatorics and returns `C(10, 3) = 120`.
 - `solve x^2 - 5x + 6 > 0` finds critical points and returns
   `x in (-inf, 2) U (3, inf)`.
 - `x^3` becomes a power node, so the derivative engine can apply the power rule.
@@ -103,6 +105,8 @@ The same idea works for algebra and calculus:
   and computes a nonparametric U test.
 - `ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10` reports F,
   p-value, eta squared, omega squared, and pairwise comparisons.
+- `hypergeometric population=50 successes=5 draws=10 k=2` models sampling
+  without replacement and returns `P(X = 2) = 0.20984`.
 - `two-proportion z-test successes1=56 n1=100 successes2=44 n2=100` compares
   two sample proportions and reports `z = 1.697056, p = 0.089686`.
 - `expected value values: 0,1,2 probabilities: 0.2,0.5,0.3` treats the
@@ -160,12 +164,14 @@ The demo includes:
 - Expression-tree visualization
 - Truth tables for logic mode
 - Polynomial factoring through Ask mode
+- Exact combinatorics through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
-  Poisson probability, normal probability, z-scores, discrete expected value,
-  Bayes theorem, one-sample/two-sample/paired t tests, one-proportion/two-proportion
-  z tests, proportion confidence intervals, ANOVA, chi-square tests, nonparametric
-  rank tests, effect sizes, and pairwise follow-up summaries in Stats mode
+  Poisson probability, hypergeometric probability, normal probability, z-scores,
+  discrete expected value, Bayes theorem, one-sample/two-sample/paired t tests,
+  one-proportion/two-proportion z tests, proportion confidence intervals, ANOVA,
+  chi-square tests, nonparametric rank tests, effect sizes, and pairwise follow-up
+  summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
   graphing, and numerical roots through Ask mode
 - Step-by-step explanation cards

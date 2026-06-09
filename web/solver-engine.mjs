@@ -379,6 +379,79 @@ export function analyzeDerivative(statement, variable = "x") {
   };
 }
 
+export function analyzeCombinatorics(statement) {
+  const request = parseCombinatoricsInput(statement);
+  const nText = String(request.n);
+  let result;
+  let answer;
+  let summary;
+  let detail;
+  let formula;
+
+  if (request.operation === "factorial") {
+    result = factorialBigInt(request.n);
+    answer = `${nText}! = ${result.toString()}`;
+    summary = "factorial count";
+    detail = "Ordered arrangements of all items";
+    formula = "n!";
+  } else if (request.operation === "permutation") {
+    result = permutationBigInt(request.n, request.k);
+    answer = `P(${nText}, ${request.k}) = ${result.toString()}`;
+    summary = "permutation count";
+    detail = "Ordered arrangements without replacement";
+    formula = "n! / (n-k)!";
+  } else {
+    result = combinationBigInt(request.n, request.k);
+    answer = `C(${nText}, ${request.k}) = ${result.toString()}`;
+    summary = "combination count";
+    detail = "Unordered selections without replacement";
+    formula = "n! / (k!(n-k)!)";
+  }
+
+  const tree = {
+    kind: "statsDistribution",
+    label: request.operation === "factorial" ? "FACTORIAL" : request.operation === "permutation" ? "PERMUTE" : "CHOOSE",
+    children: [
+      statsMetricNode("n", request.n),
+      ...(request.operation === "factorial" ? [] : [statsMetricNode("k", request.k)]),
+    ],
+  };
+
+  return {
+    mode: "combinatorics",
+    tree,
+    answer,
+    summary,
+    details: detail,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read counting problem",
+        expression: request.operation === "factorial" ? `n = ${nText}` : `n = ${nText}, k = ${request.k}`,
+        detail: "The solver identifies whether order matters.",
+      },
+      {
+        title: "Select counting formula",
+        expression: formula,
+        detail,
+      },
+      {
+        title: "Evaluate count exactly",
+        expression: answer,
+        detail: "The count is computed with exact integer arithmetic.",
+      },
+    ],
+    artifacts: [
+      ["Operation", request.operation],
+      ["n", nText],
+      ...(request.operation === "factorial" ? [] : [["k", String(request.k)]]),
+      ["Formula", formula],
+      ["Count", result.toString()],
+    ],
+  };
+}
+
 export function analyzeStatistics(statement) {
   const lower = statement.toLowerCase();
 
@@ -409,6 +482,10 @@ export function analyzeStatistics(statement) {
 
   if (lower.includes("chi-square") || lower.includes("chi square") || lower.includes("chisquare")) {
     return analyzeChiSquare(statement);
+  }
+
+  if (lower.includes("hypergeometric")) {
+    return analyzeHypergeometric(statement);
   }
 
   if (lower.includes("proportion")) {
@@ -511,6 +588,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isFactorQuestion(lower)) {
     routed = analyzeFactoring(question);
     routedLabel = "Factor";
+  } else if (isCombinatoricsQuestion(lower)) {
+    routed = analyzeCombinatorics(question);
+    routedLabel = "Combinatorics";
   } else if (isStatisticsQuestion(lower)) {
     routed = analyzeStatistics(question);
     routedLabel = "Statistics";
@@ -1841,6 +1921,84 @@ function analyzeChiSquare(statement) {
       ["p-value", formatNumber(pValue)],
       ["Cohen's w", formatNumber(cohensW)],
       ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeHypergeometric(statement) {
+  const request = parseHypergeometricInput(statement);
+  const minK = Math.max(0, request.draws - (request.population - request.successes));
+  const maxK = Math.min(request.successes, request.draws);
+  const exact = hypergeometricProbability(request.population, request.successes, request.draws, request.k);
+  const atMost = sumRange(minK, request.k, (value) =>
+    hypergeometricProbability(request.population, request.successes, request.draws, value),
+  );
+  const atLeast = sumRange(request.k, maxK, (value) =>
+    hypergeometricProbability(request.population, request.successes, request.draws, value),
+  );
+  const expected = request.draws * (request.successes / request.population);
+  const variance = request.draws *
+    (request.successes / request.population) *
+    (1 - request.successes / request.population) *
+    ((request.population - request.draws) / (request.population - 1));
+  const label = `P(X = ${request.k})`;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "HYPERGEOM",
+      children: [
+        statsMetricNode("N", request.population),
+        statsMetricNode("K", request.successes),
+        statsMetricNode("n", request.draws),
+        statsMetricNode("k", request.k),
+      ],
+    },
+    answer: `${label} = ${formatNumber(exact)}`,
+    summary: "hypergeometric probability",
+    details: "Sampling without replacement",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [
+        statsMetricNode("population", request.population),
+        statsMetricNode("successes", request.successes),
+        statsMetricNode("draws", request.draws),
+      ],
+    }),
+    steps: [
+      {
+        title: "Read sampling setup",
+        expression: `N = ${request.population}, K = ${request.successes}, n = ${request.draws}, k = ${request.k}`,
+        detail: "A hypergeometric model counts successes when sampling without replacement.",
+      },
+      {
+        title: "Apply probability formula",
+        expression: "P(X = k) = C(K,k) C(N-K,n-k) / C(N,n)",
+        detail: "The numerator chooses successful and unsuccessful draws; the denominator chooses all possible samples.",
+      },
+      {
+        title: "Evaluate probability",
+        expression: `${label} = ${formatNumber(exact)}`,
+        detail: "The solver also reports cumulative tails and distribution moments.",
+      },
+    ],
+    table: {
+      headers: ["Term", "Value"],
+      rows: [
+        ["C(K,k)", formatNumber(combination(request.successes, request.k))],
+        ["C(N-K,n-k)", formatNumber(combination(request.population - request.successes, request.draws - request.k))],
+        ["C(N,n)", formatNumber(combination(request.population, request.draws))],
+      ],
+    },
+    artifacts: [
+      [label, formatNumber(exact)],
+      [`P(X <= ${request.k})`, formatNumber(atMost)],
+      [`P(X >= ${request.k})`, formatNumber(atLeast)],
+      ["Expected value", formatNumber(expected)],
+      ["Variance", formatNumber(variance)],
+      ["Standard deviation", formatNumber(Math.sqrt(variance))],
     ],
   };
 }
@@ -3747,6 +3905,33 @@ function parseChiSquareInput(text) {
   throw new Error("Use chi-square observed 10, 20, 30 expected 15, 15, 30.");
 }
 
+function parseHypergeometricInput(text) {
+  const numbers = parseNumbers(text);
+  const population = readNamedNumber(text, ["population", "total", "size"], numbers[0]);
+  const successes = readNamedNumber(text, ["successes", "good"], numbers[1]);
+  const draws = readNamedNumber(text, ["draws", "sample", "selected"], numbers[2]);
+  const k = readNamedNumber(text, ["k", "x", "observed"], numbers[3]);
+
+  if (![population, successes, draws, k].every(Number.isInteger)) {
+    throw new Error("Use hypergeometric population=50 successes=5 draws=10 k=2.");
+  }
+  if (population <= 1 || successes < 0 || successes > population || draws < 0 || draws > population) {
+    throw new Error("Hypergeometric inputs need 0 <= successes <= population and 0 <= draws <= population.");
+  }
+  const minK = Math.max(0, draws - (population - successes));
+  const maxK = Math.min(successes, draws);
+  if (k < minK || k > maxK) {
+    throw new Error(`Hypergeometric k must be between ${minK} and ${maxK} for these inputs.`);
+  }
+
+  return {
+    population,
+    successes,
+    draws,
+    k,
+  };
+}
+
 function parseOneProportionInput(text, { needsNull }) {
   const { alpha, cleaned } = extractAlpha(text);
   const numbers = parseNumbers(cleaned);
@@ -3820,6 +4005,32 @@ function validateProportionCount(successes, total, context) {
   if (total <= 0 || successes < 0 || successes > total) {
     throw new Error(`${context} need 0 <= successes <= n and n > 0.`);
   }
+}
+
+function parseCombinatoricsInput(text) {
+  const lower = text.toLowerCase();
+  const numbers = parseNumbers(text);
+  const operation = lower.includes("factorial") || /!\s*$/.test(text.trim())
+    ? "factorial"
+    : lower.includes("permutation") || lower.includes("permute") || lower.includes("npr") || lower.includes("arrangement")
+      ? "permutation"
+      : "combination";
+  const n = readNamedNumber(text, ["n", "items", "total"], numbers[0]);
+  const k = operation === "factorial"
+    ? 0
+    : readNamedNumber(text, ["k", "r", "select"], numbers[1]);
+
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error("Counting problems need a nonnegative integer n.");
+  }
+  if (n > 500) {
+    throw new Error("Counting mode supports n up to 500 to keep exact integer output readable.");
+  }
+  if (operation !== "factorial" && (!Number.isInteger(k) || k < 0 || k > n)) {
+    throw new Error("Combinations and permutations need integers with 0 <= k <= n.");
+  }
+
+  return { operation, n, k };
 }
 
 function extractAlpha(text) {
@@ -4272,9 +4483,24 @@ function poissonProbability(lambda, k) {
   return Math.exp(-lambda) * lambda ** k / factorial(k);
 }
 
+function hypergeometricProbability(population, successes, draws, k) {
+  return (
+    combination(successes, k) *
+    combination(population - successes, draws - k)
+  ) / combination(population, draws);
+}
+
 function factorial(value) {
   let result = 1;
   for (let index = 2; index <= value; index += 1) {
+    result *= index;
+  }
+  return result;
+}
+
+function factorialBigInt(value) {
+  let result = 1n;
+  for (let index = 2n; index <= BigInt(value); index += 1n) {
     result *= index;
   }
   return result;
@@ -4285,6 +4511,23 @@ function combination(n, k) {
   let result = 1;
   for (let index = 1; index <= limit; index += 1) {
     result = (result * (n - limit + index)) / index;
+  }
+  return result;
+}
+
+function combinationBigInt(n, k) {
+  const limit = Math.min(k, n - k);
+  let result = 1n;
+  for (let index = 1; index <= limit; index += 1) {
+    result = (result * BigInt(n - limit + index)) / BigInt(index);
+  }
+  return result;
+}
+
+function permutationBigInt(n, k) {
+  let result = 1n;
+  for (let index = 0; index < k; index += 1) {
+    result *= BigInt(n - index);
   }
   return result;
 }
@@ -4434,6 +4677,7 @@ function isStatisticsQuestion(lower) {
     "correlation",
     "binomial",
     "poisson",
+    "hypergeometric",
     "normal",
     "z-score",
     "zscore",
@@ -4494,6 +4738,18 @@ function isFactorQuestion(lower) {
     lower.startsWith("factorise ") ||
     lower.startsWith("fully factor ") ||
     lower.startsWith("factor the ");
+}
+
+function isCombinatoricsQuestion(lower) {
+  return lower.includes("choose") ||
+    lower.includes("combination") ||
+    lower.includes("permutation") ||
+    lower.includes("permute") ||
+    lower.includes("arrangement") ||
+    lower.includes("ncr") ||
+    lower.includes("npr") ||
+    lower.includes("factorial") ||
+    /^\s*\d+\s*!\s*$/.test(lower);
 }
 
 function isInequalityQuestion(question) {
