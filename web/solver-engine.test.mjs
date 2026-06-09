@@ -20,6 +20,7 @@ import {
   analyzeSystem,
   analyzeTaylor,
   analyzeUniversal,
+  analyzeVector,
 } from "./solver-engine.mjs";
 
 function runTest(name, callback) {
@@ -85,6 +86,15 @@ runTest("number theory mode computes integer operations", () => {
   assert.equal(analyzeNumberTheory("7^128 mod 13").answer, "7^128 mod 13 = 3");
   assert.equal(analyzeNumberTheory("mod inverse 3 mod 11").answer, "3^-1 mod 11 = 4");
   assert.equal(analyzeNumberTheory("crt x=2 mod 3; x=3 mod 5; x=2 mod 7").answer, "x = 23 mod 105");
+});
+
+runTest("vector mode computes vector geometry", () => {
+  assert.equal(analyzeVector("dot [1,2,3] [4,5,6]").answer, "dot = 32");
+  assert.equal(analyzeVector("cross [1,2,3] [4,5,6]").answer, "cross = [-3, 6, -3]");
+  assert.equal(analyzeVector("magnitude [3,4]").answer, "|v| = 5");
+  assert.equal(analyzeVector("angle between [1,0] [0,1]").answer, "angle = 90 degrees");
+  assert.equal(analyzeVector("projection [3,4] onto [1,0]").answer, "projection = [3, 0]");
+  assert.equal(analyzeVector("distance [1,2] [4,6]").answer, "distance = 5");
 });
 
 runTest("inequality mode solves strict quadratic inequalities", () => {
@@ -549,4 +559,6 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("eigen [[2,1],[1,2]]").summary, "2x2 eigenvalues");
   assert.equal(analyzeUniversal("nullspace [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix null space");
   assert.equal(analyzeUniversal("eigenvectors [[2,1],[1,2]]").summary, "2x2 eigenvectors");
+  assert.equal(analyzeUniversal("dot [1,2,3] [4,5,6]").summary, "dot product");
+  assert.equal(analyzeUniversal("angle between [1,0] [0,1]").summary, "vector angle");
 });

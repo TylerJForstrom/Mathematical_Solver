@@ -883,6 +883,9 @@ export function analyzeUniversal(question, values = {}) {
   if (isMatrixQuestion(lower)) {
     routed = analyzeMatrix(question);
     routedLabel = "Matrix";
+  } else if (isVectorQuestion(lower)) {
+    routed = analyzeVector(question);
+    routedLabel = "Vector";
   } else if (isGraphQuestion(lower)) {
     routed = analyzeGraph(question);
     routedLabel = "Graph";
@@ -1249,6 +1252,185 @@ export function analyzeMatrix(statement) {
     variables: [],
     metrics: treeMetrics(tree),
     steps,
+    artifacts,
+  };
+}
+
+export function analyzeVector(statement) {
+  const request = parseVectorInput(statement);
+  const steps = [
+    {
+      title: "Read vector request",
+      expression: request.vectors.map(formatVector).join(", "),
+      detail: "The solver extracts vector literals and checks their dimensions.",
+    },
+  ];
+  let answer;
+  let summary;
+  let details;
+  let artifacts;
+  let table;
+  let treeChildren;
+
+  if (request.operation === "magnitude") {
+    const vector = request.vectors[0];
+    const magnitude = vectorMagnitude(vector);
+    answer = `|v| = ${formatNumber(magnitude)}`;
+    summary = "vector magnitude";
+    details = "Euclidean norm";
+    artifacts = [
+      ["Vector", formatVector(vector)],
+      ["Magnitude", formatNumber(magnitude)],
+    ];
+    treeChildren = [vectorNode("v", vector), statsMetricNode("norm", magnitude)];
+    steps.push({
+      title: "Compute Euclidean norm",
+      expression: `sqrt(sum v_i^2) = ${formatNumber(magnitude)}`,
+      detail: "The magnitude is the square root of the sum of squared components.",
+    });
+  } else if (request.operation === "dot") {
+    const [left, right] = request.vectors;
+    assertSameVectorDimension(left, right);
+    const result = dotProduct(left, right);
+    answer = `dot = ${formatNumber(result)}`;
+    summary = "dot product";
+    details = "Component-wise product sum";
+    artifacts = [
+      ["u", formatVector(left)],
+      ["v", formatVector(right)],
+      ["Dot product", formatNumber(result)],
+    ];
+    table = vectorPairTable(left, right, (a, b) => a * b, "Product");
+    treeChildren = [vectorNode("u", left), vectorNode("v", right), statsMetricNode("dot", result)];
+    steps.push({
+      title: "Sum component products",
+      expression: left.map((value, index) => `${formatNumber(value)}*${formatNumber(right[index])}`).join(" + "),
+      detail: `The dot product is ${formatNumber(result)}.`,
+    });
+  } else if (request.operation === "cross") {
+    const [left, right] = request.vectors;
+    if (left.length !== 3 || right.length !== 3) {
+      throw new Error("Cross product requires two 3D vectors.");
+    }
+    const result = crossProduct(left, right);
+    answer = `cross = ${formatVector(result)}`;
+    summary = "cross product";
+    details = "3D perpendicular vector";
+    artifacts = [
+      ["u", formatVector(left)],
+      ["v", formatVector(right)],
+      ["Cross product", formatVector(result)],
+    ];
+    treeChildren = [vectorNode("u", left), vectorNode("v", right), vectorNode("u x v", result)];
+    steps.push({
+      title: "Compute determinant components",
+      expression: formatVector(result),
+      detail: "The cross product returns a vector perpendicular to both 3D inputs.",
+    });
+  } else if (request.operation === "angle") {
+    const [left, right] = request.vectors;
+    assertSameVectorDimension(left, right);
+    const dot = dotProduct(left, right);
+    const leftMagnitude = vectorMagnitude(left);
+    const rightMagnitude = vectorMagnitude(right);
+    if (nearlyEqual(leftMagnitude, 0) || nearlyEqual(rightMagnitude, 0)) {
+      throw new Error("Angle between vectors needs two nonzero vectors.");
+    }
+    const cosine = Math.max(-1, Math.min(1, dot / (leftMagnitude * rightMagnitude)));
+    const radians = Math.acos(cosine);
+    const degrees = radians * 180 / Math.PI;
+    answer = `angle = ${formatNumber(degrees)} degrees`;
+    summary = "vector angle";
+    details = "Angle from dot product";
+    artifacts = [
+      ["Dot product", formatNumber(dot)],
+      ["|u|", formatNumber(leftMagnitude)],
+      ["|v|", formatNumber(rightMagnitude)],
+      ["cos(theta)", formatNumber(cosine)],
+      ["Radians", formatNumber(radians)],
+      ["Degrees", formatNumber(degrees)],
+    ];
+    treeChildren = [
+      vectorNode("u", left),
+      vectorNode("v", right),
+      statsMetricNode("angle", degrees),
+    ];
+    steps.push({
+      title: "Use dot product identity",
+      expression: "cos(theta) = (u dot v) / (|u||v|)",
+      detail: `The angle is ${formatNumber(degrees)} degrees.`,
+    });
+  } else if (request.operation === "projection") {
+    const [source, target] = request.vectors;
+    assertSameVectorDimension(source, target);
+    const denominator = dotProduct(target, target);
+    if (nearlyEqual(denominator, 0)) {
+      throw new Error("Projection target vector must be nonzero.");
+    }
+    const scalar = dotProduct(source, target) / denominator;
+    const projection = target.map((value) => scalar * value);
+    answer = `projection = ${formatVector(projection)}`;
+    summary = "vector projection";
+    details = "Projection of one vector onto another";
+    artifacts = [
+      ["source", formatVector(source)],
+      ["onto", formatVector(target)],
+      ["Scale", formatNumber(scalar)],
+      ["Projection", formatVector(projection)],
+    ];
+    treeChildren = [
+      vectorNode("source", source),
+      vectorNode("onto", target),
+      vectorNode("proj", projection),
+    ];
+    steps.push({
+      title: "Scale the target vector",
+      expression: `proj = ((u dot v)/(v dot v))v = ${formatVector(projection)}`,
+      detail: "The result is the component of the source vector in the target direction.",
+    });
+  } else {
+    const [left, right] = request.vectors;
+    assertSameVectorDimension(left, right);
+    const difference = left.map((value, index) => value - right[index]);
+    const distance = vectorMagnitude(difference);
+    answer = `distance = ${formatNumber(distance)}`;
+    summary = "vector distance";
+    details = "Euclidean distance between two points";
+    artifacts = [
+      ["first", formatVector(left)],
+      ["second", formatVector(right)],
+      ["Difference", formatVector(difference)],
+      ["Distance", formatNumber(distance)],
+    ];
+    treeChildren = [
+      vectorNode("p", left),
+      vectorNode("q", right),
+      vectorNode("p - q", difference),
+      statsMetricNode("distance", distance),
+    ];
+    steps.push({
+      title: "Measure difference vector",
+      expression: `|p - q| = ${formatNumber(distance)}`,
+      detail: "Distance is the magnitude of the component-wise difference.",
+    });
+  }
+
+  const tree = {
+    kind: "matrixOperation",
+    label: "VECTOR",
+    children: treeChildren,
+  };
+
+  return {
+    mode: "vector",
+    tree,
+    answer,
+    summary,
+    details,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps,
+    table,
     artifacts,
   };
 }
@@ -3534,6 +3716,68 @@ function parseMatrixLiteral(literal) {
   }));
 }
 
+function parseVectorInput(text) {
+  const vectors = extractVectors(text);
+  const lower = text.toLowerCase();
+  let operation;
+  if (lower.startsWith("magnitude") || lower.startsWith("norm") || lower.startsWith("length")) {
+    operation = "magnitude";
+  } else if (lower.startsWith("cross") || lower.includes("cross product")) {
+    operation = "cross";
+  } else if (lower.startsWith("angle") || lower.includes("angle between")) {
+    operation = "angle";
+  } else if (lower.startsWith("projection") || lower.includes("project ")) {
+    operation = "projection";
+  } else if (lower.startsWith("distance") || lower.includes("distance between")) {
+    operation = "distance";
+  } else {
+    operation = "dot";
+  }
+
+  const expected = operation === "magnitude" ? 1 : 2;
+  if (vectors.length < expected) {
+    throw new Error(`${operation} needs ${expected} vector${expected === 1 ? "" : "s"}, such as dot [1,2] [3,4].`);
+  }
+
+  return {
+    operation,
+    vectors: vectors.slice(0, expected),
+  };
+}
+
+function extractVectors(text) {
+  const vectors = [];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== "[" || text[index + 1] === "[") {
+      continue;
+    }
+    const start = index;
+    let depth = 0;
+    for (; index < text.length; index += 1) {
+      if (text[index] === "[") depth += 1;
+      if (text[index] === "]") depth -= 1;
+      if (depth === 0) {
+        vectors.push(parseVectorLiteral(text.slice(start, index + 1)));
+        break;
+      }
+    }
+  }
+  return vectors;
+}
+
+function parseVectorLiteral(literal) {
+  let vector;
+  try {
+    vector = JSON.parse(literal);
+  } catch {
+    throw new Error(`Invalid vector notation '${literal}'. Use [1,2,3].`);
+  }
+  if (!Array.isArray(vector) || vector.length === 0 || vector.some((value) => !Number.isFinite(Number(value)))) {
+    throw new Error("Vector entries must be numbers.");
+  }
+  return vector.map(Number);
+}
+
 function matrixShape(matrix) {
   return `${matrix.length}x${matrix[0].length}`;
 }
@@ -3550,6 +3794,14 @@ function formatVectorList(vectors) {
   return `[${vectors.map(formatVector).join(", ")}]`;
 }
 
+function vectorNode(label, vector) {
+  return {
+    kind: "matrixRow",
+    label,
+    children: vector.map((value) => statsMetricNode("VALUE", value)),
+  };
+}
+
 function matrixNode(label, matrix) {
   return {
     kind: "matrix",
@@ -3559,6 +3811,40 @@ function matrixNode(label, matrix) {
       label: `R${index + 1}`,
       children: row.map((value) => statsMetricNode("VALUE", value)),
     })),
+  };
+}
+
+function assertSameVectorDimension(left, right) {
+  if (left.length !== right.length) {
+    throw new Error("Vector operations need vectors with the same dimension.");
+  }
+}
+
+function dotProduct(left, right) {
+  return left.reduce((sum, value, index) => sum + value * right[index], 0);
+}
+
+function crossProduct(left, right) {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0],
+  ];
+}
+
+function vectorMagnitude(vector) {
+  return Math.sqrt(dotProduct(vector, vector));
+}
+
+function vectorPairTable(left, right, combiner, label) {
+  return {
+    headers: ["Index", "u", "v", label],
+    rows: left.map((value, index) => [
+      String(index + 1),
+      formatNumber(value),
+      formatNumber(right[index]),
+      formatNumber(combiner(value, right[index])),
+    ]),
   };
 }
 
@@ -5934,6 +6220,23 @@ function isMatrixQuestion(lower) {
     lower.includes("inverse [[") ||
     lower.includes("multiply [[") ||
     lower.includes("product [[");
+}
+
+function isVectorQuestion(lower) {
+  return lower.startsWith("dot ") ||
+    lower.includes("dot product") ||
+    lower.startsWith("cross ") ||
+    lower.includes("cross product") ||
+    lower.startsWith("angle ") ||
+    lower.includes("angle between") ||
+    lower.startsWith("projection ") ||
+    lower.includes("project ") ||
+    lower.startsWith("distance ") ||
+    lower.includes("distance between") ||
+    lower.startsWith("magnitude ") ||
+    lower.startsWith("norm ") ||
+    lower.startsWith("length of vector") ||
+    lower.includes(" vector projection");
 }
 
 function isGraphQuestion(lower) {

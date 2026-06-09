@@ -24,6 +24,8 @@ The frontend currently supports:
 - Systems of linear equations through Universal Ask mode
 - Matrix determinants, inverses, multiplication, row reduction, rank, null spaces,
   and 2x2 eigenvalues/eigenvectors
+- Vector geometry: dot products, cross products, magnitudes, angles,
+  projections, and point distances
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
 - Finite and one-sided numeric limits, including removable discontinuities
 - Taylor and Maclaurin polynomial expansions for supported elementary functions
@@ -105,6 +107,8 @@ The same idea works for algebra and calculus:
   returns `10 + 5i`.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
 - `det [[1,2],[3,4]]` becomes a matrix-operation tree.
+- `dot [1,2,3] [4,5,6]`, `angle between [1,0] [0,1]`, and
+  `projection [3,4] onto [1,0]` evaluate vector-geometry trees.
 - `rref [[1,2,1],[2,4,2],[1,1,0]]` becomes a row-operation tree with rank and pivots.
 - `nullspace [[1,2,1],[2,4,2],[1,1,0]]` extracts a basis from the RREF free variables.
 - `eigenvectors [[2,1],[1,2]]` solves the 2x2 characteristic polynomial and then
@@ -201,7 +205,7 @@ The demo includes:
   proportion confidence intervals, ANOVA, chi-square tests, nonparametric rank
   tests, effect sizes, and pairwise follow-up summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
-  graphing, and numerical roots through Ask mode
+  vector geometry, graphing, and numerical roots through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
 
