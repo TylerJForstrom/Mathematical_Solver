@@ -1052,6 +1052,10 @@ export function analyzeStatistics(statement) {
     return analyzeMultivariateStatistics(statement);
   }
 
+  if (isKMeansQuestion(lower)) {
+    return analyzeKMeansClustering(statement);
+  }
+
   if (
     lower.includes("regression") ||
     lower.includes("correlation") ||
@@ -4110,6 +4114,68 @@ function analyzeMultivariateStatistics(statement) {
   };
 }
 
+function analyzeKMeansClustering(statement) {
+  const request = parseKMeansInput(statement);
+  const result = fitKMeans(request.points, request.k);
+  const tree = {
+    kind: "statsDistribution",
+    label: "KMEANS",
+    children: [
+      matrixNode("POINTS", request.points),
+      matrixNode("CENTROIDS", result.centroids),
+      statsMetricNode("SSE", result.sse),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `centroids = ${formatMatrix(result.centroids)}; SSE = ${formatNumber(result.sse)}`,
+    summary: "k-means clustering",
+    details: `${request.points.length} points, ${request.k} clusters`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read points and cluster count",
+        expression: `k = ${request.k}, points = ${request.points.map(formatVector).join(", ")}`,
+        detail: "K-means groups points by distance to cluster centroids.",
+      },
+      {
+        title: "Initialize centroids",
+        expression: formatMatrix(result.initialCentroids),
+        detail: "The solver uses deterministic farthest-first initialization so the same input gives the same clusters.",
+      },
+      {
+        title: "Alternate assignment and update",
+        expression: `${result.iterations} iterations, ${result.converged ? "converged" : "stopped"}`,
+        detail: "Each iteration assigns points to the closest centroid, then replaces each centroid with its cluster mean.",
+      },
+      {
+        title: "Compute within-cluster SSE",
+        expression: `SSE = ${formatNumber(result.sse)}`,
+        detail: "SSE sums squared distances from each point to its assigned centroid.",
+      },
+    ],
+    table: {
+      headers: ["Point", "Cluster", "Squared distance"],
+      rows: request.points.map((point, index) => [
+        formatVector(point),
+        String(result.assignments[index] + 1),
+        formatNumber(squaredDistance(point, result.centroids[result.assignments[index]])),
+      ]),
+    },
+    artifacts: [
+      ["Clusters", formatNumber(request.k)],
+      ["Iterations", formatNumber(result.iterations)],
+      ["Converged", result.converged ? "yes" : "no"],
+      ["Centroids", formatMatrix(result.centroids)],
+      ["Cluster sizes", result.sizes.map(formatNumber).join(", ")],
+      ["Within-cluster SSE", formatNumber(result.sse)],
+    ],
+  };
+}
+
 function analyzeBinomial(statement) {
   const params = parseNamedProbabilityParams(statement);
   const n = params.n;
@@ -5596,6 +5662,96 @@ function logisticSigmoid(value) {
 
 function clampLogLikelihoodProbability(value) {
   return Math.min(1 - 1e-12, Math.max(1e-12, value));
+}
+
+function fitKMeans(points, k) {
+  const initialCentroids = initializeKMeansCentroids(points, k);
+  let centroids = initialCentroids.map((point) => [...point]);
+  let assignments = Array(points.length).fill(-1);
+  let converged = false;
+  let iterations = 0;
+
+  for (let iteration = 0; iteration < 100; iteration += 1) {
+    const nextAssignments = points.map((point) => nearestCentroidIndex(point, centroids));
+    const nextCentroids = centroids.map((centroid, cluster) => {
+      const members = points.filter((_, index) => nextAssignments[index] === cluster);
+      return members.length ? meanPoint(members) : centroid;
+    });
+
+    iterations = iteration + 1;
+    if (
+      nextAssignments.every((assignment, index) => assignment === assignments[index]) &&
+      nextCentroids.every((centroid, index) => squaredDistance(centroid, centroids[index]) < EPSILON)
+    ) {
+      assignments = nextAssignments;
+      centroids = nextCentroids;
+      converged = true;
+      break;
+    }
+
+    assignments = nextAssignments;
+    centroids = nextCentroids;
+  }
+
+  const normalizedCentroids = centroids.map((centroid) => centroid.map(normalizeNumber));
+  const sse = points.reduce(
+    (sum, point, index) => sum + squaredDistance(point, normalizedCentroids[assignments[index]]),
+    0,
+  );
+  const sizes = normalizedCentroids.map((_, cluster) =>
+    assignments.filter((assignment) => assignment === cluster).length,
+  );
+
+  return {
+    initialCentroids,
+    centroids: normalizedCentroids,
+    assignments,
+    sizes,
+    sse: normalizeNumber(sse),
+    iterations,
+    converged,
+  };
+}
+
+function initializeKMeansCentroids(points, k) {
+  const centroids = [[...points[0]]];
+  while (centroids.length < k) {
+    let nextPoint = points[0];
+    let bestDistance = -Infinity;
+    for (const point of points) {
+      const distance = Math.min(...centroids.map((centroid) => squaredDistance(point, centroid)));
+      if (distance > bestDistance + EPSILON) {
+        bestDistance = distance;
+        nextPoint = point;
+      }
+    }
+    centroids.push([...nextPoint]);
+  }
+  return centroids;
+}
+
+function nearestCentroidIndex(point, centroids) {
+  let bestIndex = 0;
+  let bestDistance = squaredDistance(point, centroids[0]);
+  for (let index = 1; index < centroids.length; index += 1) {
+    const distance = squaredDistance(point, centroids[index]);
+    if (distance < bestDistance - EPSILON) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
+function squaredDistance(left, right) {
+  return left.reduce((sum, value, index) => sum + (value - right[index]) ** 2, 0);
+}
+
+function meanPoint(points) {
+  const dimension = points[0].length;
+  return Array.from({ length: dimension }, (_, column) =>
+    normalizeNumber(points.reduce((sum, point) => sum + point[column], 0) / points.length),
+  );
 }
 
 function covarianceMatrixFromColumns(columns) {
@@ -7995,6 +8151,32 @@ function multivariateObservationTable(dataset) {
   };
 }
 
+function parseKMeansInput(text) {
+  const points = parsePairs(text).map((point) => [point.x, point.y]);
+  if (points.length < 2) {
+    throw new Error("K-means needs coordinate points, such as k-means k=2 (1,1), (2,1), (8,8).");
+  }
+
+  let k = readNamedNumber(text, ["k", "clusters"], Number.NaN);
+  const clusterMatch = text.match(/\b(\d+)\s+clusters?\b/i);
+  if (!Number.isFinite(k) && clusterMatch) {
+    k = Number(clusterMatch[1]);
+  }
+  if (!Number.isSafeInteger(k) || k < 1 || k > points.length) {
+    throw new Error("K-means needs an integer k between 1 and the number of points.");
+  }
+
+  const distinct = new Set(points.map((point) => point.map(formatNumber).join(",")));
+  if (distinct.size < k) {
+    throw new Error("K-means needs at least k distinct points.");
+  }
+
+  return {
+    k,
+    points,
+  };
+}
+
 function parseLogisticRegressionInput(text) {
   const lists = new Map();
   const listText = text.replace(/\bpredict\b.*$/i, "");
@@ -8765,6 +8947,14 @@ function isMultivariateStatsQuestion(lower, statement = lower) {
     /\bcorr(?:elation)?\s+matrix\b/i.test(statement);
 }
 
+function isKMeansQuestion(lower) {
+  return lower.includes("k-means") ||
+    lower.includes("k means") ||
+    lower.includes("kmeans") ||
+    lower.includes("clustering") ||
+    lower.includes("cluster points");
+}
+
 function isMultivariableQuestion(lower) {
   return lower.includes("partial derivative") ||
     lower.startsWith("partial ") ||
@@ -8939,6 +9129,10 @@ function isStatisticsQuestion(lower) {
     "logistic regression",
     "binary regression",
     "logit regression",
+    "k-means",
+    "k means",
+    "kmeans",
+    "clustering",
     "binomial",
     "poisson",
     "geometric",

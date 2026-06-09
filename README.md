@@ -48,6 +48,8 @@ The frontend currently supports:
   classification accuracy, McFadden R squared, and probability prediction
 - Multivariate statistics: covariance matrices, correlation matrices, and
   2D principal component analysis with explained variance and component directions
+- K-means clustering for coordinate points with deterministic centroid
+  initialization, assignments, cluster sizes, and within-cluster SSE
 - Confidence intervals, one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
   one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis,
@@ -160,6 +162,8 @@ The same idea works for algebra and calculus:
   matrix, and `correlation matrix ...` scales it to pairwise correlations.
 - `pca x: 1,2,3,4; y: 2,3,5,8` finds the covariance eigenvectors and reports
   the first principal component's explained variance.
+- `k-means k=3 points (1,1), (1,2), (5,5), (6,5), (10,10), (10,11)`
+  clusters coordinate data and reports centroids plus within-cluster SSE.
 - `mann-whitney group1: 10,12,9; group2: 8,7,11` ranks combined samples
   and computes a nonparametric U test.
 - `ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10` reports F,
@@ -244,7 +248,7 @@ The demo includes:
 - Complex arithmetic and complex quadratic roots through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, multiple regression,
   logistic regression,
-  covariance/correlation matrices, 2D PCA,
+  covariance/correlation matrices, 2D PCA, k-means clustering,
   binomial probability,
   Poisson probability, geometric probability, exponential probability, uniform
   probability, hypergeometric probability, normal probability, inverse-normal

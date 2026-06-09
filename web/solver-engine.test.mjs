@@ -395,6 +395,15 @@ runTest("statistics mode computes multivariate statistics and PCA", () => {
   assert.equal(artifactValue(pca, "PC2 direction"), "[0.901303, -0.433189]");
 });
 
+runTest("statistics mode computes k-means clustering", () => {
+  const result = analyzeStatistics("k-means k=3 points (1,1), (1,2), (5,5), (6,5), (10,10), (10,11)");
+
+  assert.equal(result.summary, "k-means clustering");
+  assert.equal(result.answer, "centroids = [[1, 1.5], [10, 10.5], [5.5, 5]]; SSE = 1.5");
+  assert.equal(artifactValue(result, "Cluster sizes"), "2, 2, 2");
+  assert.deepEqual(result.table.rows[2], ["[5, 5]", "3", "0.25"]);
+});
+
 runTest("statistics mode applies Bayes theorem", () => {
   const result = analyzeStatistics("bayes prior=0.01 sensitivity=0.99 specificity=0.95");
 
@@ -669,6 +678,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5").summary, "logistic regression");
   assert.equal(analyzeUniversal("pca x: 1,2,3,4; y: 2,3,5,8").summary, "principal component analysis");
   assert.equal(analyzeUniversal("correlation matrix x: 1,2,3,4; y: 2,3,5,8").answer, "correlation matrix = [[1, 0.9759], [0.9759, 1]]");
+  assert.equal(analyzeUniversal("k-means k=3 points (1,1), (1,2), (5,5), (6,5), (10,10), (10,11)").summary, "k-means clustering");
   assert.equal(analyzeUniversal("one-proportion z-test successes=56 n=100 p0=0.5").summary, "one-proportion z test");
   assert.equal(analyzeUniversal("two-proportion z-test successes1=56 n1=100 successes2=44 n2=100").summary, "two-proportion z test");
   assert.equal(analyzeUniversal("chi-square observed 10,20,30 expected 15,15,30").summary, "chi-square goodness-of-fit");
