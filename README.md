@@ -44,6 +44,8 @@ The frontend currently supports:
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression/correlation for coordinate pairs, plus multiple linear
   regression with several predictor lists, residuals, R squared, and prediction
+- Multivariate statistics: covariance matrices, correlation matrices, and
+  2D principal component analysis with explained variance and component directions
 - Confidence intervals, one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
   one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis,
@@ -150,6 +152,10 @@ The same idea works for algebra and calculus:
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
 - `multiple regression y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a least-squares model with multiple predictors.
+- `covariance matrix x: 1,2,3,4; y: 2,3,5,8` returns a sample covariance
+  matrix, and `correlation matrix ...` scales it to pairwise correlations.
+- `pca x: 1,2,3,4; y: 2,3,5,8` finds the covariance eigenvectors and reports
+  the first principal component's explained variance.
 - `mann-whitney group1: 10,12,9; group2: 8,7,11` ranks combined samples
   and computes a nonparametric U test.
 - `ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10` reports F,
@@ -233,6 +239,7 @@ The demo includes:
 - Taylor/Maclaurin approximations through Ask mode
 - Complex arithmetic and complex quadratic roots through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, multiple regression,
+  covariance/correlation matrices, 2D PCA,
   binomial probability,
   Poisson probability, geometric probability, exponential probability, uniform
   probability, hypergeometric probability, normal probability, inverse-normal

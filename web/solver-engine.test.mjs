@@ -373,6 +373,19 @@ runTest("statistics mode computes discrete expected value", () => {
   assert.equal(artifactValue(result, "Standard deviation"), "0.7");
 });
 
+runTest("statistics mode computes multivariate statistics and PCA", () => {
+  const covariance = analyzeStatistics("covariance matrix x: 1,2,3,4; y: 2,3,5,8");
+  const correlation = analyzeStatistics("correlation matrix x: 1,2,3,4; y: 2,3,5,8");
+  const pca = analyzeStatistics("pca x: 1,2,3,4; y: 2,3,5,8");
+
+  assert.equal(covariance.summary, "covariance matrix");
+  assert.equal(covariance.answer, "covariance matrix = [[1.666667, 3.333333], [3.333333, 7]]");
+  assert.equal(correlation.answer, "correlation matrix = [[1, 0.9759], [0.9759, 1]]");
+  assert.equal(pca.summary, "principal component analysis");
+  assert.equal(pca.answer, "PC1 variance = 8.602083, explained = 99.254802%; direction = [0.433189, 0.901303]");
+  assert.equal(artifactValue(pca, "PC2 direction"), "[0.901303, -0.433189]");
+});
+
 runTest("statistics mode applies Bayes theorem", () => {
   const result = analyzeStatistics("bayes prior=0.01 sensitivity=0.99 specificity=0.95");
 
@@ -644,6 +657,8 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
+  assert.equal(analyzeUniversal("pca x: 1,2,3,4; y: 2,3,5,8").summary, "principal component analysis");
+  assert.equal(analyzeUniversal("correlation matrix x: 1,2,3,4; y: 2,3,5,8").answer, "correlation matrix = [[1, 0.9759], [0.9759, 1]]");
   assert.equal(analyzeUniversal("one-proportion z-test successes=56 n=100 p0=0.5").summary, "one-proportion z test");
   assert.equal(analyzeUniversal("two-proportion z-test successes1=56 n1=100 successes2=44 n2=100").summary, "two-proportion z test");
   assert.equal(analyzeUniversal("chi-square observed 10,20,30 expected 15,15,30").summary, "chi-square goodness-of-fit");

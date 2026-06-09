@@ -1048,6 +1048,10 @@ export function analyzeStatistics(statement) {
     return analyzeBayes(statement);
   }
 
+  if (isMultivariateStatsQuestion(lower, statement)) {
+    return analyzeMultivariateStatistics(statement);
+  }
+
   if (
     lower.includes("regression") ||
     lower.includes("correlation") ||
@@ -1071,6 +1075,9 @@ export function analyzeUniversal(question, values = {}) {
   if (isMarkovQuestion(lower)) {
     routed = analyzeMarkovChain(question);
     routedLabel = "Markov chain";
+  } else if (isMultivariateStatsQuestion(lower, question)) {
+    routed = analyzeStatistics(question);
+    routedLabel = "Multivariate statistics";
   } else if (isMatrixQuestion(lower)) {
     routed = analyzeMatrix(question);
     routedLabel = "Matrix";
@@ -3875,6 +3882,135 @@ function analyzeMultipleRegression(statement) {
   };
 }
 
+function analyzeMultivariateStatistics(statement) {
+  const lower = statement.toLowerCase();
+  const dataset = parseMultivariateStatsInput(statement);
+  const columns = dataset.columns.map((column) => column.values);
+  const covariance = covarianceMatrixFromColumns(columns);
+  const wantsPca = lower.includes("pca") || lower.includes("principal component");
+  const wantsCorrelation = lower.includes("correlation");
+  const correlation = covariance.every((row, index) => row[index] > EPSILON)
+    ? correlationMatrixFromCovariance(covariance)
+    : null;
+  if (wantsCorrelation && !correlation) {
+    throw new Error("Correlation matrix needs every variable to have nonzero sample variance.");
+  }
+  const tree = {
+    kind: "statsDistribution",
+    label: wantsPca ? "PCA" : wantsCorrelation ? "CORR" : "COV",
+    children: [
+      ...dataset.columns.map((column) => statsDatasetNode(column.values, [], column.name)),
+      matrixNode("COV", covariance),
+      ...(correlation && wantsCorrelation ? [matrixNode("R", correlation)] : []),
+    ],
+  };
+
+  if (wantsPca) {
+    if (dataset.columns.length !== 2) {
+      throw new Error("PCA currently supports exactly two variables, such as pca x: ...; y: ....");
+    }
+    const components = principalComponents2d(covariance);
+    const pcTree = {
+      ...tree,
+      children: [
+        ...tree.children,
+        ...components.map((component, index) => vectorNode(`PC${index + 1}`, component.vector)),
+      ],
+    };
+
+    return {
+      mode: "statistics",
+      tree: pcTree,
+      answer: `PC1 variance = ${formatNumber(components[0].eigenvalue)}, explained = ${formatNumber(components[0].explained * 100)}%; direction = ${formatVector(components[0].vector)}`,
+      summary: "principal component analysis",
+      details: `${dataset.n} observations, 2 variables`,
+      variables: [],
+      metrics: treeMetrics(pcTree),
+      steps: [
+        {
+          title: "Read variables",
+          expression: dataset.columns.map((column) => `${column.name}: ${column.values.map(formatNumber).join(", ")}`).join("; "),
+          detail: "PCA treats each labeled list as one variable measured on the same observations.",
+        },
+        {
+          title: "Center variables",
+          expression: dataset.columns.map((column) => `${column.name}bar = ${formatNumber(column.mean)}`).join(", "),
+          detail: "Subtracting each mean makes the covariance matrix measure shared variation.",
+        },
+        {
+          title: "Build covariance matrix",
+          expression: formatMatrix(covariance),
+          detail: "Sample covariance uses denominator n - 1.",
+        },
+        {
+          title: "Find principal components",
+          expression: `lambda1 = ${formatNumber(components[0].eigenvalue)}, lambda2 = ${formatNumber(components[1].eigenvalue)}`,
+          detail: "The eigenvectors of the covariance matrix are the principal component directions.",
+        },
+      ],
+      table: multivariateObservationTable(dataset),
+      artifacts: [
+        ["Variables", dataset.columns.map((column) => column.name).join(", ")],
+        ["Observations", formatNumber(dataset.n)],
+        ["Covariance matrix", formatMatrix(covariance)],
+        ["Correlation matrix", correlation ? formatMatrix(correlation) : "undefined"],
+        ["PC1 eigenvalue", formatNumber(components[0].eigenvalue)],
+        ["PC1 explained variance", `${formatNumber(components[0].explained * 100)}%`],
+        ["PC1 direction", formatVector(components[0].vector)],
+        ["PC2 eigenvalue", formatNumber(components[1].eigenvalue)],
+        ["PC2 explained variance", `${formatNumber(components[1].explained * 100)}%`],
+        ["PC2 direction", formatVector(components[1].vector)],
+      ],
+    };
+  }
+
+  const matrix = wantsCorrelation ? correlation : covariance;
+  const label = wantsCorrelation ? "correlation matrix" : "covariance matrix";
+  return {
+    mode: "statistics",
+    tree: {
+      ...tree,
+      children: correlation && !wantsCorrelation ? [...tree.children, matrixNode("R", correlation)] : tree.children,
+    },
+    answer: `${label} = ${formatMatrix(matrix)}`,
+    summary: label,
+    details: `${dataset.n} observations, ${dataset.columns.length} variables`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read variables",
+        expression: dataset.columns.map((column) => `${column.name}: ${column.values.map(formatNumber).join(", ")}`).join("; "),
+        detail: "Each labeled list must have the same number of observations.",
+      },
+      {
+        title: "Center variables",
+        expression: dataset.columns.map((column) => `${column.name}bar = ${formatNumber(column.mean)}`).join(", "),
+        detail: "Covariance and correlation compare deviations from each variable mean.",
+      },
+      {
+        title: "Compute covariance",
+        expression: formatMatrix(covariance),
+        detail: "The covariance matrix stores every pairwise sample covariance.",
+      },
+      {
+        title: "Scale to correlation",
+        expression: correlation ? formatMatrix(correlation) : "undefined",
+        detail: correlation
+          ? "Correlation divides covariance by the product of the two sample standard deviations."
+          : "A constant variable has zero sample standard deviation, so correlation is undefined.",
+      },
+    ],
+    table: multivariateObservationTable(dataset),
+    artifacts: [
+      ["Variables", dataset.columns.map((column) => column.name).join(", ")],
+      ["Observations", formatNumber(dataset.n)],
+      ["Covariance matrix", formatMatrix(covariance)],
+      ["Correlation matrix", correlation ? formatMatrix(correlation) : "undefined"],
+    ],
+  };
+}
+
 function analyzeBinomial(statement) {
   const params = parseNamedProbabilityParams(statement);
   const n = params.n;
@@ -5293,6 +5429,70 @@ function multiplyMatrixVector(matrix, vector) {
     throw new Error("Matrix-vector multiplication dimensions do not match.");
   }
   return matrix.map((row) => dotProduct(row, vector));
+}
+
+function covarianceMatrixFromColumns(columns) {
+  const means = columns.map(mean);
+  const n = columns[0].length;
+  return columns.map((left, row) =>
+    columns.map((right, column) =>
+      normalizeNumber(left.reduce(
+        (sum, value, index) => sum + (value - means[row]) * (right[index] - means[column]),
+        0,
+      ) / (n - 1)),
+    ),
+  );
+}
+
+function correlationMatrixFromCovariance(covariance) {
+  return covariance.map((row, rowIndex) =>
+    row.map((value, columnIndex) => {
+      if (rowIndex === columnIndex) return 1;
+      const scale = Math.sqrt(covariance[rowIndex][rowIndex] * covariance[columnIndex][columnIndex]);
+      if (scale <= EPSILON) {
+        throw new Error("Correlation matrix needs every variable to have nonzero sample variance.");
+      }
+      return normalizeNumber(value / scale);
+    }),
+  );
+}
+
+function principalComponents2d(covariance) {
+  const a = covariance[0][0];
+  const b = covariance[0][1];
+  const d = covariance[1][1];
+  const totalVariance = a + d;
+  if (totalVariance <= EPSILON) {
+    throw new Error("PCA needs data with positive total variance.");
+  }
+
+  const spread = Math.sqrt((a - d) ** 2 + 4 * b ** 2);
+  const eigenvalues = [
+    normalizeNumber((totalVariance + spread) / 2),
+    normalizeNumber((totalVariance - spread) / 2),
+  ];
+  const vectors = nearlyEqual(b, 0)
+    ? (a >= d ? [[1, 0], [0, 1]] : [[0, 1], [1, 0]])
+    : eigenvalues.map((lambda) => normalizeUnitVector([b, lambda - a]));
+
+  return eigenvalues.map((eigenvalue, index) => ({
+    eigenvalue,
+    vector: vectors[index],
+    explained: normalizeNumber(eigenvalue / totalVariance),
+  }));
+}
+
+function normalizeUnitVector(vector) {
+  const magnitude = vectorMagnitude(vector);
+  if (magnitude <= EPSILON) {
+    return vector.map(normalizeNumber);
+  }
+  const unit = vector.map((value) => value / magnitude);
+  const firstNonzero = unit.find((value) => !nearlyEqual(value, 0));
+  const oriented = firstNonzero !== undefined && firstNonzero < 0
+    ? unit.map((value) => -value)
+    : unit;
+  return oriented.map(normalizeNumber);
 }
 
 function identityMatrix(size) {
@@ -7566,6 +7766,68 @@ function parseXYLists(text) {
   return { x, y };
 }
 
+function parseMultivariateStatsInput(text) {
+  const columns = [];
+  const seen = new Set();
+
+  for (const match of text.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    const name = match[1];
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    const values = parseNumberList(match[2]);
+    if (values.length >= 2) {
+      columns.push({ name, values });
+      seen.add(key);
+    }
+  }
+
+  if (columns.length >= 2) {
+    return buildMultivariateDataset(columns);
+  }
+
+  const pairs = parsePairs(text);
+  if (pairs.length >= 2) {
+    return buildMultivariateDataset([
+      { name: "x", values: pairs.map((pair) => pair.x) },
+      { name: "y", values: pairs.map((pair) => pair.y) },
+    ]);
+  }
+
+  throw new Error("Use labeled lists such as pca x: 1,2,3; y: 2,4,6.");
+}
+
+function buildMultivariateDataset(columns) {
+  if (columns.length < 2) {
+    throw new Error("Multivariate statistics need at least two variables.");
+  }
+  const n = columns[0].values.length;
+  if (n < 2) {
+    throw new Error("Each variable needs at least two observations.");
+  }
+  for (const column of columns) {
+    if (column.values.length !== n) {
+      throw new Error("All multivariate lists must have the same length.");
+    }
+  }
+  return {
+    n,
+    columns: columns.map((column) => ({
+      ...column,
+      mean: mean(column.values),
+    })),
+  };
+}
+
+function multivariateObservationTable(dataset) {
+  return {
+    headers: ["Obs", ...dataset.columns.map((column) => column.name)],
+    rows: Array.from({ length: dataset.n }, (_, rowIndex) => [
+      String(rowIndex + 1),
+      ...dataset.columns.map((column) => formatNumber(column.values[rowIndex])),
+    ]),
+  };
+}
+
 function parseMultipleRegressionInput(text) {
   const lists = new Map();
   const listText = text.replace(/\bpredict\b.*$/i, "");
@@ -8246,6 +8508,14 @@ function isMultipleRegressionQuestion(lower, statement) {
     /\bx1\s*[:=].*;\s*x2\s*[:=]/is.test(statement);
 }
 
+function isMultivariateStatsQuestion(lower, statement = lower) {
+  return lower.includes("pca") ||
+    lower.includes("principal component") ||
+    lower.includes("covariance") ||
+    lower.includes("correlation matrix") ||
+    /\bcorr(?:elation)?\s+matrix\b/i.test(statement);
+}
+
 function isMultivariableQuestion(lower) {
   return lower.includes("partial derivative") ||
     lower.startsWith("partial ") ||
@@ -8414,6 +8684,9 @@ function isStatisticsQuestion(lower) {
     "std",
     "regression",
     "correlation",
+    "covariance",
+    "pca",
+    "principal component",
     "binomial",
     "poisson",
     "geometric",
