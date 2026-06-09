@@ -923,6 +923,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isNumberTheoryQuestion(lower)) {
     routed = analyzeNumberTheory(question);
     routedLabel = "Number theory";
+  } else if (isSequenceQuestion(lower)) {
+    routed = analyzeSequence(question);
+    routedLabel = "Sequence";
   } else if (isStatisticsQuestion(lower)) {
     routed = analyzeStatistics(question);
     routedLabel = "Statistics";
@@ -1423,6 +1426,187 @@ export function analyzeVector(statement) {
 
   return {
     mode: "vector",
+    tree,
+    answer,
+    summary,
+    details,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps,
+    table,
+    artifacts,
+  };
+}
+
+export function analyzeSequence(statement) {
+  const request = parseSequenceInput(statement);
+  const steps = [
+    {
+      title: "Read sequence request",
+      expression: request.expression,
+      detail: "The solver identifies the series type and extracts the needed parameters.",
+    },
+  ];
+  let answer;
+  let summary;
+  let details;
+  let artifacts;
+  let table;
+  let treeChildren;
+
+  if (request.operation === "arithmetic") {
+    const term = request.a1 + (request.n - 1) * request.d;
+    const sum = (request.n / 2) * (request.a1 + term);
+    answer = `a_${request.n} = ${formatNumber(term)}, S_${request.n} = ${formatNumber(sum)}`;
+    summary = "arithmetic sequence";
+    details = "Linear sequence with constant difference";
+    artifacts = [
+      ["First term", formatNumber(request.a1)],
+      ["Common difference", formatNumber(request.d)],
+      ["n", formatNumber(request.n)],
+      [`a_${request.n}`, formatNumber(term)],
+      [`S_${request.n}`, formatNumber(sum)],
+    ];
+    table = sequenceTermTable(request.n, (index) => request.a1 + (index - 1) * request.d);
+    treeChildren = [
+      statsMetricNode("a1", request.a1),
+      statsMetricNode("d", request.d),
+      statsMetricNode("n", request.n),
+      statsMetricNode("an", term),
+      statsMetricNode("sum", sum),
+    ];
+    steps.push(
+      {
+        title: "Find nth term",
+        expression: `a_n = a_1 + (n - 1)d = ${formatNumber(term)}`,
+        detail: "Arithmetic sequences add the same difference each step.",
+      },
+      {
+        title: "Find partial sum",
+        expression: `S_n = n(a_1 + a_n)/2 = ${formatNumber(sum)}`,
+        detail: "The partial sum averages the first and nth terms, then multiplies by n.",
+      },
+    );
+  } else if (request.operation === "geometric") {
+    const term = request.a1 * request.r ** (request.n - 1);
+    const sum = nearlyEqual(request.r, 1)
+      ? request.a1 * request.n
+      : request.a1 * (1 - request.r ** request.n) / (1 - request.r);
+    answer = `a_${request.n} = ${formatNumber(term)}, S_${request.n} = ${formatNumber(sum)}`;
+    summary = "geometric sequence";
+    details = "Exponential sequence with constant ratio";
+    artifacts = [
+      ["First term", formatNumber(request.a1)],
+      ["Common ratio", formatNumber(request.r)],
+      ["n", formatNumber(request.n)],
+      [`a_${request.n}`, formatNumber(term)],
+      [`S_${request.n}`, formatNumber(sum)],
+    ];
+    table = sequenceTermTable(request.n, (index) => request.a1 * request.r ** (index - 1));
+    treeChildren = [
+      statsMetricNode("a1", request.a1),
+      statsMetricNode("r", request.r),
+      statsMetricNode("n", request.n),
+      statsMetricNode("an", term),
+      statsMetricNode("sum", sum),
+    ];
+    steps.push(
+      {
+        title: "Find nth term",
+        expression: `a_n = a_1 r^(n-1) = ${formatNumber(term)}`,
+        detail: "Geometric sequences multiply by the same ratio each step.",
+      },
+      {
+        title: "Find partial sum",
+        expression: nearlyEqual(request.r, 1)
+          ? `S_n = n*a_1 = ${formatNumber(sum)}`
+          : `S_n = a_1(1-r^n)/(1-r) = ${formatNumber(sum)}`,
+        detail: "The finite geometric sum collapses repeated powers of the ratio.",
+      },
+    );
+  } else if (request.operation === "infinite-geometric") {
+    const converges = Math.abs(request.r) < 1;
+    const sum = converges ? request.a1 / (1 - request.r) : Number.NaN;
+    answer = converges ? `S_inf = ${formatNumber(sum)}` : "series diverges";
+    summary = converges ? "infinite geometric series" : "divergent geometric series";
+    details = "Infinite geometric convergence test";
+    artifacts = [
+      ["First term", formatNumber(request.a1)],
+      ["Common ratio", formatNumber(request.r)],
+      ["Converges", converges ? "yes" : "no"],
+      ["Sum", converges ? formatNumber(sum) : "none"],
+    ];
+    treeChildren = [
+      statsMetricNode("a1", request.a1),
+      statsMetricNode("r", request.r),
+      statsMetricNode("sum", converges ? sum : 0),
+    ];
+    steps.push({
+      title: "Check convergence",
+      expression: `|r| = ${formatNumber(Math.abs(request.r))}`,
+      detail: "An infinite geometric series converges only when the common ratio has magnitude less than one.",
+    });
+    if (converges) {
+      steps.push({
+        title: "Compute infinite sum",
+        expression: `S_inf = a_1/(1-r) = ${formatNumber(sum)}`,
+        detail: "The shrinking tail leaves a finite limit for the partial sums.",
+      });
+    }
+  } else {
+    const values = [];
+    let total = 0;
+    for (let index = request.start; index <= request.end; index += 1) {
+      const value = safeEvaluateMath(request.parsed, { [request.variable]: index });
+      if (!Number.isFinite(value)) {
+        throw new Error(`The summand was not finite at ${request.variable}=${index}.`);
+      }
+      values.push({ index, value });
+      total += value;
+    }
+    answer = `sum = ${formatNumber(total)}`;
+    summary = "finite series";
+    details = "Sigma notation over an integer range";
+    artifacts = [
+      ["Summand", formatMath(request.parsed)],
+      ["Variable", request.variable],
+      ["Start", formatNumber(request.start)],
+      ["End", formatNumber(request.end)],
+      ["Terms", formatNumber(values.length)],
+      ["Sum", formatNumber(total)],
+    ];
+    table = {
+      headers: [request.variable, "Term"],
+      rows: values.slice(0, 50).map((row) => [formatNumber(row.index), formatNumber(row.value)]),
+    };
+    treeChildren = [
+      statsMetricNode("start", request.start),
+      statsMetricNode("end", request.end),
+      statsMetricNode("terms", values.length),
+      statsMetricNode("sum", total),
+    ];
+    steps.push(
+      {
+        title: "Evaluate summand",
+        expression: formatMath(request.parsed),
+        detail: "The expression tree is evaluated once for each integer in the range.",
+      },
+      {
+        title: "Add terms",
+        expression: `sum = ${formatNumber(total)}`,
+        detail: "The finite series is the total of all evaluated terms.",
+      },
+    );
+  }
+
+  const tree = {
+    kind: "statsDistribution",
+    label: "SERIES",
+    children: treeChildren,
+  };
+
+  return {
+    mode: "sequence",
     tree,
     answer,
     summary,
@@ -3776,6 +3960,120 @@ function parseVectorLiteral(literal) {
     throw new Error("Vector entries must be numbers.");
   }
   return vector.map(Number);
+}
+
+function parseSequenceInput(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes("arithmetic")) {
+    const numbers = parseSequenceNumbers(text);
+    const a1 = readNamedNumber(text, ["a1", "a_1", "first", "start", "a"], numbers[0]);
+    const d = readNamedNumber(text, ["d", "difference", "diff"], numbers[1]);
+    const n = readNamedNumber(text, ["n", "term", "terms"], numbers[2]);
+    validateSequenceParams([a1, d, n], "Arithmetic sequence needs a1, d, and n.");
+    validatePositiveInteger(n, "Arithmetic sequence n");
+    return {
+      operation: "arithmetic",
+      a1,
+      d,
+      n,
+      expression: `a1=${formatNumber(a1)}, d=${formatNumber(d)}, n=${formatNumber(n)}`,
+    };
+  }
+
+  if (lower.includes("geometric")) {
+    const numbers = parseSequenceNumbers(text);
+    const a1 = readNamedNumber(text, ["a1", "a_1", "first", "start", "a"], numbers[0]);
+    const r = readNamedNumber(text, ["r", "ratio"], numbers[1]);
+    validateSequenceParams([a1, r], "Geometric sequence needs a1 and r.");
+    if (lower.includes("infinite")) {
+      return {
+        operation: "infinite-geometric",
+        a1,
+        r,
+        expression: `a1=${formatNumber(a1)}, r=${formatNumber(r)}`,
+      };
+    }
+    const n = readNamedNumber(text, ["n", "term", "terms"], numbers[2]);
+    validateSequenceParams([n], "Finite geometric sequence needs n.");
+    validatePositiveInteger(n, "Geometric sequence n");
+    return {
+      operation: "geometric",
+      a1,
+      r,
+      n,
+      expression: `a1=${formatNumber(a1)}, r=${formatNumber(r)}, n=${formatNumber(n)}`,
+    };
+  }
+
+  return parseFiniteSeriesInput(text);
+}
+
+function parseFiniteSeriesInput(text) {
+  const cleaned = text.replace(/[?!.]+$/, "").trim();
+  let expression;
+  let variable;
+  let start;
+  let end;
+  const boundsFirst = cleaned.match(/^(?:sum|sigma|summation|series)\s+([A-Za-z_]\w*)\s*=\s*(-?\d+)\s+to\s+(-?\d+)\s+(?:of\s+)?(.+)$/i);
+  const expressionFirst = cleaned.match(/^(?:sum|sigma|summation|series)\s+(?:of\s+)?(.+?)\s+from\s+([A-Za-z_]\w*)\s*=\s*(-?\d+)\s+to\s+(-?\d+)$/i);
+
+  if (boundsFirst) {
+    [, variable, start, end, expression] = boundsFirst;
+  } else if (expressionFirst) {
+    [, expression, variable, start, end] = expressionFirst;
+  } else {
+    throw new Error("Use a finite sum such as sum k^2 from k=1 to 5.");
+  }
+
+  start = Number(start);
+  end = Number(end);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end) {
+    throw new Error("Finite sums need integer bounds with start <= end.");
+  }
+  if (end - start > 10000) {
+    throw new Error("Finite sums support at most 10001 evaluated terms.");
+  }
+
+  const parsed = parseMath(expression.trim());
+  if (parsed.kind === "equation") {
+    throw new Error("Finite sums need an expression, not an equation.");
+  }
+
+  return {
+    operation: "finite-series",
+    variable,
+    start,
+    end,
+    parsed,
+    expression: `${formatMath(parsed)}, ${variable}=${start}..${end}`,
+  };
+}
+
+function parseSequenceNumbers(text) {
+  return parseNumbers(text.replace(/\b[A-Za-z_]\w*\s*=/g, ""));
+}
+
+function validateSequenceParams(values, message) {
+  if (!values.every(Number.isFinite)) {
+    throw new Error(message);
+  }
+}
+
+function validatePositiveInteger(value, context) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${context} must be a positive integer.`);
+  }
+}
+
+function sequenceTermTable(n, termAt) {
+  const count = Math.min(n, 25);
+  return {
+    headers: ["n", "a_n"],
+    rows: Array.from({ length: count }, (_, index) => {
+      const termNumber = index + 1;
+      return [formatNumber(termNumber), formatNumber(termAt(termNumber))];
+    }),
+  };
 }
 
 function matrixShape(matrix) {
@@ -6237,6 +6535,17 @@ function isVectorQuestion(lower) {
     lower.startsWith("norm ") ||
     lower.startsWith("length of vector") ||
     lower.includes(" vector projection");
+}
+
+function isSequenceQuestion(lower) {
+  return lower.includes("arithmetic sequence") ||
+    lower.includes("arithmetic series") ||
+    lower.includes("geometric sequence") ||
+    lower.includes("geometric series") ||
+    lower.startsWith("sum ") ||
+    lower.startsWith("sigma ") ||
+    lower.startsWith("summation ") ||
+    lower.startsWith("series ");
 }
 
 function isGraphQuestion(lower) {

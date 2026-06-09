@@ -15,6 +15,7 @@ import {
   analyzeNumerical,
   analyzeNumberTheory,
   analyzeOptimization,
+  analyzeSequence,
   analyzeSimplification,
   analyzeStatistics,
   analyzeSystem,
@@ -95,6 +96,14 @@ runTest("vector mode computes vector geometry", () => {
   assert.equal(analyzeVector("angle between [1,0] [0,1]").answer, "angle = 90 degrees");
   assert.equal(analyzeVector("projection [3,4] onto [1,0]").answer, "projection = [3, 0]");
   assert.equal(analyzeVector("distance [1,2] [4,6]").answer, "distance = 5");
+});
+
+runTest("sequence mode computes sequences and series", () => {
+  assert.equal(analyzeSequence("arithmetic sequence a1=3 d=5 n=10").answer, "a_10 = 48, S_10 = 255");
+  assert.equal(analyzeSequence("geometric sequence a1=2 r=3 n=5").answer, "a_5 = 162, S_5 = 242");
+  assert.equal(analyzeSequence("infinite geometric series a1=5 r=0.2").answer, "S_inf = 6.25");
+  assert.equal(analyzeSequence("sum k^2 from k=1 to 5").answer, "sum = 55");
+  assert.equal(analyzeSequence("sum k=1 to 4 of 2k + 1").answer, "sum = 24");
 });
 
 runTest("inequality mode solves strict quadratic inequalities", () => {
@@ -561,4 +570,6 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("eigenvectors [[2,1],[1,2]]").summary, "2x2 eigenvectors");
   assert.equal(analyzeUniversal("dot [1,2,3] [4,5,6]").summary, "dot product");
   assert.equal(analyzeUniversal("angle between [1,0] [0,1]").summary, "vector angle");
+  assert.equal(analyzeUniversal("arithmetic sequence a1=3 d=5 n=10").summary, "arithmetic sequence");
+  assert.equal(analyzeUniversal("sum k^2 from k=1 to 5").answer, "sum = 55");
 });
