@@ -23,7 +23,7 @@ The frontend currently supports:
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations through Universal Ask mode
 - Matrix determinants, inverses, multiplication, row reduction, rank, null spaces,
-  QR decomposition, and 2x2 eigenvalues/eigenvectors
+  QR decomposition, reduced SVD, and 2x2 eigenvalues/eigenvectors
 - Vector geometry: dot products, cross products, magnitudes, angles,
   projections, and point distances
 - Geometry formulas: circles, rectangles, triangles, Pythagorean theorem,
@@ -144,6 +144,7 @@ The same idea works for algebra and calculus:
   and `sum k^2 from k=1 to 5` evaluate sequence and series trees.
 - `rref [[1,2,1],[2,4,2],[1,1,0]]` becomes a row-operation tree with rank and pivots.
 - `qr [[1,1],[1,0],[0,1]]` uses Gram-Schmidt to return `Q`, `R`, and `Q*R`.
+- `svd [[3,1],[1,3]]` returns singular values plus `U`, `Sigma`, `V^T`, and reconstruction.
 - `nullspace [[1,2,1],[2,4,2],[1,1,0]]` extracts a basis from the RREF free variables.
 - `eigenvectors [[2,1],[1,2]]` solves the 2x2 characteristic polynomial and then
   finds each eigenspace.

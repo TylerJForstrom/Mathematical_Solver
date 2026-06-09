@@ -518,6 +518,14 @@ runTest("matrix mode computes QR decompositions", () => {
   assert.equal(artifactValue(result, "Q * R"), "[[1, 1], [1, 0], [0, 1]]");
 });
 
+runTest("matrix mode computes singular value decompositions", () => {
+  const result = analyzeMatrix("svd [[3,1],[1,3]]");
+
+  assert.equal(result.summary, "singular value decomposition");
+  assert.equal(result.answer, "singular values = [4, 2]");
+  assert.equal(artifactValue(result, "U * Sigma * V^T"), "[[3, 1], [1, 3]]");
+});
+
 runTest("matrix mode computes 2x2 eigenvalues", () => {
   const result = analyzeMatrix("eigen [[2,1],[1,2]]");
 
@@ -728,6 +736,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "Kruskal-Wallis test");
   assert.equal(analyzeUniversal("rank [[1,2],[2,4]]").summary, "matrix rank");
   assert.equal(analyzeUniversal("qr [[1,1],[1,0],[0,1]]").summary, "QR decomposition");
+  assert.equal(analyzeUniversal("svd [[3,1],[1,3]]").summary, "singular value decomposition");
   assert.equal(analyzeUniversal("eigen [[2,1],[1,2]]").summary, "2x2 eigenvalues");
   assert.equal(analyzeUniversal("nullspace [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix null space");
   assert.equal(analyzeUniversal("eigenvectors [[2,1],[1,2]]").summary, "2x2 eigenvectors");

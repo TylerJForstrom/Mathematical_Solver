@@ -1393,6 +1393,41 @@ export function analyzeMatrix(statement) {
         detail: "For 2x2 matrices, lambda^2 - trace(A)lambda + det(A) = 0.",
       },
     ];
+  } else if (lower.includes("svd") || lower.includes("singular value")) {
+    const result = singularValueDecomposition(matrices[0]);
+    answer = `singular values = ${formatVector(result.singularValues)}`;
+    summary = "singular value decomposition";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["U", formatMatrix(result.u)],
+      ["Sigma", formatMatrix(result.sigma)],
+      ["V^T", formatMatrix(result.vTranspose)],
+      ["Singular values", formatVector(result.singularValues)],
+      ["U * Sigma * V^T", formatMatrix(result.product)],
+    ];
+    children = [matrixNode("A", matrices[0]), matrixNode("U", result.u), matrixNode("SIGMA", result.sigma), matrixNode("VT", result.vTranspose)];
+    steps = [
+      {
+        title: "Read matrix",
+        expression: matrixShape(matrices[0]),
+        detail: "SVD rewrites a matrix as A = U Sigma V^T.",
+      },
+      {
+        title: "Diagonalize A^T A",
+        expression: `singular values = ${formatVector(result.singularValues)}`,
+        detail: "Singular values are the square roots of the eigenvalues of A^T A.",
+      },
+      {
+        title: "Build singular vectors",
+        expression: `U = ${formatMatrix(result.u)}, V^T = ${formatMatrix(result.vTranspose)}`,
+        detail: "Right singular vectors come from A^T A; left singular vectors are Av divided by each singular value.",
+      },
+      {
+        title: "Verify reconstruction",
+        expression: formatMatrix(result.product),
+        detail: "Multiplying U Sigma V^T reconstructs the original matrix up to rounding.",
+      },
+    ];
   } else if (lower.includes("qr") || lower.includes("gram-schmidt") || lower.includes("gram schmidt")) {
     const result = qrDecomposition(matrices[0]);
     answer = `Q = ${formatMatrix(result.q)}; R = ${formatMatrix(result.r)}`;
@@ -5845,6 +5880,71 @@ function qrDecomposition(matrix) {
   };
 }
 
+function singularValueDecomposition(matrix) {
+  const rowCount = matrix.length;
+  const columnCount = matrix[0].length;
+  if (columnCount < 1 || columnCount > 2 || rowCount < columnCount) {
+    throw new Error("SVD currently supports full-rank matrices with one or two columns and rows >= columns.");
+  }
+
+  const transposed = transposeMatrix(matrix);
+  const gram = multiplyMatrices(transposed, matrix).map((row) => row.map(normalizeNumber));
+  const eigen = symmetricEigenDecompositionUpTo2x2(gram);
+  const singularValues = eigen.values.map((value) => normalizeNumber(Math.sqrt(Math.max(0, value))));
+  if (singularValues.some((value) => value <= EPSILON)) {
+    throw new Error("SVD currently needs full column rank.");
+  }
+
+  const v = transposeMatrix(eigen.vectors).map((row) => row.map(normalizeNumber));
+  const uColumns = eigen.vectors.map((vector, index) =>
+    multiplyMatrixVector(matrix, vector).map((value) => normalizeNumber(value / singularValues[index])),
+  );
+  const u = transposeMatrix(uColumns).map((row) => row.map(normalizeNumber));
+  const sigma = singularValues.map((value, row) =>
+    singularValues.map((_, column) => (row === column ? value : 0)),
+  );
+  const vTranspose = transposeMatrix(v).map((row) => row.map(normalizeNumber));
+  const product = multiplyMatrices(multiplyMatrices(u, sigma), vTranspose).map((row) => row.map(normalizeNumber));
+
+  return {
+    u,
+    sigma,
+    vTranspose,
+    singularValues,
+    product,
+  };
+}
+
+function symmetricEigenDecompositionUpTo2x2(matrix) {
+  if (matrix.length === 1 && matrix[0].length === 1) {
+    return {
+      values: [normalizeNumber(matrix[0][0])],
+      vectors: [[1]],
+    };
+  }
+  if (matrix.length !== 2 || matrix[0].length !== 2) {
+    throw new Error("SVD currently supports one-column or two-column matrices.");
+  }
+
+  const a = matrix[0][0];
+  const b = matrix[0][1];
+  const d = matrix[1][1];
+  const trace = a + d;
+  const spread = Math.sqrt((a - d) ** 2 + 4 * b ** 2);
+  const values = [
+    normalizeNumber((trace + spread) / 2),
+    normalizeNumber((trace - spread) / 2),
+  ];
+  const vectors = nearlyEqual(b, 0)
+    ? (a >= d ? [[1, 0], [0, 1]] : [[0, 1], [1, 0]])
+    : values.map((lambda) => normalizeUnitVector([b, lambda - a]));
+
+  return {
+    values,
+    vectors,
+  };
+}
+
 function fitLogisticRegression(design, yValues) {
   const parameterCount = design[0].length;
   let coefficients = Array(parameterCount).fill(0);
@@ -9523,6 +9623,8 @@ function hasImaginaryUnit(text) {
 function isMatrixQuestion(lower) {
   return lower.includes("matrix") ||
     lower.includes("determinant") ||
+    lower.startsWith("svd ") ||
+    lower.includes("singular value") ||
     lower.startsWith("qr ") ||
     lower.includes("qr decomposition") ||
     lower.includes("gram-schmidt") ||
