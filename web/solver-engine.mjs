@@ -1097,6 +1097,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isVectorQuestion(lower)) {
     routed = analyzeVector(question);
     routedLabel = "Vector";
+  } else if (isFourierQuestion(lower)) {
+    routed = analyzeFourierSeries(question);
+    routedLabel = "Fourier series";
   } else if (isGraphQuestion(lower)) {
     routed = analyzeGraph(question);
     routedLabel = "Graph";
@@ -2608,6 +2611,87 @@ export function analyzeGraph(statement) {
       yMin,
       yMax,
     },
+  };
+}
+
+export function analyzeFourierSeries(statement) {
+  const request = extractFourierSeriesQuestion(statement);
+  const expression = parseMath(request.expression);
+  if (expression.kind === "equation") {
+    throw new Error("Fourier series mode expects a function expression, not an equation.");
+  }
+
+  const expressionVariables = mathVariables(expression).filter((name) => !isMathConstantName(name));
+  if (!request.variable && expressionVariables.length === 1) {
+    request.variable = expressionVariables[0];
+  }
+  if (!request.variable) {
+    request.variable = "x";
+  }
+  if (expressionVariables.some((name) => name !== request.variable)) {
+    throw new Error("Fourier series mode supports one function variable at a time.");
+  }
+
+  const result = computeFourierSeries(request, expression);
+  const seriesText = formatFourierPartialSum(request, result);
+  const tree = {
+    kind: "mathFourierSeries",
+    label: "FOURIER",
+    children: [
+      expression,
+      statsMetricNode("order", request.order),
+      statsMetricNode("a0", result.a0),
+      ...result.coefficients.slice(0, 4).flatMap((coefficient) => [
+        statsMetricNode(`a${coefficient.n}`, coefficient.an),
+        statsMetricNode(`b${coefficient.n}`, coefficient.bn),
+      ]),
+    ],
+  };
+
+  return {
+    mode: "calculus",
+    tree,
+    answer: `S_${request.order}(${request.variable}) ~= ${seriesText}`,
+    summary: "Fourier series",
+    details: `Partial Fourier series on [${formatFourierNumber(request.lower)}, ${formatFourierNumber(request.upper)}]`,
+    variables: [request.variable],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Parse periodic interval",
+        expression: `${formatMath(expression)} on [${formatFourierNumber(request.lower)}, ${formatFourierNumber(request.upper)}]`,
+        detail: "The interval is centered so sine and cosine basis functions can be scaled to the requested period.",
+      },
+      {
+        title: "Compute Fourier coefficients",
+        expression: `a_n, b_n through order ${request.order}`,
+        detail: "Each coefficient is a definite integral against a sine or cosine basis function.",
+      },
+      {
+        title: "Assemble partial sum",
+        expression: `S_${request.order}(${request.variable}) ~= ${seriesText}`,
+        detail: "The partial sum combines the constant term, cosine coefficients, and sine coefficients.",
+      },
+    ],
+    table: {
+      headers: ["n", "a_n", "b_n"],
+      rows: [
+        ["0", formatNumber(result.a0), ""],
+        ...result.coefficients.map((coefficient) => [
+          String(coefficient.n),
+          formatNumber(coefficient.an),
+          formatNumber(coefficient.bn),
+        ]),
+      ],
+    },
+    artifacts: [
+      ["Function", `f(${request.variable}) = ${formatMath(expression)}`],
+      ["Interval", `[${formatFourierNumber(request.lower)}, ${formatFourierNumber(request.upper)}]`],
+      ["Order", formatNumber(request.order)],
+      ["Quadrature", `Simpson's rule, n=${formatNumber(request.subintervals)}`],
+      ["Partial sum", `S_${request.order}(${request.variable}) ~= ${seriesText}`],
+    ],
+    graph: result.graph,
   };
 }
 
@@ -7113,6 +7197,70 @@ function extractGraphQuestion(statement) {
   return { expression: text, variable, xMin, xMax };
 }
 
+function extractFourierSeriesQuestion(statement) {
+  let text = statement
+    .replace(/^(?:fourier(?:\s+series)?|fourier expansion|series expansion)\s*/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  let order = 5;
+  let subintervals = 400;
+  let variable = "";
+
+  const samplesMatch = text.match(/\b(?:samples|subintervals|quadrature)\s*=?\s*(\d+)\b/i);
+  if (samplesMatch) {
+    subintervals = Number(samplesMatch[1]);
+    text = text.replace(samplesMatch[0], "").trim();
+  }
+
+  const orderMatch = text.match(/\b(?:order|degree|terms|n)\s*=?\s*(\d+)\b/i);
+  if (orderMatch) {
+    order = Number(orderMatch[1]);
+    text = text.replace(orderMatch[0], "").trim();
+  }
+
+  const variableMatch = text.match(/\b(?:with respect to|wrt|variable)\s*=?\s*([A-Za-z_]\w*)\b/i);
+  if (variableMatch) {
+    variable = variableMatch[1];
+    text = text.replace(variableMatch[0], "").trim();
+  }
+
+  let lower = -Math.PI;
+  let upper = Math.PI;
+  const boundsMatch = text.match(/\bfrom\s+(.+?)\s+(?:to|,)\s+(.+)$/i);
+  if (boundsMatch) {
+    lower = evaluateBoundExpression(boundsMatch[1]);
+    upper = evaluateBoundExpression(boundsMatch[2]);
+    text = text.slice(0, boundsMatch.index).trim();
+  }
+
+  text = text
+    .replace(/^f\s*\([A-Za-z_]\w*\)\s*=\s*/i, "")
+    .replace(/^y\s*=\s*/i, "")
+    .trim();
+
+  if (!text) {
+    throw new Error("Fourier series needs a function, such as fourier series x from -pi to pi order=5.");
+  }
+  if (!Number.isSafeInteger(order) || order < 1 || order > 50) {
+    throw new Error("Fourier series order must be an integer from 1 to 50.");
+  }
+  if (!Number.isSafeInteger(subintervals) || subintervals < 2 || subintervals > 100000 || subintervals % 2 !== 0) {
+    throw new Error("Fourier series Simpson quadrature needs an even sample count from 2 to 100000.");
+  }
+  if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower >= upper) {
+    throw new Error("Fourier series needs finite bounds with lower < upper.");
+  }
+
+  return {
+    expression: text,
+    variable,
+    lower,
+    upper,
+    order,
+    subintervals,
+  };
+}
+
 function extractLimitQuestion(statement, fallbackVariable) {
   let text = statement
     .replace(/^(limit|lim)\s+/i, "")
@@ -7228,6 +7376,126 @@ function sampleFunction(expression, variable, xMin, xMax, count) {
     }
   }
   return points;
+}
+
+function computeFourierSeries(request, expression) {
+  const halfPeriod = (request.upper - request.lower) / 2;
+  const center = (request.lower + request.upper) / 2;
+  const evaluator = (x) => {
+    const value = evaluateMath(expression, { [request.variable]: x });
+    if (!Number.isFinite(value)) {
+      throw new Error("The Fourier integrand is not finite at a quadrature sample point.");
+    }
+    return value;
+  };
+  const integrate = (fn) =>
+    approximateDefiniteIntegral(fn, request.lower, request.upper, request.subintervals, "simpson").value;
+  const angle = (n, x) => (n * Math.PI * (x - center)) / halfPeriod;
+  const a0 = normalizeNumber(integrate((x) => evaluator(x)) / halfPeriod);
+  const coefficients = [];
+
+  for (let n = 1; n <= request.order; n += 1) {
+    const an = normalizeNumber(integrate((x) => evaluator(x) * Math.cos(angle(n, x))) / halfPeriod);
+    const bn = normalizeNumber(integrate((x) => evaluator(x) * Math.sin(angle(n, x))) / halfPeriod);
+    coefficients.push({ n, an, bn });
+  }
+
+  const partialSum = (x) => {
+    let value = a0 / 2;
+    for (const coefficient of coefficients) {
+      value += coefficient.an * Math.cos(angle(coefficient.n, x));
+      value += coefficient.bn * Math.sin(angle(coefficient.n, x));
+    }
+    return normalizeNumber(value);
+  };
+  const points = [];
+  for (let index = 0; index < 121; index += 1) {
+    const x = request.lower + ((request.upper - request.lower) * index) / 120;
+    const y = partialSum(x);
+    if (Number.isFinite(y)) {
+      points.push({ x, y });
+    }
+  }
+  if (points.length < 2) {
+    throw new Error("Could not sample enough finite Fourier approximation points.");
+  }
+
+  const yValues = points.map((point) => point.y);
+  return {
+    a0,
+    coefficients,
+    center,
+    halfPeriod,
+    graph: {
+      expression: `S_${request.order}(${request.variable})`,
+      points,
+      xMin: request.lower,
+      xMax: request.upper,
+      yMin: Math.min(...yValues),
+      yMax: Math.max(...yValues),
+    },
+  };
+}
+
+function formatFourierPartialSum(request, result) {
+  const pieces = [];
+  pushFourierTerm(pieces, result.a0 / 2, "");
+  for (const coefficient of result.coefficients) {
+    const angle = formatFourierAngle(coefficient.n, request.variable, result.center, result.halfPeriod);
+    pushFourierTerm(pieces, coefficient.an, `cos(${angle})`);
+    pushFourierTerm(pieces, coefficient.bn, `sin(${angle})`);
+  }
+  return pieces.length ? pieces.join("") : "0";
+}
+
+function pushFourierTerm(pieces, coefficient, basis) {
+  if (nearlyEqual(coefficient, 0)) {
+    return;
+  }
+  const sign = coefficient < 0 ? "-" : "+";
+  const magnitude = Math.abs(coefficient);
+  const coefficientText = basis && Math.abs(magnitude - 1) < 1e-6 ? "" : formatNumber(magnitude);
+  const body = `${coefficientText}${basis}`;
+  if (pieces.length === 0) {
+    pieces.push(sign === "-" ? `-${body}` : body);
+  } else {
+    pieces.push(` ${sign} ${body}`);
+  }
+}
+
+function formatFourierAngle(n, variable, center, halfPeriod) {
+  const shifted = formatFourierShift(variable, center);
+  if (nearlyEqual(halfPeriod, Math.PI)) {
+    if (n === 1) {
+      return shifted;
+    }
+    return shifted === variable ? `${n}${variable}` : `${n}${shifted}`;
+  }
+  const multiplier = n === 1 ? "pi" : `${n}pi`;
+  return `${multiplier}*${shifted}/${formatFourierNumber(halfPeriod)}`;
+}
+
+function formatFourierShift(variable, center) {
+  if (nearlyEqual(center, 0)) {
+    return variable;
+  }
+  return center > 0
+    ? `(${variable} - ${formatFourierNumber(center)})`
+    : `(${variable} + ${formatFourierNumber(Math.abs(center))})`;
+}
+
+function formatFourierNumber(value) {
+  if (nearlyEqual(value, 0)) {
+    return "0";
+  }
+  const ratio = value / Math.PI;
+  const rounded = Math.round(ratio);
+  if (rounded !== 0 && Math.abs(rounded) <= 12 && nearlyEqual(ratio, rounded)) {
+    if (rounded === 1) return "pi";
+    if (rounded === -1) return "-pi";
+    return `${rounded}pi`;
+  }
+  return formatNumber(value);
 }
 
 function estimateLimit(expression, request) {
@@ -7783,6 +8051,11 @@ function evaluateMath(node, values = {}) {
     return evaluateBinary(node.operator, left, right);
   }
   throw new Error(`Cannot evaluate node '${node.kind}'.`);
+}
+
+function isMathConstantName(name) {
+  const lower = name.toLowerCase();
+  return lower === "pi" || lower === "e";
 }
 
 function safeEvaluateMath(node, values = {}) {
@@ -10077,6 +10350,13 @@ function isSequenceQuestion(lower) {
 
 function isGraphQuestion(lower) {
   return lower.startsWith("graph ") || lower.startsWith("plot ") || lower.startsWith("draw ");
+}
+
+function isFourierQuestion(lower) {
+  return lower.startsWith("fourier ") ||
+    lower.startsWith("fourier series ") ||
+    lower.startsWith("fourier expansion ") ||
+    lower.startsWith("series expansion ");
 }
 
 function isLimitQuestion(lower) {
@@ -12442,6 +12722,7 @@ function isOperatorNode(node) {
     "mathBinary",
     "mathFunction",
     "equation",
+    "mathFourierSeries",
     "matrixOperation",
   ].includes(node.kind);
 }

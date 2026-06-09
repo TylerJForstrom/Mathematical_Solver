@@ -7,6 +7,7 @@ import {
   analyzeDifferentialEquation,
   analyzeEquation,
   analyzeFactoring,
+  analyzeFourierSeries,
   analyzeGeometry,
   analyzeGraph,
   analyzeInequality,
@@ -627,6 +628,15 @@ runTest("graph mode samples functions", () => {
   assert.equal(result.graph.points.length, 121);
 });
 
+runTest("fourier mode computes partial series coefficients", () => {
+  const result = analyzeFourierSeries("fourier series x from -pi to pi order=5");
+
+  assert.equal(result.summary, "Fourier series");
+  assert.equal(result.answer, "S_5(x) ~= 2sin(x) - sin(2x) + 0.666667sin(3x) - 0.5sin(4x) + 0.4sin(5x)");
+  assert.deepEqual(result.table.rows.at(1), ["1", "0", "2"]);
+  assert.equal(result.graph.points.length, 121);
+});
+
 runTest("numerical mode runs Newton's method", () => {
   const result = analyzeNumerical("newton x^3 - x - 2 guess=1");
 
@@ -726,6 +736,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
   assert.equal(analyzeUniversal("linear programming maximize 3x + 2y subject to x + y <= 4; x <= 2; y <= 3; x >= 0; y >= 0").summary, "linear programming");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
+  assert.equal(analyzeUniversal("fourier series x from -pi to pi order=5").summary, "Fourier series");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
   assert.equal(analyzeUniversal("simpson integrate sin(x) from 0 to pi n=100").summary, "simpson numerical integration");
   assert.equal(analyzeUniversal("rk4 dy/dt = t + y y0=1 from t=0 to 1 h=0.25").summary, "RK4 numerical ODE");

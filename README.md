@@ -41,6 +41,8 @@ The frontend currently supports:
 - Two-variable linear programming with feasible-vertex enumeration and
   constrained objective optimization
 - Function graphing with sampled SVG plots
+- Fourier series partial sums with numerically integrated sine/cosine
+  coefficients and plotted approximations
 - Differential equations: exponential growth/decay, Newton cooling, logistic
   growth, and separable power ODEs
 - Numerical ODE solvers: Euler's method and fourth-order Runge-Kutta for
@@ -162,6 +164,8 @@ The same idea works for algebra and calculus:
 - `linear programming maximize 3x + 2y subject to x + y <= 4; x <= 2; y <= 3; x >= 0; y >= 0`
   enumerates feasible vertices and returns the constrained optimum.
 - `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
+- `fourier series x from -pi to pi order=5` estimates Fourier coefficients
+  and plots the fifth-order partial sum.
 - `simpson integrate sin(x) from 0 to pi n=100` approximates a definite
   integral numerically and returns `integral ~= 2`.
 - `ode dy/dt = 0.3y y0=2 t=5`, `newton cooling ambient=70 initial=100 k=0.2 t=10`,
