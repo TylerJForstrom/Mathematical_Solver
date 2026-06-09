@@ -50,6 +50,8 @@ The frontend currently supports:
   probability, inverse-normal percentiles, geometric probability, exponential
   probability, uniform probability, hypergeometric probability, discrete expected
   value/variance, Bayes theorem, and z-score calculations
+- Markov chains: n-step state distributions and stationary distributions from
+  row-stochastic transition matrices
 - Statistical power and sample-size planning for one-sample means,
   one-proportion z designs, and equal-size two-sample mean designs
 - Effect sizes and follow-up comparisons, including Cohen's d/dz, Hedges g,
@@ -162,6 +164,9 @@ The same idea works for algebra and calculus:
   inputs as a probability mass function and returns `E(X) = 1.1`.
 - `bayes prior=0.01 sensitivity=0.99 specificity=0.95` updates the prior and
   returns `P(H | positive) = 0.166667`.
+- `markov [[0.7,0.3],[0.2,0.8]] start [1,0] steps=3` computes an n-step
+  distribution, and `stationary markov [[0.7,0.3],[0.2,0.8]]` solves the
+  long-run stationary distribution.
 
 ## Run It
 
@@ -224,6 +229,7 @@ The demo includes:
   Poisson probability, geometric probability, exponential probability, uniform
   probability, hypergeometric probability, normal probability, inverse-normal
   percentiles, z-scores, discrete expected value, Bayes theorem,
+  Markov chains,
   one-sample/two-sample/paired t tests, one-proportion/two-proportion z tests,
   proportion confidence intervals, ANOVA, chi-square tests, nonparametric rank
   tests, power/sample-size analysis, effect sizes, and pairwise follow-up

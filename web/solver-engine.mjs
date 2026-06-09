@@ -918,6 +918,10 @@ export function analyzeNumberTheory(statement) {
 export function analyzeStatistics(statement) {
   const lower = statement.toLowerCase();
 
+  if (isMarkovQuestion(lower)) {
+    return analyzeMarkovChain(statement);
+  }
+
   if (
     lower.includes("power analysis") ||
     lower.includes("statistical power") ||
@@ -1057,7 +1061,10 @@ export function analyzeUniversal(question, values = {}) {
   let routed;
   let routedLabel;
 
-  if (isMatrixQuestion(lower)) {
+  if (isMarkovQuestion(lower)) {
+    routed = analyzeMarkovChain(question);
+    routedLabel = "Markov chain";
+  } else if (isMatrixQuestion(lower)) {
     routed = analyzeMatrix(question);
     routedLabel = "Matrix";
   } else if (isGeometryQuestion(lower)) {
@@ -1442,6 +1449,109 @@ export function analyzeMatrix(statement) {
     metrics: treeMetrics(tree),
     steps,
     artifacts,
+  };
+}
+
+export function analyzeMarkovChain(statement) {
+  const request = parseMarkovInput(statement);
+  const transition = request.transition;
+  const steps = [
+    {
+      title: "Read transition matrix",
+      expression: formatMatrix(transition),
+      detail: "A Markov chain uses a row-stochastic transition matrix.",
+    },
+    {
+      title: "Validate probabilities",
+      expression: transition.map((row) => `sum=${formatNumber(row.reduce((sum, value) => sum + value, 0))}`).join(", "),
+      detail: "Each row must contain nonnegative probabilities that add to one.",
+    },
+  ];
+
+  if (request.operation === "stationary") {
+    const stationary = stationaryMarkovDistribution(transition);
+    const tree = {
+      kind: "statsDistribution",
+      label: "MARKOV",
+      children: [matrixNode("P", transition), vectorNode("pi", stationary)],
+    };
+    steps.push(
+      {
+        title: "Set stationarity equation",
+        expression: "pi P = pi, sum(pi)=1",
+        detail: "A stationary distribution is unchanged by one transition.",
+      },
+      {
+        title: "Solve linear system",
+        expression: `pi = ${formatVector(stationary)}`,
+        detail: "The normalization equation replaces one dependent stationarity equation.",
+      },
+    );
+
+    return {
+      mode: "statistics",
+      tree,
+      answer: `stationary = ${formatVector(stationary)}`,
+      summary: "Markov stationary distribution",
+      details: "Long-run distribution for a finite Markov chain",
+      variables: [],
+      metrics: treeMetrics(tree),
+      steps,
+      artifacts: [
+        ["Transition matrix", formatMatrix(transition)],
+        ["Stationary distribution", formatVector(stationary)],
+      ],
+      table: {
+        headers: ["State", "Stationary probability"],
+        rows: stationary.map((value, index) => [`S${index + 1}`, formatNumber(value)]),
+      },
+    };
+  }
+
+  const power = matrixPower(transition, request.steps);
+  const distribution = vectorTimesMatrix(request.start, power).map(normalizeNumber);
+  const tree = {
+    kind: "statsDistribution",
+    label: "MARKOV",
+    children: [matrixNode("P", transition), vectorNode("start", request.start), vectorNode("after", distribution)],
+  };
+  steps.push(
+    {
+      title: "Raise transition matrix",
+      expression: `P^${request.steps} = ${formatMatrix(power)}`,
+      detail: "Repeated transitions are computed by matrix powers.",
+    },
+    {
+      title: "Apply starting distribution",
+      expression: `${formatVector(request.start)} P^${request.steps} = ${formatVector(distribution)}`,
+      detail: "The starting distribution is treated as a row vector.",
+    },
+  );
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `after ${request.steps} steps = ${formatVector(distribution)}`,
+    summary: "Markov n-step distribution",
+    details: "Finite Markov chain transition probabilities",
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps,
+    artifacts: [
+      ["Transition matrix", formatMatrix(transition)],
+      ["Start distribution", formatVector(request.start)],
+      ["Steps", formatNumber(request.steps)],
+      [`P^${request.steps}`, formatMatrix(power)],
+      ["Result distribution", formatVector(distribution)],
+    ],
+    table: {
+      headers: ["State", "Start", `After ${request.steps} steps`],
+      rows: distribution.map((value, index) => [
+        `S${index + 1}`,
+        formatNumber(request.start[index]),
+        formatNumber(value),
+      ]),
+    },
   };
 }
 
@@ -4517,6 +4627,103 @@ function parseMatrixLiteral(literal) {
   }));
 }
 
+function parseMarkovInput(text) {
+  const transition = extractMatrices(text)[0];
+  if (!transition) {
+    throw new Error("Markov chain questions need a transition matrix, such as markov [[0.7,0.3],[0.2,0.8]].");
+  }
+  validateMarkovTransition(transition);
+
+  const lower = text.toLowerCase();
+  if (lower.includes("stationary") || lower.includes("steady state") || lower.includes("long-run") || lower.includes("long run")) {
+    return {
+      operation: "stationary",
+      transition,
+      steps: 0,
+      start: [],
+    };
+  }
+
+  const start = extractMarkovStartVector(text);
+  if (start.length !== transition.length) {
+    throw new Error(`Markov start distribution needs ${transition.length} probabilities.`);
+  }
+  validateProbabilityVector(start, "Markov start distribution");
+  const steps = readMarkovSteps(text);
+
+  return {
+    operation: "distribution",
+    transition,
+    start,
+    steps,
+  };
+}
+
+function validateMarkovTransition(matrix) {
+  if (matrix.length !== matrix[0].length) {
+    throw new Error("Markov transition matrices must be square.");
+  }
+  for (const row of matrix) {
+    if (row.some((value) => value < -EPSILON || value > 1 + EPSILON)) {
+      throw new Error("Markov transition probabilities must be between 0 and 1.");
+    }
+    const total = row.reduce((sum, value) => sum + value, 0);
+    if (Math.abs(total - 1) > 1e-6) {
+      throw new Error("Each Markov transition row must add to 1.");
+    }
+  }
+}
+
+function extractMarkovStartVector(text) {
+  const direct = text.match(/\b(?:start|initial|distribution)\s*=?\s*(\[[^\]]+\])/i);
+  if (direct) {
+    return parseVectorLiteral(direct[1]);
+  }
+  const withoutMatrices = removeMatrixLiterals(text);
+  const vectors = extractVectors(withoutMatrices);
+  if (vectors.length > 0) {
+    return vectors[0];
+  }
+  throw new Error("Markov n-step questions need a start distribution, such as start [1,0].");
+}
+
+function removeMatrixLiterals(text) {
+  let result = "";
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "[" && text[index + 1] === "[") {
+      let depth = 0;
+      for (; index < text.length; index += 1) {
+        if (text[index] === "[") depth += 1;
+        if (text[index] === "]") depth -= 1;
+        if (depth === 0) break;
+      }
+      result += " ";
+    } else {
+      result += text[index];
+    }
+  }
+  return result;
+}
+
+function validateProbabilityVector(vector, context) {
+  if (vector.some((value) => value < -EPSILON || value > 1 + EPSILON)) {
+    throw new Error(`${context} probabilities must be between 0 and 1.`);
+  }
+  const total = vector.reduce((sum, value) => sum + value, 0);
+  if (Math.abs(total - 1) > 1e-6) {
+    throw new Error(`${context} must add to 1.`);
+  }
+}
+
+function readMarkovSteps(text) {
+  const match = text.match(/\b(?:steps?|n|t|after)\s*=?\s*(\d+)\b/i);
+  const steps = match ? Number(match[1]) : 1;
+  if (!Number.isSafeInteger(steps) || steps < 0 || steps > 1000) {
+    throw new Error("Markov steps must be an integer from 0 through 1000.");
+  }
+  return steps;
+}
+
 function parseVectorInput(text) {
   const vectors = extractVectors(text);
   const lower = text.toLowerCase();
@@ -4882,6 +5089,48 @@ function multiplyMatrices(left, right) {
       row.reduce((sum, value, index) => sum + value * right[index][columnIndex], 0),
     ),
   );
+}
+
+function identityMatrix(size) {
+  return Array.from({ length: size }, (_, row) =>
+    Array.from({ length: size }, (_, column) => (row === column ? 1 : 0)),
+  );
+}
+
+function matrixPower(matrix, exponent) {
+  let result = identityMatrix(matrix.length);
+  let factor = matrix;
+  let power = exponent;
+  while (power > 0) {
+    if (power % 2 === 1) {
+      result = multiplyMatrices(result, factor);
+    }
+    factor = multiplyMatrices(factor, factor);
+    power = Math.floor(power / 2);
+  }
+  return result.map((row) => row.map(normalizeNumber));
+}
+
+function vectorTimesMatrix(vector, matrix) {
+  if (vector.length !== matrix.length) {
+    throw new Error("Vector length must match matrix rows.");
+  }
+  return matrix[0].map((_, column) =>
+    vector.reduce((sum, value, row) => sum + value * matrix[row][column], 0),
+  );
+}
+
+function stationaryMarkovDistribution(matrix) {
+  const size = matrix.length;
+  const system = [];
+  const constants = [];
+  for (let column = 0; column < size - 1; column += 1) {
+    system.push(matrix.map((_, row) => matrix[row][column] - (row === column ? 1 : 0)));
+    constants.push(0);
+  }
+  system.push(Array(size).fill(1));
+  constants.push(1);
+  return solveLinearSystem(system, constants).map(normalizeNumber);
 }
 
 function determinant(matrix) {
@@ -7606,6 +7855,13 @@ function statsMetricNode(label, value) {
 
 function isDerivativeQuestion(lower) {
   return lower.includes("derivative") || lower.includes("differentiate") || /d\s*\/\s*d[a-z]\w*/i.test(lower);
+}
+
+function isMarkovQuestion(lower) {
+  return lower.includes("markov") ||
+    lower.includes("transition matrix") ||
+    lower.includes("stationary distribution") ||
+    lower.includes("steady state");
 }
 
 function isMultivariableQuestion(lower) {
