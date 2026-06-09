@@ -1129,6 +1129,10 @@ export function analyzeStatistics(statement) {
     return analyzeDiscreteDistribution(statement);
   }
 
+  if (isNaiveBayesQuestion(lower)) {
+    return analyzeNaiveBayes(statement);
+  }
+
   if (
     lower.includes("bayes") ||
     lower.includes("posterior") ||
@@ -5258,6 +5262,99 @@ function analyzeLogisticRegression(statement) {
   };
 }
 
+function analyzeNaiveBayes(statement) {
+  const request = parseNaiveBayesInput(statement);
+  const model = fitGaussianNaiveBayes(request.classes, request.predictors);
+  const hasPrediction = request.prediction.every(Number.isFinite);
+  const prediction = hasPrediction
+    ? predictGaussianNaiveBayes(model, request.prediction)
+    : null;
+  const fitted = request.classes.map((_, row) =>
+    predictGaussianNaiveBayes(model, request.predictors.map((predictor) => predictor.values[row])),
+  );
+  const accuracy = fitted.filter((item, index) => item.classValue === request.classes[index]).length / request.classes.length;
+  const classLabels = model.classes.map((classInfo) => formatNumber(classInfo.value)).join(", ");
+  const tree = {
+    kind: "statsRegression",
+    label: "NAIVE BAYES",
+    children: [
+      statsDatasetNode(request.classes, [], "CLASS"),
+      ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+      statsMetricNode("ACC", accuracy),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: prediction
+      ? `predicted class = ${formatNumber(prediction.classValue)}`
+      : `classes = ${classLabels}`,
+    summary: "Gaussian Naive Bayes",
+    details: `${request.classes.length} observations, ${model.classes.length} classes, ${request.predictors.length} features`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read classes and numeric features",
+        expression: `classes = ${classLabels}, features = ${request.predictors.map((predictor) => predictor.name).join(", ")}`,
+        detail: "Gaussian Naive Bayes learns one normal distribution per class and feature.",
+      },
+      {
+        title: "Estimate priors and likelihoods",
+        expression: model.classes
+          .map((classInfo) => `P(${formatNumber(classInfo.value)})=${formatNumber(classInfo.prior)}`)
+          .join(", "),
+        detail: "Class priors come from class frequencies, and feature likelihoods use class-specific means and variances.",
+      },
+      {
+        title: "Evaluate training predictions",
+        expression: `accuracy = ${formatNumber(accuracy)}`,
+        detail: "Each training row is classified by the largest posterior probability.",
+      },
+      ...(prediction
+        ? [{
+            title: "Predict class posterior",
+            expression: prediction.posteriors
+              .map((posterior) => `P(${formatNumber(posterior.classValue)}|x)=${formatNumber(posterior.probability)}`)
+              .join(", "),
+            detail: "Log likelihoods are normalized into posterior probabilities to avoid underflow.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Obs", "Actual", "Predicted", "Confidence"],
+      rows: request.classes.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(fitted[index].classValue),
+        formatNumber(fitted[index].probability),
+      ]),
+    },
+    artifacts: [
+      ["Classes", classLabels],
+      ["Training accuracy", formatNumber(accuracy)],
+      ...model.classes.map((classInfo) => [`Prior class ${formatNumber(classInfo.value)}`, formatNumber(classInfo.prior)]),
+      ...model.classes.flatMap((classInfo) =>
+        classInfo.features.flatMap((feature, index) => [
+          [`Class ${formatNumber(classInfo.value)} ${request.predictors[index].name} mean`, formatNumber(feature.mean)],
+          [`Class ${formatNumber(classInfo.value)} ${request.predictors[index].name} variance`, formatNumber(feature.variance)],
+        ]),
+      ),
+      ...(prediction
+        ? [
+            ["Predicted class", formatNumber(prediction.classValue)],
+            ["Posterior probability", formatNumber(prediction.probability)],
+            ...prediction.posteriors.map((posterior) => [
+              `Posterior class ${formatNumber(posterior.classValue)}`,
+              formatNumber(posterior.probability),
+            ]),
+          ]
+        : []),
+    ],
+  };
+}
+
 function analyzePoissonRegression(statement) {
   const request = parsePoissonRegressionInput(statement);
   const design = request.y.map((_, row) => [
@@ -7294,6 +7391,76 @@ function logisticSigmoid(value) {
 
 function clampLogLikelihoodProbability(value) {
   return Math.min(1 - 1e-12, Math.max(1e-12, value));
+}
+
+function fitGaussianNaiveBayes(classes, predictors) {
+  const classValues = [...new Set(classes)].sort((left, right) => left - right);
+  const globalVariances = predictors.map((predictor) => {
+    const predictorMean = mean(predictor.values);
+    const variance = predictor.values.reduce((sum, value) => sum + (value - predictorMean) ** 2, 0) / Math.max(1, predictor.values.length - 1);
+    return Math.max(variance, 1);
+  });
+  const classInfo = classValues.map((classValue) => {
+    const rowIndexes = classes
+      .map((value, index) => (value === classValue ? index : -1))
+      .filter((index) => index >= 0);
+    return {
+      value: classValue,
+      count: rowIndexes.length,
+      prior: rowIndexes.length / classes.length,
+      features: predictors.map((predictor, featureIndex) => {
+        const values = rowIndexes.map((row) => predictor.values[row]);
+        const featureMean = mean(values);
+        const rawVariance = values.length > 1
+          ? values.reduce((sum, value) => sum + (value - featureMean) ** 2, 0) / (values.length - 1)
+          : 0;
+        const variance = Math.max(rawVariance, globalVariances[featureIndex] * 1e-6);
+        return {
+          mean: normalizeNumber(featureMean),
+          variance: normalizeNumber(variance),
+        };
+      }),
+    };
+  });
+
+  return {
+    classes: classInfo,
+    featureCount: predictors.length,
+  };
+}
+
+function predictGaussianNaiveBayes(model, values) {
+  const scores = model.classes.map((classInfo) => {
+    const logLikelihood = values.reduce((sum, value, index) => {
+      const feature = classInfo.features[index];
+      return sum + gaussianLogDensity(value, feature.mean, feature.variance);
+    }, Math.log(classInfo.prior));
+    return {
+      classValue: classInfo.value,
+      logLikelihood,
+    };
+  });
+  const maxScore = Math.max(...scores.map((score) => score.logLikelihood));
+  const weights = scores.map((score) => Math.exp(score.logLikelihood - maxScore));
+  const totalWeight = weights.reduce((sum, value) => sum + value, 0);
+  const posteriors = scores.map((score, index) => ({
+    classValue: score.classValue,
+    probability: normalizeNumber(weights[index] / totalWeight),
+    logLikelihood: normalizeNumber(score.logLikelihood),
+  }));
+  const best = posteriors.reduce((winner, current) =>
+    current.probability > winner.probability ? current : winner,
+  );
+
+  return {
+    classValue: best.classValue,
+    probability: best.probability,
+    posteriors,
+  };
+}
+
+function gaussianLogDensity(value, center, variance) {
+  return -0.5 * (Math.log(2 * Math.PI * variance) + ((value - center) ** 2) / variance);
 }
 
 function fitKMeans(points, k) {
@@ -11331,6 +11498,55 @@ function parsePoissonRegressionInput(text) {
   };
 }
 
+function parseNaiveBayesInput(text) {
+  const lists = new Map();
+  const listText = text.replace(/\bpredict\b.*$/i, "");
+  for (const match of listText.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    const label = match[1];
+    const values = parseNumberList(match[2]);
+    if (values.length > 1) {
+      lists.set(label.toLowerCase(), { name: label, values });
+    }
+  }
+
+  const classEntry = lists.get("class") ??
+    lists.get("classes") ??
+    lists.get("label") ??
+    lists.get("labels") ??
+    lists.get("y") ??
+    lists.get("response") ??
+    lists.get("outcome");
+  if (!classEntry) {
+    throw new Error("Naive Bayes needs a class list, such as class: 0, 0, 1, 1.");
+  }
+
+  const predictors = [...lists.entries()]
+    .filter(([key]) => key !== classEntry.name.toLowerCase())
+    .filter(([key]) => /^x\d*$/i.test(key) || /^predictor\d+$/i.test(key) || /^feature\d+$/i.test(key))
+    .sort(([left], [right]) => naturalLabelNumber(left) - naturalLabelNumber(right))
+    .map(([, value]) => value);
+
+  if (predictors.length < 1) {
+    throw new Error("Naive Bayes needs at least one numeric feature list, such as x1: 1, 2, 3.");
+  }
+  for (const predictor of predictors) {
+    if (predictor.values.length !== classEntry.values.length) {
+      throw new Error("All Naive Bayes feature lists must have the same length as the class list.");
+    }
+  }
+  const classValues = [...new Set(classEntry.values)];
+  if (classValues.length < 2) {
+    throw new Error("Naive Bayes needs at least two classes.");
+  }
+
+  const prediction = parseLogisticRegressionPrediction(text, predictors.map((predictor) => predictor.name));
+  return {
+    classes: classEntry.values,
+    predictors,
+    prediction,
+  };
+}
+
 function parseLogisticRegressionPrediction(text, predictorNames) {
   const match = text.match(/\bpredict\b(.+)$/i);
   if (!match) {
@@ -12228,6 +12444,12 @@ function isPoissonRegressionQuestion(lower) {
     lower.includes("log linear regression");
 }
 
+function isNaiveBayesQuestion(lower) {
+  return lower.includes("naive bayes") ||
+    lower.includes("naïve bayes") ||
+    lower.includes("bayes classifier");
+}
+
 function isMultivariateStatsQuestion(lower, statement = lower) {
   return lower.includes("pca") ||
     lower.includes("principal component") ||
@@ -12556,6 +12778,9 @@ function isStatisticsQuestion(lower) {
     "beta binomial",
     "bayesian proportion",
     "credible interval",
+    "naive bayes",
+    "naïve bayes",
+    "bayes classifier",
     "bayes",
     "posterior",
     "prior",
