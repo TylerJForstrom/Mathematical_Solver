@@ -63,6 +63,8 @@ The frontend currently supports:
   classification accuracy, McFadden R squared, and probability prediction
 - Gaussian Naive Bayes classification with class priors, feature likelihoods,
   posterior probabilities, training accuracy, and class prediction
+- Linear discriminant analysis with class mean vectors, pooled covariance,
+  discriminant scores, posterior-like probabilities, and class prediction
 - Decision tree classification with Gini impurity splits, learned rule paths,
   training accuracy, max-depth/min-leaf controls, and class prediction
 - Random forest classification with seeded bootstrap trees, feature subsampling,
@@ -213,6 +215,8 @@ The same idea works for algebra and calculus:
   fits a binary-response model and returns a predicted probability.
 - `naive bayes class: 0,0,0,1,1,1; x1: 1,2,1.5,5,6,5.5; x2: 1,1.2,0.8,5,5.5,4.8`
   trains a Gaussian classifier and reports posterior class probabilities.
+- `lda class: 0,0,0,1,1,1; x1: 1,2,1.5,5,6,5.5; x2: 1,1.2,0.8,5,5.5,4.8; regularization=0.001 predict x1=5.2 x2=5`
+  fits class means plus a pooled covariance matrix and predicts with discriminant scores.
 - `decision tree class: 0,0,0,1,1,1; x1: 1,2,1.5,5,6,5.5; x2: 1,1.2,0.8,5,5.5,4.8; maxDepth=2 predict x1=5.2 x2=5`
   learns Gini split rules and traces the prediction path to a class leaf.
 - `random forest class: 0,0,0,1,1,1; x1: 1,2,1.5,5,6,5.5; x2: 1,1.2,0.8,5,5.5,4.8; trees=9 maxDepth=2 seed=7 predict x1=5.2 x2=5`
@@ -329,6 +333,7 @@ The demo includes:
   LASSO regression,
   logistic regression,
   Gaussian Naive Bayes classification,
+  linear discriminant analysis,
   decision tree classification,
   random forest classification,
   ROC/AUC classifier evaluation,

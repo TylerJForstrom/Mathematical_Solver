@@ -299,6 +299,18 @@ runTest("statistics mode computes Gaussian Naive Bayes classifiers", () => {
   assert.deepEqual(result.table.rows[0], ["1", "0", "0", "1"]);
 });
 
+runTest("statistics mode computes linear discriminant analysis classifiers", () => {
+  const result = analyzeStatistics("lda class: 0, 0, 0, 1, 1, 1; x1: 1, 2, 1.5, 5, 6, 5.5; x2: 1, 1.2, 0.8, 5, 5.5, 4.8; regularization=0.001 predict x1=5.2 x2=5");
+
+  assert.equal(result.summary, "linear discriminant analysis");
+  assert.equal(result.answer, "predicted class = 1 (posterior = 1)");
+  assert.equal(artifactValue(result, "Pooled covariance"), "[[0.25, 0.0875], [0.0875, 0.085]]");
+  assert.equal(artifactValue(result, "Mean class 1"), "[5.5, 5.1]");
+  assert.equal(artifactValue(result, "Discriminant weights class 0"), "[2.979235, 8.596708]");
+  assert.equal(artifactValue(result, "Score gap"), "93.265852");
+  assert.deepEqual(result.table.rows[5], ["6", "1", "1", "1", "83.197832"]);
+});
+
 runTest("statistics mode computes decision tree classifiers", () => {
   const result = analyzeStatistics("decision tree class: 0, 0, 0, 1, 1, 1; x1: 1, 2, 1.5, 5, 6, 5.5; x2: 1, 1.2, 0.8, 5, 5.5, 4.8; maxDepth=2 predict x1=5.2 x2=5");
 
@@ -910,6 +922,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("lasso regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "LASSO regression");
   assert.equal(analyzeUniversal("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5").summary, "logistic regression");
   assert.equal(analyzeUniversal("naive bayes class: 0, 0, 0, 1, 1, 1; x1: 1, 2, 1.5, 5, 6, 5.5; x2: 1, 1.2, 0.8, 5, 5.5, 4.8; predict x1=3.1 x2=2.6").summary, "Gaussian Naive Bayes");
+  assert.equal(analyzeUniversal("lda class: 0, 0, 0, 1, 1, 1; x1: 1, 2, 1.5, 5, 6, 5.5; x2: 1, 1.2, 0.8, 5, 5.5, 4.8; regularization=0.001 predict x1=5.2 x2=5").summary, "linear discriminant analysis");
   assert.equal(analyzeUniversal("random forest class: 0, 0, 0, 1, 1, 1; x1: 1, 2, 1.5, 5, 6, 5.5; x2: 1, 1.2, 0.8, 5, 5.5, 4.8; trees=9 maxDepth=2 seed=7 predict x1=5.2 x2=5").summary, "random forest classifier");
   assert.equal(analyzeUniversal("roc actual: 1, 1, 0, 1, 0, 0; scores: 0.9, 0.75, 0.6, 0.55, 0.3, 0.1").summary, "ROC/AUC analysis");
   assert.equal(analyzeUniversal("poisson regression y: 1, 2, 1, 3, 4, 5; x: 0, 1, 2, 3, 4, 5; predict x=6").summary, "Poisson regression");
