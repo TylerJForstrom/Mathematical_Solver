@@ -1133,6 +1133,10 @@ export function analyzeStatistics(statement) {
     return analyzeRocAnalysis(statement);
   }
 
+  if (isRandomForestQuestion(lower)) {
+    return analyzeRandomForestClassifier(statement);
+  }
+
   if (isDecisionTreeQuestion(lower)) {
     return analyzeDecisionTreeClassifier(statement);
   }
@@ -5524,6 +5528,100 @@ function analyzeDecisionTreeClassifier(statement) {
   };
 }
 
+function analyzeRandomForestClassifier(statement) {
+  const request = parseRandomForestInput(statement);
+  const model = fitRandomForestClassifier(request.classes, request.predictors, request);
+  const predictorNames = request.predictors.map((predictor) => predictor.name);
+  const trainingPredictions = request.classes.map((_, row) =>
+    predictRandomForest(model.trees, request.predictors.map((predictor) => predictor.values[row]), predictorNames),
+  );
+  const correct = trainingPredictions.filter((prediction, index) => prediction.classValue === request.classes[index]).length;
+  const accuracy = correct / request.classes.length;
+  const oob = evaluateRandomForestOob(model.trees, request.classes, request.predictors, predictorNames);
+  const hasPrediction = request.prediction.every(Number.isFinite);
+  const prediction = hasPrediction ? predictRandomForest(model.trees, request.prediction, predictorNames) : null;
+  const classLabels = model.classes.map(formatNumber).join(", ");
+  const tree = {
+    kind: "statsRegression",
+    label: "FOREST",
+    children: [
+      statsDatasetNode(request.classes, [], "CLASS"),
+      ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+      statsMetricNode("TREES", request.treeCount),
+      statsMetricNode("ACC", accuracy),
+      statsMetricNode("OOB", Number.isFinite(oob.accuracy) ? oob.accuracy : 0),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: prediction
+      ? `predicted class = ${formatNumber(prediction.classValue)} (vote confidence = ${formatNumber(prediction.confidence)})`
+      : `training accuracy = ${formatNumber(accuracy)}`,
+    summary: "random forest classifier",
+    details: `${request.classes.length} observations, ${model.classes.length} classes, ${request.treeCount} trees, mtry ${request.mtry}`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read classes and numeric features",
+        expression: `classes = ${classLabels}, features = ${predictorNames.join(", ")}`,
+        detail: "The forest learns many decision trees from the same labeled numeric dataset.",
+      },
+      {
+        title: "Bootstrap and subsample features",
+        expression: `${request.treeCount} trees, sample size ${request.sampleSize}, mtry ${request.mtry}, seed ${request.seed}`,
+        detail: "Each tree trains on a seeded bootstrap sample and considers a random subset of features at each split.",
+      },
+      {
+        title: "Vote across trees",
+        expression: `accuracy = ${formatNumber(accuracy)}, OOB accuracy = ${Number.isFinite(oob.accuracy) ? formatNumber(oob.accuracy) : "not available"}`,
+        detail: "Predictions use majority vote; out-of-bag rows estimate performance from trees that did not train on that row.",
+      },
+      ...(prediction
+        ? [{
+            title: "Predict new values",
+            expression: `votes = ${formatVoteCounts(prediction.votes)}`,
+            detail: "The predicted class is the class with the most tree votes.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Obs", "Actual", "Predicted", "Vote Confidence", "OOB Prediction"],
+      rows: request.classes.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(trainingPredictions[index].classValue),
+        formatNumber(trainingPredictions[index].confidence),
+        oob.predictions[index] ? formatNumber(oob.predictions[index].classValue) : "-",
+      ]),
+    },
+    artifacts: [
+      ["Classes", classLabels],
+      ["Trees", formatNumber(request.treeCount)],
+      ["Max depth", formatNumber(request.maxDepth)],
+      ["Min leaf", formatNumber(request.minLeaf)],
+      ["Mtry", formatNumber(request.mtry)],
+      ["Sample size", formatNumber(request.sampleSize)],
+      ["Seed", formatNumber(request.seed)],
+      ["Training accuracy", formatNumber(accuracy)],
+      ["OOB accuracy", Number.isFinite(oob.accuracy) ? formatNumber(oob.accuracy) : "not available"],
+      ["OOB rows scored", formatNumber(oob.scoredCount)],
+      ["Average tree depth", formatNumber(model.averageDepth)],
+      ["Average node count", formatNumber(model.averageNodeCount)],
+      ...randomForestTreeArtifacts(model.trees, predictorNames),
+      ...(prediction
+        ? [
+            ["Predicted class", formatNumber(prediction.classValue)],
+            ["Vote confidence", formatNumber(prediction.confidence)],
+            ["Prediction votes", formatVoteCounts(prediction.votes)],
+          ]
+        : []),
+    ],
+  };
+}
+
 function analyzePoissonRegression(statement) {
   const request = parsePoissonRegressionInput(statement);
   const design = request.y.map((_, row) => [
@@ -7709,9 +7807,9 @@ function rocThresholdMetrics(labels, scores, threshold, positives, negatives) {
   };
 }
 
-function fitDecisionTreeClassifier(classes, predictors, maxDepth, minLeaf) {
-  const rows = classes.map((_, index) => index);
-  const root = buildDecisionTreeNode(rows, classes, predictors, 0, maxDepth, minLeaf);
+function fitDecisionTreeClassifier(classes, predictors, maxDepth, minLeaf, options = {}) {
+  const rows = options.rows ?? classes.map((_, index) => index);
+  const root = buildDecisionTreeNode(rows, classes, predictors, 0, maxDepth, minLeaf, options);
   return {
     root,
     classes: [...new Set(classes)].sort((left, right) => left - right),
@@ -7720,7 +7818,7 @@ function fitDecisionTreeClassifier(classes, predictors, maxDepth, minLeaf) {
   };
 }
 
-function buildDecisionTreeNode(rows, classes, predictors, depth, maxDepth, minLeaf) {
+function buildDecisionTreeNode(rows, classes, predictors, depth, maxDepth, minLeaf, options = {}) {
   const counts = decisionClassCounts(rows, classes);
   const predictedClass = majorityClassFromCounts(counts);
   const gini = giniFromCounts(counts, rows.length);
@@ -7739,7 +7837,7 @@ function buildDecisionTreeNode(rows, classes, predictors, depth, maxDepth, minLe
     };
   }
 
-  const split = bestDecisionTreeSplit(rows, classes, predictors, gini, minLeaf);
+  const split = bestDecisionTreeSplit(rows, classes, predictors, gini, minLeaf, options);
   if (!split || split.gain <= EPSILON) {
     return {
       ...nodeBase,
@@ -7753,15 +7851,16 @@ function buildDecisionTreeNode(rows, classes, predictors, depth, maxDepth, minLe
     featureIndex: split.featureIndex,
     threshold: normalizeNumber(split.threshold),
     gain: normalizeNumber(split.gain),
-    left: buildDecisionTreeNode(split.leftRows, classes, predictors, depth + 1, maxDepth, minLeaf),
-    right: buildDecisionTreeNode(split.rightRows, classes, predictors, depth + 1, maxDepth, minLeaf),
+    left: buildDecisionTreeNode(split.leftRows, classes, predictors, depth + 1, maxDepth, minLeaf, options),
+    right: buildDecisionTreeNode(split.rightRows, classes, predictors, depth + 1, maxDepth, minLeaf, options),
   };
 }
 
-function bestDecisionTreeSplit(rows, classes, predictors, parentGini, minLeaf) {
+function bestDecisionTreeSplit(rows, classes, predictors, parentGini, minLeaf, options = {}) {
   let best = null;
+  const featureIndices = decisionTreeFeatureIndices(predictors.length, options.featureSubsetSize, options.random);
 
-  for (let featureIndex = 0; featureIndex < predictors.length; featureIndex += 1) {
+  for (const featureIndex of featureIndices) {
     const values = [...new Set(rows.map((row) => predictors[featureIndex].values[row]))].sort((left, right) => left - right);
     for (let index = 0; index < values.length - 1; index += 1) {
       const threshold = (values[index] + values[index + 1]) / 2;
@@ -7789,6 +7888,21 @@ function bestDecisionTreeSplit(rows, classes, predictors, parentGini, minLeaf) {
   }
 
   return best;
+}
+
+function decisionTreeFeatureIndices(featureCount, featureSubsetSize, random) {
+  const indices = Array.from({ length: featureCount }, (_, index) => index);
+  if (!Number.isSafeInteger(featureSubsetSize) || featureSubsetSize >= featureCount) {
+    return indices;
+  }
+
+  const shuffled = [...indices];
+  const randomValue = typeof random === "function" ? random : seededRandom(1);
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(randomValue() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled.slice(0, Math.max(1, featureSubsetSize)).sort((left, right) => left - right);
 }
 
 function decisionClassCounts(rows, classes) {
@@ -7857,6 +7971,101 @@ function decisionTreeRules(node, predictorNames, conditions = []) {
     ...decisionTreeRules(node.left, predictorNames, [...conditions, `${featureName} <= ${threshold}`]),
     ...decisionTreeRules(node.right, predictorNames, [...conditions, `${featureName} > ${threshold}`]),
   ];
+}
+
+function fitRandomForestClassifier(classes, predictors, request) {
+  const random = seededRandom(request.seed);
+  const trees = [];
+
+  for (let treeIndex = 0; treeIndex < request.treeCount; treeIndex += 1) {
+    const rows = bootstrapSampleRows(classes.length, request.sampleSize, random);
+    const model = fitDecisionTreeClassifier(classes, predictors, request.maxDepth, request.minLeaf, {
+      featureSubsetSize: request.mtry,
+      random,
+      rows,
+    });
+    trees.push({
+      root: model.root,
+      depth: model.depth,
+      nodeCount: model.nodeCount,
+      inBagRows: new Set(rows),
+    });
+  }
+
+  return {
+    trees,
+    classes: [...new Set(classes)].sort((left, right) => left - right),
+    averageDepth: mean(trees.map((tree) => tree.depth)),
+    averageNodeCount: mean(trees.map((tree) => tree.nodeCount)),
+  };
+}
+
+function bootstrapSampleRows(rowCount, sampleSize, random) {
+  return Array.from({ length: sampleSize }, () => Math.floor(random() * rowCount));
+}
+
+function predictRandomForest(trees, values, predictorNames) {
+  const votes = new Map();
+  const paths = [];
+
+  for (const [index, tree] of trees.entries()) {
+    const prediction = predictDecisionTree(tree.root, values, predictorNames);
+    votes.set(prediction.classValue, (votes.get(prediction.classValue) ?? 0) + 1);
+    paths.push(`T${index + 1}: ${formatNumber(prediction.classValue)}`);
+  }
+
+  const classValue = majorityClassFromCounts(votes);
+  const confidence = votes.get(classValue) / trees.length;
+  return {
+    classValue,
+    confidence: normalizeNumber(confidence),
+    votes,
+    paths,
+  };
+}
+
+function evaluateRandomForestOob(trees, classes, predictors, predictorNames) {
+  const predictions = classes.map((_, row) => {
+    const eligibleTrees = trees.filter((tree) => !tree.inBagRows.has(row));
+    if (eligibleTrees.length === 0) {
+      return null;
+    }
+    return predictRandomForest(
+      eligibleTrees,
+      predictors.map((predictor) => predictor.values[row]),
+      predictorNames,
+    );
+  });
+  const scored = predictions
+    .map((prediction, row) => ({ prediction, row }))
+    .filter((entry) => entry.prediction);
+  const correct = scored.filter((entry) => entry.prediction.classValue === classes[entry.row]).length;
+
+  return {
+    predictions,
+    scoredCount: scored.length,
+    accuracy: scored.length ? normalizeNumber(correct / scored.length) : Number.NaN,
+  };
+}
+
+function formatVoteCounts(votes) {
+  return [...votes.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([classValue, count]) => `${formatNumber(classValue)}:${count}`)
+    .join(", ");
+}
+
+function randomForestTreeArtifacts(trees, predictorNames) {
+  return trees.slice(0, 5).map((tree, index) => [
+    `Tree ${index + 1} root`,
+    `${decisionTreeRootLabel(tree.root, predictorNames)}; depth ${formatNumber(tree.depth)}; nodes ${formatNumber(tree.nodeCount)}`,
+  ]);
+}
+
+function decisionTreeRootLabel(root, predictorNames) {
+  return root.leaf
+    ? `leaf ${formatNumber(root.predictedClass)}`
+    : `${predictorNames[root.featureIndex]} <= ${formatNumber(root.threshold)}`;
 }
 
 function fitKMeans(points, k) {
@@ -12050,6 +12259,36 @@ function parseDecisionTreeInput(text) {
   };
 }
 
+function parseRandomForestInput(text) {
+  const base = parseDecisionTreeInput(text);
+  const treeCount = readNamedNumber(text, ["trees", "treeCount", "treecount", "ntrees", "estimators"], 11);
+  const defaultMtry = Math.max(1, Math.floor(Math.sqrt(base.predictors.length)));
+  const mtry = readNamedNumber(text, ["mtry", "featuresPerSplit", "featurespersplit", "featureSubset", "featuresubset"], defaultMtry);
+  const sampleSize = readNamedNumber(text, ["sampleSize", "samplesize", "bagSize", "bagsize"], base.classes.length);
+  const seed = readNamedNumber(text, ["seed"], 12345);
+
+  if (!Number.isSafeInteger(treeCount) || treeCount < 1 || treeCount > 101) {
+    throw new Error("Random forest trees must be an integer from 1 to 101.");
+  }
+  if (!Number.isSafeInteger(mtry) || mtry < 1 || mtry > base.predictors.length) {
+    throw new Error("Random forest mtry must be an integer between 1 and the number of features.");
+  }
+  if (!Number.isSafeInteger(sampleSize) || sampleSize < 2 || sampleSize > base.classes.length * 5) {
+    throw new Error("Random forest sampleSize must be an integer from 2 to five times the dataset size.");
+  }
+  if (!Number.isSafeInteger(seed) || seed < 0) {
+    throw new Error("Random forest seed must be a nonnegative integer.");
+  }
+
+  return {
+    ...base,
+    treeCount,
+    mtry,
+    sampleSize,
+    seed,
+  };
+}
+
 function parseLogisticRegressionPrediction(text, predictorNames) {
   const match = text.match(/\bpredict\b(.+)$/i);
   if (!match) {
@@ -12959,6 +13198,13 @@ function isDecisionTreeQuestion(lower) {
     lower.includes("tree classifier");
 }
 
+function isRandomForestQuestion(lower) {
+  return lower.includes("random forest") ||
+    lower.includes("forest classifier") ||
+    lower.includes("bagged tree") ||
+    lower.includes("bagged trees");
+}
+
 function isRocQuestion(lower) {
   return /\broc\b/.test(lower) ||
     /\bauc\b/.test(lower) ||
@@ -13216,7 +13462,7 @@ function isSystemQuestion(lower) {
 }
 
 function isStatisticsQuestion(lower) {
-  if (isRocQuestion(lower) || isDecisionTreeQuestion(lower)) {
+  if (isRocQuestion(lower) || isRandomForestQuestion(lower) || isDecisionTreeQuestion(lower)) {
     return true;
   }
 
@@ -13303,6 +13549,10 @@ function isStatisticsQuestion(lower) {
     "decision tree",
     "classification tree",
     "tree classifier",
+    "random forest",
+    "forest classifier",
+    "bagged tree",
+    "bagged trees",
     "bayes",
     "posterior",
     "prior",

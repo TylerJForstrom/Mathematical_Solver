@@ -65,6 +65,8 @@ The frontend currently supports:
   posterior probabilities, training accuracy, and class prediction
 - Decision tree classification with Gini impurity splits, learned rule paths,
   training accuracy, max-depth/min-leaf controls, and class prediction
+- Random forest classification with seeded bootstrap trees, feature subsampling,
+  majority votes, out-of-bag accuracy, and class prediction
 - ROC/AUC classifier evaluation with threshold sweeps, sensitivity,
   specificity, precision, accuracy, Youden's J, and confusion counts
 - Poisson regression for count outcomes with log-link coefficients, fitted
@@ -213,6 +215,8 @@ The same idea works for algebra and calculus:
   trains a Gaussian classifier and reports posterior class probabilities.
 - `decision tree class: 0,0,0,1,1,1; x1: 1,2,1.5,5,6,5.5; x2: 1,1.2,0.8,5,5.5,4.8; maxDepth=2 predict x1=5.2 x2=5`
   learns Gini split rules and traces the prediction path to a class leaf.
+- `random forest class: 0,0,0,1,1,1; x1: 1,2,1.5,5,6,5.5; x2: 1,1.2,0.8,5,5.5,4.8; trees=9 maxDepth=2 seed=7 predict x1=5.2 x2=5`
+  trains seeded bootstrap trees, votes across them, and reports out-of-bag accuracy.
 - `roc actual: 1,1,0,1,0,0; scores: 0.9,0.75,0.6,0.55,0.3,0.1`
   computes AUC and threshold-by-threshold classification metrics.
 - `poisson regression y: 1,2,1,3,4,5; x: 0,1,2,3,4,5; predict x=6`
@@ -326,6 +330,7 @@ The demo includes:
   logistic regression,
   Gaussian Naive Bayes classification,
   decision tree classification,
+  random forest classification,
   ROC/AUC classifier evaluation,
   Poisson regression,
   AR(1) time-series forecasting,

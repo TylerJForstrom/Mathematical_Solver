@@ -311,6 +311,19 @@ runTest("statistics mode computes decision tree classifiers", () => {
   assert.deepEqual(result.table.rows[5], ["6", "1", "1", "3"]);
 });
 
+runTest("statistics mode computes random forest classifiers", () => {
+  const result = analyzeStatistics("random forest class: 0, 0, 0, 1, 1, 1; x1: 1, 2, 1.5, 5, 6, 5.5; x2: 1, 1.2, 0.8, 5, 5.5, 4.8; trees=9 maxDepth=2 seed=7 predict x1=5.2 x2=5");
+
+  assert.equal(result.summary, "random forest classifier");
+  assert.equal(result.answer, "predicted class = 1 (vote confidence = 1)");
+  assert.equal(artifactValue(result, "Trees"), "9");
+  assert.equal(artifactValue(result, "Mtry"), "1");
+  assert.equal(artifactValue(result, "OOB accuracy"), "1");
+  assert.equal(artifactValue(result, "Prediction votes"), "1:9");
+  assert.equal(artifactValue(result, "Tree 3 root"), "x2 <= 2.9; depth 1; nodes 3");
+  assert.deepEqual(result.table.rows[0], ["1", "0", "0", "1", "0"]);
+});
+
 runTest("statistics mode computes ROC AUC analysis", () => {
   const result = analyzeStatistics("roc actual: 1, 1, 0, 1, 0, 0; scores: 0.9, 0.75, 0.6, 0.55, 0.3, 0.1");
 
@@ -897,6 +910,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("lasso regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "LASSO regression");
   assert.equal(analyzeUniversal("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5").summary, "logistic regression");
   assert.equal(analyzeUniversal("naive bayes class: 0, 0, 0, 1, 1, 1; x1: 1, 2, 1.5, 5, 6, 5.5; x2: 1, 1.2, 0.8, 5, 5.5, 4.8; predict x1=3.1 x2=2.6").summary, "Gaussian Naive Bayes");
+  assert.equal(analyzeUniversal("random forest class: 0, 0, 0, 1, 1, 1; x1: 1, 2, 1.5, 5, 6, 5.5; x2: 1, 1.2, 0.8, 5, 5.5, 4.8; trees=9 maxDepth=2 seed=7 predict x1=5.2 x2=5").summary, "random forest classifier");
   assert.equal(analyzeUniversal("roc actual: 1, 1, 0, 1, 0, 0; scores: 0.9, 0.75, 0.6, 0.55, 0.3, 0.1").summary, "ROC/AUC analysis");
   assert.equal(analyzeUniversal("poisson regression y: 1, 2, 1, 3, 4, 5; x: 0, 1, 2, 3, 4, 5; predict x=6").summary, "Poisson regression");
   assert.equal(analyzeUniversal("pca x: 1,2,3,4; y: 2,3,5,8").summary, "principal component analysis");
