@@ -1103,6 +1103,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isLimitQuestion(lower)) {
     routed = analyzeLimit(question);
     routedLabel = "Limit";
+  } else if (isNumericalIntegrationQuestion(lower)) {
+    routed = analyzeNumerical(question);
+    routedLabel = "Numerical integration";
   } else if (isIntegralQuestion(lower)) {
     routed = analyzeIntegral(question);
     routedLabel = "Integral";
@@ -2611,6 +2614,10 @@ export function analyzeGraph(statement) {
 export function analyzeNumerical(statement) {
   const request = extractNumericalQuestion(statement);
   const expression = parseMath(request.expression);
+  if (request.kind === "integral") {
+    return analyzeNumericalIntegration(request, expression);
+  }
+
   const evaluator = numericFunctionFromExpression(expression);
   const steps = [
     {
@@ -2654,6 +2661,63 @@ export function analyzeNumerical(statement) {
       ["Function", request.expression],
       ["Root", `${request.variable} ~= ${formatNumber(root)}`],
       ["f(root)", formatNumber(evaluator(root))],
+    ],
+  };
+}
+
+function analyzeNumericalIntegration(request, expression) {
+  if (expression.kind === "equation") {
+    throw new Error("Numerical integration expects an expression, not an equation.");
+  }
+  const evaluator = (x) => evaluateMath(expression, { [request.variable]: x });
+  const result = approximateDefiniteIntegral(evaluator, request.lower, request.upper, request.subintervals, request.method);
+  const methodName = request.method === "simpson" ? "Simpson's rule" : "trapezoidal rule";
+  const tree = {
+    kind: "mathNumericalIntegral",
+    label: request.method.toUpperCase(),
+    children: [
+      expression,
+      statsMetricNode("a", request.lower),
+      statsMetricNode("b", request.upper),
+      statsMetricNode("n", request.subintervals),
+    ],
+  };
+
+  return {
+    mode: "numerical",
+    tree,
+    answer: `integral ~= ${formatNumber(result.value)}`,
+    summary: `${request.method} numerical integration`,
+    details: `${methodName} with ${request.subintervals} subintervals`,
+    variables: mathVariables(expression),
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Parse numerical integral",
+        expression: `${formatMath(expression)} from ${formatNumber(request.lower)} to ${formatNumber(request.upper)}`,
+        detail: "The integrand is evaluated numerically instead of finding an antiderivative.",
+      },
+      {
+        title: "Partition interval",
+        expression: `h = ${formatNumber(result.stepSize)}, n = ${request.subintervals}`,
+        detail: "The interval is divided into equal-width subintervals.",
+      },
+      {
+        title: `Apply ${methodName}`,
+        expression: `integral ~= ${formatNumber(result.value)}`,
+        detail: request.method === "simpson"
+          ? "Simpson's rule combines endpoint, odd-index, and even-index samples with 1-4-2 weights."
+          : "The trapezoidal rule averages neighboring function values over each subinterval.",
+      },
+    ],
+    table: result.table,
+    artifacts: [
+      ["Method", methodName],
+      ["Integrand", formatMath(expression)],
+      ["Bounds", `[${formatNumber(request.lower)}, ${formatNumber(request.upper)}]`],
+      ["Subintervals", formatNumber(request.subintervals)],
+      ["Step size", formatNumber(result.stepSize)],
+      ["Approximation", formatNumber(result.value)],
     ],
   };
 }
@@ -7219,6 +7283,10 @@ function detectUnboundedLimit(samples) {
 
 function extractNumericalQuestion(statement) {
   const lower = statement.toLowerCase();
+  if (isNumericalIntegrationQuestion(lower)) {
+    return extractNumericalIntegrationQuestion(statement);
+  }
+
   const method = lower.includes("newton") ? "newton" : "bisection";
   let expression = statement
     .replace(/^(newton|bisection|numerical root|root of|find root of|solve numerically)\s+/i, "")
@@ -7252,6 +7320,75 @@ function extractNumericalQuestion(statement) {
     low,
     high,
   };
+}
+
+function extractNumericalIntegrationQuestion(statement) {
+  const lower = statement.toLowerCase();
+  const method = lower.includes("trapezoid") || lower.includes("trapezoidal")
+    ? "trapezoid"
+    : "simpson";
+  let expression = statement
+    .replace(/^(simpson(?:'s)?(?:\s+rule)?|trapezoidal(?:\s+rule)?|trapezoid(?:al)?(?:\s+rule)?|numerical integral|approximate integral)\s*/i, "")
+    .replace(/^integrate\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  let variable = "x";
+  let subintervals = method === "simpson" ? 100 : 100;
+
+  const subintervalMatch = expression.match(/\b(?:n|steps|subintervals)\s*=?\s*(\d+)\b/i);
+  if (subintervalMatch) {
+    subintervals = Number(subintervalMatch[1]);
+    expression = expression.replace(subintervalMatch[0], "").trim();
+  }
+
+  const respectMatch = expression.match(/\b(?:with respect to|wrt)\s+([A-Za-z_]\w*)/i);
+  const dxMatch = expression.match(/\bd([A-Za-z_]\w*)\b/i);
+  if (respectMatch) {
+    variable = respectMatch[1];
+    expression = expression.replace(respectMatch[0], "").trim();
+  } else if (dxMatch) {
+    variable = dxMatch[1];
+    expression = expression.replace(dxMatch[0], "").trim();
+  }
+
+  const boundsMatch = expression.match(/\b(?:from|between)\s+(.+?)\s+(?:to|,)\s+(.+)$/i);
+  if (!boundsMatch) {
+    throw new Error("Numerical integration needs bounds, such as simpson integrate sin(x) from 0 to pi n=100.");
+  }
+  const lowerBound = evaluateBoundExpression(boundsMatch[1]);
+  const upperBound = evaluateBoundExpression(boundsMatch[2]);
+  expression = expression.slice(0, boundsMatch.index).trim();
+
+  if (!expression) {
+    throw new Error("Numerical integration needs an integrand expression.");
+  }
+  if (!Number.isSafeInteger(subintervals) || subintervals < 1 || subintervals > 100000) {
+    throw new Error("Numerical integration needs n between 1 and 100000.");
+  }
+  if (method === "simpson" && subintervals % 2 !== 0) {
+    throw new Error("Simpson's rule needs an even number of subintervals.");
+  }
+  if (!Number.isFinite(lowerBound) || !Number.isFinite(upperBound) || nearlyEqual(lowerBound, upperBound)) {
+    throw new Error("Numerical integration needs two finite, distinct bounds.");
+  }
+
+  return {
+    kind: "integral",
+    expression,
+    variable,
+    method,
+    lower: lowerBound,
+    upper: upperBound,
+    subintervals,
+  };
+}
+
+function evaluateBoundExpression(text) {
+  const value = evaluateMath(parseMath(text.trim()));
+  if (!Number.isFinite(value)) {
+    throw new Error("Numerical integration bounds must be finite.");
+  }
+  return value;
 }
 
 function extractDifferentialEquation(statement) {
@@ -7479,6 +7616,8 @@ function evaluateMath(node, values = {}) {
   if (node.kind === "mathNumber") return node.value;
   if (node.kind === "mathSymbol") {
     if (node.name in values) return values[node.name];
+    if (node.name.toLowerCase() === "pi") return Math.PI;
+    if (node.name.toLowerCase() === "e") return Math.E;
     throw new Error(`Missing numeric value for ${node.name}.`);
   }
   if (node.kind === "mathUnary") return -evaluateMath(node.operand, values);
@@ -7498,6 +7637,44 @@ function safeEvaluateMath(node, values = {}) {
   } catch {
     return Number.NaN;
   }
+}
+
+function approximateDefiniteIntegral(evaluator, lower, upper, subintervals, method) {
+  const stepSize = (upper - lower) / subintervals;
+  const samples = [];
+  let weightedSum = 0;
+
+  for (let index = 0; index <= subintervals; index += 1) {
+    const x = lower + index * stepSize;
+    const y = evaluator(x);
+    if (!Number.isFinite(y)) {
+      throw new Error("The integrand is not finite at a quadrature sample point.");
+    }
+    let weight;
+    if (method === "simpson") {
+      weight = index === 0 || index === subintervals ? 1 : index % 2 === 1 ? 4 : 2;
+    } else {
+      weight = index === 0 || index === subintervals ? 0.5 : 1;
+    }
+    weightedSum += weight * y;
+    if (index <= 8 || index === subintervals) {
+      samples.push([String(index), formatNumber(x), formatNumber(y), formatNumber(weight)]);
+    } else if (index === 9) {
+      samples.push(["...", "...", "...", "..."]);
+    }
+  }
+
+  const value = method === "simpson"
+    ? (stepSize / 3) * weightedSum
+    : stepSize * weightedSum;
+  return {
+    value: normalizeNumber(value),
+    stepSize: normalizeNumber(stepSize),
+    table: {
+      headers: ["i", "x", "f(x)", "weight"],
+      rows: samples,
+    },
+  };
 }
 
 function newtonRoot(evaluator, initialGuess) {
@@ -9742,12 +9919,23 @@ function isDifferentialEquationQuestion(lower) {
 }
 
 function isNumericalQuestion(lower) {
-  return lower.startsWith("newton ") ||
+  return isNumericalIntegrationQuestion(lower) ||
+    lower.startsWith("newton ") ||
     lower.startsWith("bisection ") ||
     lower.startsWith("numerical root ") ||
     lower.startsWith("root of ") ||
     lower.startsWith("find root of ") ||
     lower.startsWith("solve numerically ");
+}
+
+function isNumericalIntegrationQuestion(lower) {
+  return lower.startsWith("simpson ") ||
+    lower.startsWith("simpson's ") ||
+    lower.startsWith("trapezoid ") ||
+    lower.startsWith("trapezoidal ") ||
+    lower.startsWith("numerical integral ") ||
+    lower.startsWith("approximate integral ") ||
+    ((lower.includes("simpson") || lower.includes("trapezoid")) && lower.includes("integrate"));
 }
 
 function isSystemQuestion(lower) {

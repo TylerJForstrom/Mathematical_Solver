@@ -641,6 +641,17 @@ runTest("numerical mode runs bisection", () => {
   assert.equal(result.answer, "x ~= 2");
 });
 
+runTest("numerical mode computes quadrature rules", () => {
+  const simpson = analyzeNumerical("simpson integrate sin(x) from 0 to pi n=100");
+  const trapezoid = analyzeNumerical("trapezoidal integrate x^2 from 0 to 3 n=6");
+
+  assert.equal(simpson.summary, "simpson numerical integration");
+  assert.equal(simpson.answer, "integral ~= 2");
+  assert.equal(artifactValue(simpson, "Step size"), "0.031416");
+  assert.equal(trapezoid.summary, "trapezoid numerical integration");
+  assert.equal(trapezoid.answer, "integral ~= 9.125");
+});
+
 runTest("differential equation mode solves closed-form ODE models", () => {
   const exponential = analyzeDifferentialEquation("ode dy/dt = 0.3y y0=2 t=5");
   const logistic = analyzeDifferentialEquation("logistic r=0.4 K=100 y0=10 t=8");
@@ -705,6 +716,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("linear programming maximize 3x + 2y subject to x + y <= 4; x <= 2; y <= 3; x >= 0; y >= 0").summary, "linear programming");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
+  assert.equal(analyzeUniversal("simpson integrate sin(x) from 0 to pi n=100").summary, "simpson numerical integration");
   assert.equal(analyzeUniversal("ode dy/dt = 0.3y y0=2 t=5").summary, "exponential ODE");
   assert.equal(analyzeUniversal("newton cooling ambient=70 initial=100 k=0.2 t=10").summary, "Newton cooling");
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");

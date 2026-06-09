@@ -72,6 +72,7 @@ The frontend currently supports:
   Cohen's w, Bonferroni-adjusted ANOVA pairwise comparisons, and Dunn-style
   rank comparisons
 - Newton and bisection numerical root solvers
+- Simpson's rule and trapezoidal-rule numerical integration
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
 
@@ -159,6 +160,8 @@ The same idea works for algebra and calculus:
 - `linear programming maximize 3x + 2y subject to x + y <= 4; x <= 2; y <= 3; x >= 0; y >= 0`
   enumerates feasible vertices and returns the constrained optimum.
 - `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
+- `simpson integrate sin(x) from 0 to pi n=100` approximates a definite
+  integral numerically and returns `integral ~= 2`.
 - `ode dy/dt = 0.3y y0=2 t=5`, `newton cooling ambient=70 initial=100 k=0.2 t=10`,
   and `logistic r=0.4 K=100 y0=10 t=8` solve closed-form differential equations.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
@@ -272,7 +275,7 @@ The demo includes:
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
   linear programming,
   vector geometry, geometry formulas, sequences/series, graphing, differential
-  equations, and numerical roots through Ask mode
+  equations, numerical roots, and numerical integration through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
 
