@@ -268,6 +268,17 @@ runTest("statistics mode computes ridge regression", () => {
   assert.deepEqual(result.table.rows[4], ["5", "15", "14.326733", "0.673267"]);
 });
 
+runTest("statistics mode computes LASSO regression", () => {
+  const result = analyzeStatistics("lasso regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
+
+  assert.equal(result.summary, "LASSO regression");
+  assert.equal(result.answer, "y = 2.248683 + 2.383772x1 + 0x2; prediction = 16.551317");
+  assert.equal(artifactValue(result, "Coefficient x2"), "0");
+  assert.equal(artifactValue(result, "Active predictors"), "1");
+  assert.equal(artifactValue(result, "LASSO objective"), "8.18815");
+  assert.deepEqual(result.table.rows[4], ["5", "15", "14.167544", "0.832456"]);
+});
+
 runTest("statistics mode computes logistic regression", () => {
   const result = analyzeStatistics("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5");
 
@@ -849,6 +860,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
   assert.equal(analyzeUniversal("ridge regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "ridge regression");
+  assert.equal(analyzeUniversal("lasso regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "LASSO regression");
   assert.equal(analyzeUniversal("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5").summary, "logistic regression");
   assert.equal(analyzeUniversal("poisson regression y: 1, 2, 1, 3, 4, 5; x: 0, 1, 2, 3, 4, 5; predict x=6").summary, "Poisson regression");
   assert.equal(analyzeUniversal("pca x: 1,2,3,4; y: 2,3,5,8").summary, "principal component analysis");

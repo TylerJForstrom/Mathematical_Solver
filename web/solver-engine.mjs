@@ -1148,6 +1148,8 @@ export function analyzeStatistics(statement) {
 
   if (
     lower.includes("regression") ||
+    isLassoRegressionQuestion(lower) ||
+    isRidgeRegressionQuestion(lower) ||
     lower.includes("correlation") ||
     parsePairs(statement).length >= 2 ||
     parseXYLists(statement)
@@ -1160,6 +1162,9 @@ export function analyzeStatistics(statement) {
     }
     if (isPoissonRegressionQuestion(lower)) {
       return analyzePoissonRegression(statement);
+    }
+    if (isLassoRegressionQuestion(lower)) {
+      return analyzeLassoRegression(statement);
     }
     if (isRidgeRegressionQuestion(lower)) {
       return analyzeRidgeRegression(statement);
@@ -5058,6 +5063,105 @@ function analyzeRidgeRegression(statement) {
   };
 }
 
+function analyzeLassoRegression(statement) {
+  const request = parseLassoRegressionInput(statement);
+  const fit = fitLassoRegression(request.y, request.predictors, request.lambda);
+  const coefficients = [fit.intercept, ...fit.coefficients];
+  const predictorNames = request.predictors.map((predictor) => predictor.name);
+  const design = request.y.map((_, row) => [
+    1,
+    ...request.predictors.map((predictor) => predictor.values[row]),
+  ]);
+  const fitted = design.map((row) => dotProduct(row, coefficients));
+  const residuals = request.y.map((value, index) => value - fitted[index]);
+  const meanY = mean(request.y);
+  const rss = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const tss = request.y.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
+  const rSquared = nearlyEqual(tss, 0) ? 1 : 1 - rss / tss;
+  const l1Penalty = request.lambda * fit.standardizedCoefficients.reduce((sum, value) => sum + Math.abs(value), 0);
+  const objective = 0.5 * rss + l1Penalty;
+  const activePredictors = fit.coefficients.filter((value) => Math.abs(value) > 1e-7).length;
+  const equation = formatMultipleRegressionEquation(coefficients, predictorNames);
+  const hasPrediction = request.prediction.every(Number.isFinite);
+  const prediction = hasPrediction
+    ? dotProduct([1, ...request.prediction], coefficients)
+    : Number.NaN;
+  const tree = {
+    kind: "statsRegression",
+    label: "LASSO",
+    children: [
+      statsDatasetNode(request.y, [], "Y"),
+      ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+      statsMetricNode("lambda", request.lambda),
+      statsMetricNode("active", activePredictors),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: hasPrediction
+      ? `${equation}; prediction = ${formatNumber(prediction)}`
+      : equation,
+    summary: "LASSO regression",
+    details: `${request.y.length} observations, ${request.predictors.length} predictors, ${activePredictors} active predictors`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read response, predictors, and penalty",
+        expression: `lambda = ${formatNumber(request.lambda)}, predictors = ${predictorNames.join(", ")}`,
+        detail: "LASSO regression fits a linear model while allowing coefficients to shrink exactly to zero.",
+      },
+      {
+        title: "Standardize predictors",
+        expression: "center y, center and scale each predictor",
+        detail: "Standardization makes the L1 penalty comparable across predictors with different scales.",
+      },
+      {
+        title: "Run coordinate descent",
+        expression: `${fit.iterations} iterations, ${fit.converged ? "converged" : "stopped"}`,
+        detail: "Each coordinate update applies soft-thresholding to decide whether a predictor stays active.",
+      },
+      {
+        title: "Measure sparse fit",
+        expression: `RSS = ${formatNumber(rss)}, L1 penalty = ${formatNumber(l1Penalty)}, active = ${activePredictors}`,
+        detail: "The objective balances residual error against the absolute size of standardized coefficients.",
+      },
+      ...(hasPrediction
+        ? [{
+            title: "Predict new response",
+            expression: `prediction = ${formatNumber(prediction)}`,
+            detail: "The requested predictor values are plugged into the sparse linear model.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Obs", "Actual", "Fitted", "Residual"],
+      rows: request.y.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(fitted[index]),
+        formatNumber(residuals[index]),
+      ]),
+    },
+    artifacts: [
+      ["Equation", equation],
+      ["Lambda", formatNumber(request.lambda)],
+      ["Intercept", formatNumber(fit.intercept)],
+      ...request.predictors.map((predictor, index) => [`Coefficient ${predictor.name}`, formatNumber(fit.coefficients[index])]),
+      ["Active predictors", formatNumber(activePredictors)],
+      ["RSS", formatNumber(rss)],
+      ["R squared", formatNumber(rSquared)],
+      ["L1 penalty", formatNumber(l1Penalty)],
+      ["LASSO objective", formatNumber(objective)],
+      ["Iterations", formatNumber(fit.iterations)],
+      ["Converged", fit.converged ? "yes" : "no"],
+      ...(hasPrediction ? [["Prediction", formatNumber(prediction)]] : []),
+    ],
+  };
+}
+
 function analyzeLogisticRegression(statement) {
   const request = parseLogisticRegressionInput(statement);
   const design = request.y.map((_, row) => [
@@ -6856,6 +6960,85 @@ function addRidgePenalty(matrix, lambda) {
       rowIndex === columnIndex && rowIndex > 0 ? value + lambda : value,
     ),
   );
+}
+
+function fitLassoRegression(yValues, predictors, lambda) {
+  const yMean = mean(yValues);
+  const centeredY = yValues.map((value) => value - yMean);
+  const standardizedPredictors = predictors.map((predictor) => {
+    const predictorMean = mean(predictor.values);
+    const centered = predictor.values.map((value) => value - predictorMean);
+    const norm = Math.sqrt(centered.reduce((sum, value) => sum + value ** 2, 0));
+    if (norm <= EPSILON) {
+      throw new Error("LASSO regression predictors need nonzero variation.");
+    }
+    return {
+      mean: predictorMean,
+      norm,
+      values: centered.map((value) => value / norm),
+    };
+  });
+  const standardizedRows = yValues.map((_, row) => standardizedPredictors.map((predictor) => predictor.values[row]));
+  let coefficients = Array(predictors.length).fill(0);
+  let fitted = Array(yValues.length).fill(0);
+  let converged = false;
+  let iterations = 0;
+
+  for (let iteration = 0; iteration < 1000; iteration += 1) {
+    let maxChange = 0;
+    for (let predictorIndex = 0; predictorIndex < predictors.length; predictorIndex += 1) {
+      const oldCoefficient = coefficients[predictorIndex];
+      let partialCorrelation = 0;
+
+      for (let row = 0; row < yValues.length; row += 1) {
+        const x = standardizedRows[row][predictorIndex];
+        const partialResidual = centeredY[row] - fitted[row] + oldCoefficient * x;
+        partialCorrelation += x * partialResidual;
+      }
+
+      const nextCoefficient = softThreshold(partialCorrelation, lambda);
+      const delta = nextCoefficient - oldCoefficient;
+      if (!nearlyEqual(delta, 0)) {
+        for (let row = 0; row < yValues.length; row += 1) {
+          fitted[row] += delta * standardizedRows[row][predictorIndex];
+        }
+      }
+      coefficients[predictorIndex] = normalizeNumber(nextCoefficient);
+      maxChange = Math.max(maxChange, Math.abs(delta));
+    }
+
+    iterations = iteration + 1;
+    if (maxChange < 1e-8) {
+      converged = true;
+      break;
+    }
+  }
+
+  const originalCoefficients = coefficients.map((coefficient, index) =>
+    normalizeNumber(coefficient / standardizedPredictors[index].norm),
+  );
+  const intercept = normalizeNumber(yMean - originalCoefficients.reduce(
+    (sum, coefficient, index) => sum + coefficient * standardizedPredictors[index].mean,
+    0,
+  ));
+
+  return {
+    intercept,
+    coefficients: originalCoefficients,
+    standardizedCoefficients: coefficients.map(normalizeNumber),
+    iterations,
+    converged,
+  };
+}
+
+function softThreshold(value, lambda) {
+  if (value > lambda) {
+    return value - lambda;
+  }
+  if (value < -lambda) {
+    return value + lambda;
+  }
+  return 0;
 }
 
 function multiplyMatrixVector(matrix, vector) {
@@ -11224,6 +11407,24 @@ function parseRidgeRegressionInput(text) {
   };
 }
 
+function parseLassoRegressionInput(text) {
+  const lambda = readNamedNumber(text, ["lambda", "penalty", "alpha"], 1);
+  if (!(lambda >= 0)) {
+    throw new Error("LASSO regression lambda must be a nonnegative number.");
+  }
+
+  const base = parseMultipleRegressionInput(text
+    .replace(/\blasso\b/gi, "")
+    .replace(/\bfeature\s+selection\b/gi, "")
+    .replace(/\blambda\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, "")
+    .replace(/\balpha\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, "")
+    .replace(/\bpenalty\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, ""));
+  return {
+    ...base,
+    lambda,
+  };
+}
+
 function parseMultipleRegressionPrediction(text, predictorNames) {
   const match = text.match(/\bpredict\b(.+)$/i);
   if (!match) {
@@ -11999,6 +12200,12 @@ function isRidgeRegressionQuestion(lower) {
     lower.includes("regularised regression");
 }
 
+function isLassoRegressionQuestion(lower) {
+  return lower.includes("lasso regression") ||
+    lower.startsWith("lasso ") ||
+    lower.includes("feature selection regression");
+}
+
 function isPolynomialRegressionQuestion(lower) {
   return lower.includes("polynomial regression") ||
     lower.includes("quadratic regression") ||
@@ -12305,6 +12512,9 @@ function isStatisticsQuestion(lower) {
     "ridge regression",
     "regularized regression",
     "regularised regression",
+    "lasso regression",
+    "lasso",
+    "feature selection regression",
     "correlation",
     "covariance",
     "pca",
