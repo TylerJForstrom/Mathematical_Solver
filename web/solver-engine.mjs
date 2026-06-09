@@ -988,6 +988,10 @@ export function analyzeStatistics(statement) {
     return analyzeBayesianProportion(statement);
   }
 
+  if (isSurvivalQuestion(lower)) {
+    return analyzeKaplanMeier(statement);
+  }
+
   if (lower.includes("permutation") || lower.includes("randomization test") || lower.includes("randomisation test")) {
     return analyzePermutationTest(statement);
   }
@@ -4249,6 +4253,72 @@ function analyzePermutationTest(statement) {
       ["p-value", formatNumber(pValue)],
       ["Decision", decision],
     ],
+  };
+}
+
+function analyzeKaplanMeier(statement) {
+  const request = parseKaplanMeierInput(statement);
+  const result = kaplanMeierEstimate(request.times, request.events);
+  const finalRow = result.rows[result.rows.length - 1];
+  const medianText = Number.isFinite(result.medianSurvival)
+    ? formatNumber(result.medianSurvival)
+    : "not reached";
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(request.times, [
+      statsMetricNode("N", request.times.length),
+      statsMetricNode("EVENTS", result.eventCount),
+      statsMetricNode("MEDIAN", Number.isFinite(result.medianSurvival) ? result.medianSurvival : 0),
+      statsMetricNode("SURV", finalRow?.survival ?? 1),
+    ], "SURVIVAL"),
+    answer: `median survival = ${medianText}`,
+    summary: "Kaplan-Meier survival",
+    details: "Right-censored survival curve estimate",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.times)),
+    steps: [
+      {
+        title: "Read survival data",
+        expression: `${request.times.length} subjects, ${result.eventCount} events, ${result.censoredCount} censored`,
+        detail: "Each record has a follow-up time and an event indicator where 1 means the event occurred.",
+      },
+      {
+        title: "Build risk sets",
+        expression: `${result.rows.length} distinct follow-up times`,
+        detail: "At each time, the risk set counts subjects who have not yet had an event or censoring before that time.",
+      },
+      {
+        title: "Multiply conditional survival",
+        expression: "S(t) = product(1 - d_i / n_i)",
+        detail: "Kaplan-Meier multiplies the conditional survival probability at each event time.",
+      },
+      {
+        title: "Find median survival",
+        expression: medianText,
+        detail: "The median is the first time where estimated survival is at most 0.5.",
+      },
+    ],
+    table: {
+      headers: ["Time", "At risk", "Events", "Censored", "Survival", "Std error"],
+      rows: result.rows.map((row) => [
+        formatNumber(row.time),
+        formatNumber(row.atRisk),
+        formatNumber(row.events),
+        formatNumber(row.censored),
+        formatNumber(row.survival),
+        formatNumber(row.standardError),
+      ]),
+    },
+    artifacts: [
+      ["Subjects", formatNumber(request.times.length)],
+      ["Events", formatNumber(result.eventCount)],
+      ["Censored", formatNumber(result.censoredCount)],
+      ["Median survival", medianText],
+      ["Final survival", formatNumber(finalRow?.survival ?? 1)],
+      ["Final standard error", formatNumber(finalRow?.standardError ?? 0)],
+    ],
+    graph: result.graph,
   };
 }
 
@@ -8730,6 +8800,58 @@ function shuffleCopy(values, random) {
   return shuffled;
 }
 
+function kaplanMeierEstimate(times, events) {
+  const uniqueTimes = [...new Set(times)].sort((left, right) => left - right);
+  let survival = 1;
+  let greenwoodSum = 0;
+  let medianSurvival = Number.NaN;
+  const rows = [];
+
+  for (const time of uniqueTimes) {
+    const atRisk = times.filter((value) => value >= time).length;
+    const eventCount = times.reduce((count, value, index) =>
+      nearlyEqual(value, time) && events[index] === 1 ? count + 1 : count, 0);
+    const censoredCount = times.reduce((count, value, index) =>
+      nearlyEqual(value, time) && events[index] === 0 ? count + 1 : count, 0);
+
+    if (eventCount > 0) {
+      survival *= 1 - eventCount / atRisk;
+      if (atRisk > eventCount) {
+        greenwoodSum += eventCount / (atRisk * (atRisk - eventCount));
+      }
+      if (!Number.isFinite(medianSurvival) && survival <= 0.5) {
+        medianSurvival = time;
+      }
+    }
+
+    rows.push({
+      time: normalizeNumber(time),
+      atRisk,
+      events: eventCount,
+      censored: censoredCount,
+      survival: normalizeNumber(survival),
+      standardError: normalizeNumber(survival <= 0 ? 0 : survival * Math.sqrt(greenwoodSum)),
+    });
+  }
+
+  const eventCount = events.filter((event) => event === 1).length;
+  const yValues = rows.map((row) => row.survival);
+  return {
+    rows,
+    eventCount,
+    censoredCount: events.length - eventCount,
+    medianSurvival,
+    graph: {
+      expression: "Kaplan-Meier S(t)",
+      points: [{ x: 0, y: 1 }, ...rows.map((row) => ({ x: row.time, y: row.survival }))],
+      xMin: 0,
+      xMax: Math.max(...times),
+      yMin: Math.min(0, ...yValues),
+      yMax: 1,
+    },
+  };
+}
+
 function bootstrapStatistic(values, statistic) {
   if (statistic === "median") {
     return median([...values].sort((left, right) => left - right));
@@ -9187,6 +9309,31 @@ function parsePermutationInput(text) {
     resamples,
     seed,
   };
+}
+
+function parseKaplanMeierInput(text) {
+  const timesMatch = text.match(/\b(?:times?|durations?|follow-?up)\s*[:=]\s*([^;]+)/i);
+  const eventsMatch = text.match(/\b(?:events?|status|statuses|event indicators?)\s*[:=]\s*([^;]+)/i);
+  if (!timesMatch || !eventsMatch) {
+    throw new Error("Kaplan-Meier needs times and events, such as kaplan-meier times: 5,6,6,8,10; events: 1,1,0,1,0.");
+  }
+
+  const times = parseNumbers(timesMatch[1]);
+  const events = parseNumbers(eventsMatch[1]);
+  if (times.length < 2 || events.length < 2 || times.length !== events.length) {
+    throw new Error("Kaplan-Meier times and events must have the same length with at least two observations.");
+  }
+  if (times.some((time) => !Number.isFinite(time) || time <= 0)) {
+    throw new Error("Kaplan-Meier follow-up times must be finite positive numbers.");
+  }
+  if (events.some((event) => !(event === 0 || event === 1))) {
+    throw new Error("Kaplan-Meier event indicators must be 1 for event or 0 for censored.");
+  }
+  if (events.every((event) => event === 0)) {
+    throw new Error("Kaplan-Meier needs at least one observed event.");
+  }
+
+  return { times, events };
 }
 
 function parseConfidenceLevel(text, fallback) {
@@ -10862,6 +11009,14 @@ function isKMeansQuestion(lower) {
     lower.includes("cluster points");
 }
 
+function isSurvivalQuestion(lower) {
+  return lower.includes("kaplan") ||
+    lower.includes("survival analysis") ||
+    lower.includes("survival curve") ||
+    lower.includes("survival times") ||
+    lower.includes("censored");
+}
+
 function isMultivariableQuestion(lower) {
   return lower.includes("partial derivative") ||
     lower.startsWith("partial ") ||
@@ -11079,6 +11234,11 @@ function isStatisticsQuestion(lower) {
     "permutation",
     "randomization test",
     "randomisation test",
+    "kaplan",
+    "survival analysis",
+    "survival curve",
+    "survival times",
+    "censored",
     "regression",
     "correlation",
     "covariance",
