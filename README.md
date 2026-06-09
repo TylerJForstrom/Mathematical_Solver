@@ -63,6 +63,8 @@ The frontend currently supports:
   classification accuracy, McFadden R squared, and probability prediction
 - Gaussian Naive Bayes classification with class priors, feature likelihoods,
   posterior probabilities, training accuracy, and class prediction
+- ROC/AUC classifier evaluation with threshold sweeps, sensitivity,
+  specificity, precision, accuracy, Youden's J, and confusion counts
 - Poisson regression for count outcomes with log-link coefficients, fitted
   rates, likelihood deviance, pseudo R squared, and expected-count prediction
 - Time-series AR(1) forecasting with lag coefficients, autocorrelation,
@@ -207,6 +209,8 @@ The same idea works for algebra and calculus:
   fits a binary-response model and returns a predicted probability.
 - `naive bayes class: 0,0,0,1,1,1; x1: 1,2,1.5,5,6,5.5; x2: 1,1.2,0.8,5,5.5,4.8`
   trains a Gaussian classifier and reports posterior class probabilities.
+- `roc actual: 1,1,0,1,0,0; scores: 0.9,0.75,0.6,0.55,0.3,0.1`
+  computes AUC and threshold-by-threshold classification metrics.
 - `poisson regression y: 1,2,1,3,4,5; x: 0,1,2,3,4,5; predict x=6`
   fits a count-response GLM and predicts an expected count.
 - `ar(1) series: 10,12,13,15,16,18 forecast=3` fits a lag-1
@@ -317,6 +321,7 @@ The demo includes:
   LASSO regression,
   logistic regression,
   Gaussian Naive Bayes classification,
+  ROC/AUC classifier evaluation,
   Poisson regression,
   AR(1) time-series forecasting,
   covariance/correlation matrices, 2D PCA, k-means clustering,

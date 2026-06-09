@@ -299,6 +299,17 @@ runTest("statistics mode computes Gaussian Naive Bayes classifiers", () => {
   assert.deepEqual(result.table.rows[0], ["1", "0", "0", "1"]);
 });
 
+runTest("statistics mode computes ROC AUC analysis", () => {
+  const result = analyzeStatistics("roc actual: 1, 1, 0, 1, 0, 0; scores: 0.9, 0.75, 0.6, 0.55, 0.3, 0.1");
+
+  assert.equal(result.summary, "ROC/AUC analysis");
+  assert.equal(result.answer, "AUC = 0.888889, best threshold = 0.75");
+  assert.equal(artifactValue(result, "Best Youden J"), "0.666667");
+  assert.equal(artifactValue(result, "True positives"), "2");
+  assert.equal(artifactValue(result, "False positives"), "0");
+  assert.deepEqual(result.table.rows[1], ["0.75", "0.666667", "0", "1", "1", "0.833333", "0.666667"]);
+});
+
 runTest("statistics mode computes Poisson regression", () => {
   const result = analyzeStatistics("poisson regression y: 1, 2, 1, 3, 4, 5; x: 0, 1, 2, 3, 4, 5; predict x=6");
 
@@ -874,6 +885,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("lasso regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "LASSO regression");
   assert.equal(analyzeUniversal("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5").summary, "logistic regression");
   assert.equal(analyzeUniversal("naive bayes class: 0, 0, 0, 1, 1, 1; x1: 1, 2, 1.5, 5, 6, 5.5; x2: 1, 1.2, 0.8, 5, 5.5, 4.8; predict x1=3.1 x2=2.6").summary, "Gaussian Naive Bayes");
+  assert.equal(analyzeUniversal("roc actual: 1, 1, 0, 1, 0, 0; scores: 0.9, 0.75, 0.6, 0.55, 0.3, 0.1").summary, "ROC/AUC analysis");
   assert.equal(analyzeUniversal("poisson regression y: 1, 2, 1, 3, 4, 5; x: 0, 1, 2, 3, 4, 5; predict x=6").summary, "Poisson regression");
   assert.equal(analyzeUniversal("pca x: 1,2,3,4; y: 2,3,5,8").summary, "principal component analysis");
   assert.equal(analyzeUniversal("correlation matrix x: 1,2,3,4; y: 2,3,5,8").answer, "correlation matrix = [[1, 0.9759], [0.9759, 1]]");

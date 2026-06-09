@@ -1129,6 +1129,10 @@ export function analyzeStatistics(statement) {
     return analyzeDiscreteDistribution(statement);
   }
 
+  if (isRocQuestion(lower)) {
+    return analyzeRocAnalysis(statement);
+  }
+
   if (isNaiveBayesQuestion(lower)) {
     return analyzeNaiveBayes(statement);
   }
@@ -5355,6 +5359,77 @@ function analyzeNaiveBayes(statement) {
   };
 }
 
+function analyzeRocAnalysis(statement) {
+  const request = parseRocInput(statement);
+  const result = computeRocAnalysis(request.labels, request.scores, request.threshold);
+  const selected = result.selected;
+  const tree = statsDatasetNode(request.scores, [
+    statsMetricNode("AUC", result.auc),
+    statsMetricNode("BEST", result.best.threshold),
+    statsMetricNode("TPR", selected.sensitivity),
+    statsMetricNode("FPR", selected.falsePositiveRate),
+  ], "ROC");
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `AUC = ${formatNumber(result.auc)}, best threshold = ${formatNumber(result.best.threshold)}`,
+    summary: "ROC/AUC analysis",
+    details: `${request.labels.length} scored binary cases`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read binary labels and scores",
+        expression: `positives = ${result.positives}, negatives = ${result.negatives}`,
+        detail: "ROC analysis evaluates how well numeric scores rank positive cases above negative cases.",
+      },
+      {
+        title: "Sweep classification thresholds",
+        expression: `${result.curve.length - 1} score thresholds`,
+        detail: "Each threshold converts scores into positive or negative predictions.",
+      },
+      {
+        title: "Integrate ROC curve",
+        expression: `AUC = ${formatNumber(result.auc)}`,
+        detail: "The area under the curve is the trapezoidal area across false-positive and true-positive rates.",
+      },
+      {
+        title: "Choose operating threshold",
+        expression: `threshold = ${formatNumber(selected.threshold)}, sensitivity = ${formatNumber(selected.sensitivity)}, specificity = ${formatNumber(selected.specificity)}`,
+        detail: "The default threshold maximizes Youden's J statistic unless a threshold is supplied.",
+      },
+    ],
+    table: {
+      headers: ["Threshold", "TPR", "FPR", "Specificity", "Precision", "Accuracy", "Youden J"],
+      rows: result.curve.slice(1).map((point) => [
+        formatNumber(point.threshold),
+        formatNumber(point.sensitivity),
+        formatNumber(point.falsePositiveRate),
+        formatNumber(point.specificity),
+        formatNumber(point.precision),
+        formatNumber(point.accuracy),
+        formatNumber(point.youden),
+      ]),
+    },
+    artifacts: [
+      ["AUC", formatNumber(result.auc)],
+      ["Best threshold", formatNumber(result.best.threshold)],
+      ["Best Youden J", formatNumber(result.best.youden)],
+      ["Selected threshold", formatNumber(selected.threshold)],
+      ["Sensitivity", formatNumber(selected.sensitivity)],
+      ["Specificity", formatNumber(selected.specificity)],
+      ["False positive rate", formatNumber(selected.falsePositiveRate)],
+      ["Precision", formatNumber(selected.precision)],
+      ["Accuracy", formatNumber(selected.accuracy)],
+      ["True positives", formatNumber(selected.tp)],
+      ["False positives", formatNumber(selected.fp)],
+      ["True negatives", formatNumber(selected.tn)],
+      ["False negatives", formatNumber(selected.fn)],
+    ],
+  };
+}
+
 function analyzePoissonRegression(statement) {
   const request = parsePoissonRegressionInput(statement);
   const design = request.y.map((_, row) => [
@@ -7461,6 +7536,83 @@ function predictGaussianNaiveBayes(model, values) {
 
 function gaussianLogDensity(value, center, variance) {
   return -0.5 * (Math.log(2 * Math.PI * variance) + ((value - center) ** 2) / variance);
+}
+
+function computeRocAnalysis(labels, scores, selectedThreshold) {
+  const positives = labels.filter((value) => value === 1).length;
+  const negatives = labels.length - positives;
+  const thresholds = [
+    Infinity,
+    ...[...new Set(scores)].sort((left, right) => right - left),
+  ];
+  const curve = thresholds.map((threshold) => rocThresholdMetrics(labels, scores, threshold, positives, negatives));
+  let auc = 0;
+  for (let index = 1; index < curve.length; index += 1) {
+    const previous = curve[index - 1];
+    const current = curve[index];
+    const width = current.falsePositiveRate - previous.falsePositiveRate;
+    auc += width * (current.sensitivity + previous.sensitivity) / 2;
+  }
+
+  const best = curve.slice(1).reduce((winner, current) => {
+    if (current.youden > winner.youden + EPSILON) return current;
+    if (nearlyEqual(current.youden, winner.youden) && current.accuracy > winner.accuracy + EPSILON) return current;
+    return winner;
+  });
+  const selected = Number.isFinite(selectedThreshold)
+    ? rocThresholdMetrics(labels, scores, selectedThreshold, positives, negatives)
+    : best;
+
+  return {
+    positives,
+    negatives,
+    curve,
+    auc: normalizeNumber(auc),
+    best,
+    selected,
+  };
+}
+
+function rocThresholdMetrics(labels, scores, threshold, positives, negatives) {
+  let tp = 0;
+  let fp = 0;
+  let tn = 0;
+  let fn = 0;
+
+  for (let index = 0; index < labels.length; index += 1) {
+    const predictedPositive = scores[index] >= threshold;
+    const actualPositive = labels[index] === 1;
+    if (predictedPositive && actualPositive) {
+      tp += 1;
+    } else if (predictedPositive) {
+      fp += 1;
+    } else if (actualPositive) {
+      fn += 1;
+    } else {
+      tn += 1;
+    }
+  }
+
+  const sensitivity = positives > 0 ? tp / positives : Number.NaN;
+  const specificity = negatives > 0 ? tn / negatives : Number.NaN;
+  const falsePositiveRate = negatives > 0 ? fp / negatives : Number.NaN;
+  const precision = tp + fp > 0 ? tp / (tp + fp) : 0;
+  const accuracy = (tp + tn) / labels.length;
+  const youden = sensitivity + specificity - 1;
+
+  return {
+    threshold: normalizeNumber(threshold),
+    tp,
+    fp,
+    tn,
+    fn,
+    sensitivity: normalizeNumber(sensitivity),
+    specificity: normalizeNumber(specificity),
+    falsePositiveRate: normalizeNumber(falsePositiveRate),
+    precision: normalizeNumber(precision),
+    accuracy: normalizeNumber(accuracy),
+    youden: normalizeNumber(youden),
+  };
 }
 
 function fitKMeans(points, k) {
@@ -11547,6 +11699,52 @@ function parseNaiveBayesInput(text) {
   };
 }
 
+function parseRocInput(text) {
+  const lists = new Map();
+  for (const match of text.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    const label = match[1];
+    const values = parseNumberList(match[2]);
+    if (values.length > 1) {
+      lists.set(label.toLowerCase(), { name: label, values });
+    }
+  }
+
+  const labelsEntry = lists.get("actual") ??
+    lists.get("truth") ??
+    lists.get("label") ??
+    lists.get("labels") ??
+    lists.get("class") ??
+    lists.get("y");
+  const scoreEntry = lists.get("score") ??
+    lists.get("scores") ??
+    lists.get("probability") ??
+    lists.get("probabilities") ??
+    lists.get("predicted") ??
+    lists.get("p");
+
+  if (!labelsEntry || !scoreEntry) {
+    throw new Error("ROC analysis needs binary labels and scores, such as roc actual: 1,0; scores: 0.9,0.2.");
+  }
+  if (labelsEntry.values.length !== scoreEntry.values.length) {
+    throw new Error("ROC labels and scores must have the same length.");
+  }
+  if (!labelsEntry.values.every((value) => value === 0 || value === 1)) {
+    throw new Error("ROC labels must be binary 0/1 values.");
+  }
+  if (!labelsEntry.values.some((value) => value === 1) || !labelsEntry.values.some((value) => value === 0)) {
+    throw new Error("ROC analysis needs at least one positive and one negative label.");
+  }
+  if (!scoreEntry.values.every(Number.isFinite)) {
+    throw new Error("ROC scores must be finite numbers.");
+  }
+
+  return {
+    labels: labelsEntry.values,
+    scores: scoreEntry.values,
+    threshold: readNamedNumber(text, ["threshold", "cutoff"], Number.NaN),
+  };
+}
+
 function parseLogisticRegressionPrediction(text, predictorNames) {
   const match = text.match(/\bpredict\b(.+)$/i);
   if (!match) {
@@ -12450,6 +12648,12 @@ function isNaiveBayesQuestion(lower) {
     lower.includes("bayes classifier");
 }
 
+function isRocQuestion(lower) {
+  return /\broc\b/.test(lower) ||
+    /\bauc\b/.test(lower) ||
+    lower.includes("receiver operating");
+}
+
 function isMultivariateStatsQuestion(lower, statement = lower) {
   return lower.includes("pca") ||
     lower.includes("principal component") ||
@@ -12701,6 +12905,10 @@ function isSystemQuestion(lower) {
 }
 
 function isStatisticsQuestion(lower) {
+  if (isRocQuestion(lower)) {
+    return true;
+  }
+
   return [
     "mean",
     "average",
