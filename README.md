@@ -31,6 +31,8 @@ The frontend currently supports:
 - Sequences and series: arithmetic sequences, geometric sequences, infinite
   geometric sums, and finite sigma notation
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
+- Multivariable calculus: partial derivatives, gradient vectors, and
+  directional derivatives at a point
 - Finite and one-sided numeric limits, including removable discontinuities
 - Taylor and Maclaurin polynomial expansions for supported elementary functions
 - Polynomial and elementary indefinite/definite integrals, including trig,
@@ -108,6 +110,10 @@ The same idea works for algebra and calculus:
 - `solve x^2 - 5x + 6 > 0` finds critical points and returns
   `x in (-inf, 2) U (3, inf)`.
 - `x^3` becomes a power node, so the derivative engine can apply the power rule.
+- `partial derivative of x^2*y + y^3 with respect to y`,
+  `gradient x^2 + x*y + y^2 at x=1 y=2`, and
+  `directional derivative x^2 + x*y + y^2 at x=1 y=2 direction [3,4]`
+  evaluate multivariable calculus trees.
 - `x^2 - 5x + 6 = 0` becomes an equation node with left and right expression trees.
 - `x^2 + 1 = 0` keeps the quadratic formula in the complex plane and returns
   `x = i, x = -i`.
@@ -211,6 +217,7 @@ The demo includes:
 - Number theory and modular arithmetic through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
 - Numeric limits through Ask mode
+- Partial derivatives, gradients, and directional derivatives through Ask mode
 - Taylor/Maclaurin approximations through Ask mode
 - Complex arithmetic and complex quadratic roots through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,

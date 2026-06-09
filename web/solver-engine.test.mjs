@@ -14,6 +14,7 @@ import {
   analyzeLimit,
   analyzeLogic,
   analyzeMatrix,
+  analyzeMultivariable,
   analyzeNumerical,
   analyzeNumberTheory,
   analyzeOptimization,
@@ -173,6 +174,21 @@ runTest("derivative mode supports product rule", () => {
   const result = analyzeDerivative("x(x + 1)", "x");
 
   assert.equal(result.answer, "2x + 1");
+});
+
+runTest("multivariable mode computes partials, gradients, and directional derivatives", () => {
+  const partial = analyzeMultivariable("partial derivative of x^2*y + y^3 with respect to y");
+  const partialAtPoint = analyzeMultivariable("partial derivative of x^2*y + y^3 with respect to y at x=2 y=3");
+  const gradient = analyzeMultivariable("gradient x^2 + x*y + y^2 at x=1 y=2");
+  const directional = analyzeMultivariable("directional derivative x^2 + x*y + y^2 at x=1 y=2 direction [3,4]");
+
+  assert.equal(partial.summary, "partial derivative");
+  assert.equal(partial.answer, "df/dy = x^2 + 3y^2");
+  assert.equal(partialAtPoint.answer, "df/dy = x^2 + 3y^2; value = 31");
+  assert.equal(gradient.summary, "gradient");
+  assert.equal(gradient.answer, "grad f = [4, 5]");
+  assert.equal(directional.summary, "directional derivative");
+  assert.equal(directional.answer, "D_u f = 6.4");
 });
 
 runTest("taylor mode builds Maclaurin polynomials", () => {
@@ -585,6 +601,8 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("integrate x^2 from 0 to 3").summary, "definite integral");
   assert.equal(analyzeUniversal("integrate sin(x)").answer, "-cos(x) + C");
   assert.equal(analyzeUniversal("limit (x^2 - 1)/(x - 1) as x approaches 1").answer, "limit = 2");
+  assert.equal(analyzeUniversal("gradient x^2 + x*y + y^2 at x=1 y=2").summary, "gradient");
+  assert.equal(analyzeUniversal("directional derivative x^2 + x*y + y^2 at x=1 y=2 direction [3,4]").answer, "D_u f = 6.4");
   assert.equal(analyzeUniversal("taylor sin(x) order=5").summary, "Maclaurin polynomial");
   assert.equal(analyzeUniversal("complex (3+4i)*(2-i)").answer, "10 + 5i");
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");

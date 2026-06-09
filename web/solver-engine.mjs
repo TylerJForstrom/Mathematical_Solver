@@ -379,6 +379,172 @@ export function analyzeDerivative(statement, variable = "x") {
   };
 }
 
+export function analyzeMultivariable(statement) {
+  const request = parseMultivariableInput(statement);
+  const parsed = parseMath(request.expression);
+  if (parsed.kind === "equation") {
+    throw new Error("Multivariable calculus mode expects an expression, not an equation.");
+  }
+
+  const variables = request.variables.length ? request.variables : mathVariables(parsed);
+  if (variables.length === 0) {
+    throw new Error("Multivariable calculus needs at least one variable.");
+  }
+
+  const steps = [
+    {
+      title: "Parse multivariable expression",
+      expression: formatMath(parsed),
+      detail: `The solver treats ${variables.join(", ")} as active variables.`,
+    },
+  ];
+
+  if (request.operation === "partial") {
+    const derivative = symbolicDerivative(parsed, request.variable);
+    const value = evaluateAtPointIfAvailable(derivative.node, request.point);
+    const answer = Number.isFinite(value)
+      ? `df/d${request.variable} = ${derivative.answer}; value = ${formatNumber(value)}`
+      : `df/d${request.variable} = ${derivative.answer}`;
+    steps.push({
+      title: "Take partial derivative",
+      expression: `df/d${request.variable} = ${derivative.answer}`,
+      detail: "All other variables are held constant.",
+    });
+    if (Number.isFinite(value)) {
+      steps.push({
+        title: "Evaluate point",
+        expression: `${formatPointAssignments(request.point)} => ${formatNumber(value)}`,
+        detail: "The partial derivative tree is evaluated at the requested point.",
+      });
+    }
+
+    return {
+      mode: "multivariable",
+      tree: parsed,
+      answer,
+      summary: "partial derivative",
+      details: `with respect to ${request.variable}`,
+      variables: mathVariables(parsed),
+      metrics: treeMetrics(parsed),
+      steps,
+      artifacts: [
+        ["Expression", formatMath(parsed)],
+        [`df/d${request.variable}`, derivative.answer],
+        ...(Number.isFinite(value) ? [["Value at point", formatNumber(value)]] : []),
+      ],
+      table: {
+        headers: ["Variable", "Partial derivative", "Value"],
+        rows: [[
+          request.variable,
+          derivative.answer,
+          Number.isFinite(value) ? formatNumber(value) : "",
+        ]],
+      },
+    };
+  }
+
+  const gradient = variables.map((variable) => ({
+    variable,
+    derivative: symbolicDerivative(parsed, variable),
+  }));
+  const gradientValues = gradient.map((entry) => evaluateAtPointIfAvailable(entry.derivative.node, request.point));
+  const hasGradientPoint = gradientValues.every(Number.isFinite);
+  steps.push({
+    title: "Compute gradient",
+    expression: gradient.map((entry) => `df/d${entry.variable} = ${entry.derivative.answer}`).join("; "),
+    detail: "The gradient collects every first partial derivative into a vector.",
+  });
+  if (hasGradientPoint) {
+    steps.push({
+      title: "Evaluate gradient at point",
+      expression: `${formatPointAssignments(request.point)} => ${formatVector(gradientValues)}`,
+      detail: "Each partial derivative is evaluated at the same point.",
+    });
+  }
+
+  if (request.operation === "directional") {
+    if (!hasGradientPoint) {
+      throw new Error("Directional derivatives need a full point, such as at x=1 y=2.");
+    }
+    if (!request.direction.length) {
+      throw new Error("Directional derivatives need a direction vector, such as direction [3,4].");
+    }
+    assertSameVectorDimension(gradientValues, request.direction);
+    const magnitude = vectorMagnitude(request.direction);
+    if (nearlyEqual(magnitude, 0)) {
+      throw new Error("Directional derivatives need a nonzero direction vector.");
+    }
+    const unitDirection = request.direction.map((value) => value / magnitude);
+    const directional = dotProduct(gradientValues, unitDirection);
+    steps.push({
+      title: "Normalize direction",
+      expression: `u = ${formatVector(unitDirection)}`,
+      detail: "Directional derivatives use a unit direction vector.",
+    });
+    steps.push({
+      title: "Dot gradient with direction",
+      expression: `D_u f = ${formatNumber(directional)}`,
+      detail: "The directional derivative is the dot product of the gradient and the unit direction.",
+    });
+
+    return {
+      mode: "multivariable",
+      tree: parsed,
+      answer: `D_u f = ${formatNumber(directional)}`,
+      summary: "directional derivative",
+      details: `at ${formatPointAssignments(request.point)}`,
+      variables: mathVariables(parsed),
+      metrics: treeMetrics(parsed),
+      steps,
+      artifacts: [
+        ["Expression", formatMath(parsed)],
+        ["Gradient", formatVector(gradientValues)],
+        ["Direction", formatVector(request.direction)],
+        ["Unit direction", formatVector(unitDirection)],
+        ["Directional derivative", formatNumber(directional)],
+      ],
+      table: {
+        headers: ["Variable", "Partial", "Gradient value", "Unit direction"],
+        rows: gradient.map((entry, index) => [
+          entry.variable,
+          entry.derivative.answer,
+          formatNumber(gradientValues[index]),
+          formatNumber(unitDirection[index]),
+        ]),
+      },
+    };
+  }
+
+  const symbolicGradient = `[${gradient.map((entry) => entry.derivative.answer).join(", ")}]`;
+  const answer = hasGradientPoint
+    ? `grad f = ${formatVector(gradientValues)}`
+    : `grad f = ${symbolicGradient}`;
+
+  return {
+    mode: "multivariable",
+    tree: parsed,
+    answer,
+    summary: "gradient",
+    details: hasGradientPoint ? `at ${formatPointAssignments(request.point)}` : "symbolic gradient vector",
+    variables: mathVariables(parsed),
+    metrics: treeMetrics(parsed),
+    steps,
+    artifacts: [
+      ["Expression", formatMath(parsed)],
+      ["Symbolic gradient", symbolicGradient],
+      ...(hasGradientPoint ? [["Gradient at point", formatVector(gradientValues)]] : []),
+    ],
+    table: {
+      headers: ["Variable", "Partial derivative", "Value"],
+      rows: gradient.map((entry, index) => [
+        entry.variable,
+        entry.derivative.answer,
+        Number.isFinite(gradientValues[index]) ? formatNumber(gradientValues[index]) : "",
+      ]),
+    },
+  };
+}
+
 export function analyzeTaylor(statement, variableHint = "x") {
   const request = extractTaylorQuestion(statement, variableHint);
   const expression = parseMath(request.expression);
@@ -921,6 +1087,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isSystemQuestion(lower)) {
     routed = analyzeSystem(question);
     routedLabel = "System";
+  } else if (isMultivariableQuestion(lower)) {
+    routed = analyzeMultivariable(question);
+    routedLabel = "Multivariable";
   } else if (isDerivativeQuestion(lower)) {
     const request = extractDerivativeQuestion(question);
     routed = analyzeDerivative(request.expression, request.variable);
@@ -7439,6 +7608,13 @@ function isDerivativeQuestion(lower) {
   return lower.includes("derivative") || lower.includes("differentiate") || /d\s*\/\s*d[a-z]\w*/i.test(lower);
 }
 
+function isMultivariableQuestion(lower) {
+  return lower.includes("partial derivative") ||
+    lower.startsWith("partial ") ||
+    lower.includes("gradient") ||
+    lower.includes("directional derivative");
+}
+
 function isTaylorQuestion(lower) {
   return lower.startsWith("taylor ") ||
     lower.startsWith("maclaurin ") ||
@@ -7736,6 +7912,75 @@ function extractDerivativeQuestion(question) {
     variable: "x",
     expression: cleanSimplifyQuestion(question),
   };
+}
+
+function parseMultivariableInput(statement) {
+  let text = statement
+    .replace(/^(?:find|compute|calculate)\s+(?:the\s+)?/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  const lower = text.toLowerCase();
+  const operation = lower.includes("directional derivative")
+    ? "directional"
+    : lower.includes("gradient")
+      ? "gradient"
+      : "partial";
+  let variable = "x";
+
+  const directPartialMatch = text.match(/^partial\s+(?!derivative\b)([A-Za-z_]\w*)\s+of\s+(.+)$/i);
+  if (directPartialMatch) {
+    variable = directPartialMatch[1];
+    text = directPartialMatch[2];
+  } else {
+    const variableMatch = text.match(/\b(?:with respect to|wrt|for)\s+([A-Za-z_]\w*)\b/i) ??
+      text.match(/\bd\s*\/\s*d([A-Za-z_]\w*)\b/i);
+    if (variableMatch) {
+      variable = variableMatch[1];
+    }
+  }
+
+  const direction = operation === "directional" ? (extractVectors(text)[0] ?? []) : [];
+  const point = parsePointAssignments(text);
+  const expression = cleanMultivariableExpression(text);
+  if (!expression) {
+    throw new Error("Use a multivariable expression, such as gradient x^2 + x*y + y^2 at x=1 y=2.");
+  }
+
+  return {
+    operation,
+    expression,
+    variable,
+    point,
+    direction,
+    variables: Object.keys(point).sort(),
+  };
+}
+
+function cleanMultivariableExpression(text) {
+  return text
+    .replace(/^partial\s+derivative\s+(?:of\s+)?/i, "")
+    .replace(/^gradient\s+(?:of\s+)?/i, "")
+    .replace(/^directional\s+derivative\s+(?:of\s+)?/i, "")
+    .replace(/\b(?:with respect to|wrt|for)\s+[A-Za-z_]\w*\b/gi, "")
+    .replace(/\bd\s*\/\s*d[A-Za-z_]\w*\b/gi, "")
+    .replace(/\bdirection(?:al)?(?:\s+vector)?\s*\[[^\]]+\]/gi, "")
+    .replace(/\[[^\]]+\]/g, "")
+    .replace(/\bat\b.*$/i, "")
+    .replace(/\bpoint\b.*$/i, "")
+    .replace(/\b[A-Za-z_]\w*\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, "")
+    .replace(/^of\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parsePointAssignments(text) {
+  const point = {};
+  const pointMatch = text.match(/\b(?:at|point)\b(.+)$/i);
+  const segment = pointMatch ? pointMatch[1] : text;
+  for (const match of segment.matchAll(/\b([A-Za-z_]\w*)\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/gi)) {
+    point[match[1]] = Number(match[2]);
+  }
+  return point;
 }
 
 function extractTaylorQuestion(question, fallbackVariable) {
@@ -9678,6 +9923,37 @@ function differentiate(node, variable, steps) {
   }
 
   throw new Error(`Cannot differentiate operator '${node.operator}'.`);
+}
+
+function symbolicDerivative(parsed, variable) {
+  const derivativeSteps = [];
+  const derivative = differentiate(parsed, variable, derivativeSteps);
+  const simplified = simplifyNode(derivative, derivativeSteps);
+  const polynomial = polynomialFrom(simplified);
+  const isZeroPolynomial = polynomial && polynomial.size === 1 && nearlyEqual(polynomial.get("") ?? Number.NaN, 0);
+  const finalTree = polynomial ? (isZeroPolynomial ? mathNumber(0) : polynomialToNode(polynomial)) : simplified;
+  return {
+    node: finalTree,
+    answer: polynomial ? formatPolynomial(polynomial) : formatMath(finalTree),
+  };
+}
+
+function evaluateAtPointIfAvailable(node, point) {
+  const variables = mathVariables(node);
+  if (variables.length === 0) {
+    return safeEvaluateMath(node, {});
+  }
+  if (variables.some((variable) => !Number.isFinite(point[variable]))) {
+    return Number.NaN;
+  }
+  return safeEvaluateMath(node, point);
+}
+
+function formatPointAssignments(point) {
+  return Object.entries(point)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => `${name}=${formatNumber(value)}`)
+    .join(", ");
 }
 
 function functionDerivative(node, innerDerivative) {
