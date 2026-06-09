@@ -43,6 +43,8 @@ The frontend currently supports:
 - Function graphing with sampled SVG plots
 - Differential equations: exponential growth/decay, Newton cooling, logistic
   growth, and separable power ODEs
+- Numerical ODE solvers: Euler's method and fourth-order Runge-Kutta for
+  first-order differential equations
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression/correlation for coordinate pairs, plus multiple linear
   regression with several predictor lists, residuals, R squared, and prediction
@@ -164,6 +166,8 @@ The same idea works for algebra and calculus:
   integral numerically and returns `integral ~= 2`.
 - `ode dy/dt = 0.3y y0=2 t=5`, `newton cooling ambient=70 initial=100 k=0.2 t=10`,
   and `logistic r=0.4 K=100 y0=10 t=8` solve closed-form differential equations.
+- `rk4 dy/dt = t + y y0=1 from t=0 to 1 h=0.25` approximates a first-order
+  ODE with fourth-order Runge-Kutta.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
 - `quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5`
   fits a nonlinear polynomial curve and predicts `26`.
@@ -275,7 +279,8 @@ The demo includes:
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
   linear programming,
   vector geometry, geometry formulas, sequences/series, graphing, differential
-  equations, numerical roots, and numerical integration through Ask mode
+  equations, numerical roots, numerical integration, and numerical ODEs
+  through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
 

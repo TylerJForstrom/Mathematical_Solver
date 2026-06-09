@@ -668,6 +668,17 @@ runTest("differential equation mode solves closed-form ODE models", () => {
   assert.equal(power.answer, "y(0.25) = 2");
 });
 
+runTest("differential equation mode runs numerical ODE methods", () => {
+  const rk4 = analyzeDifferentialEquation("rk4 dy/dt = t + y y0=1 from t=0 to 1 h=0.25");
+  const euler = analyzeDifferentialEquation("euler dy/dt = t + y y0=1 from t=0 to 1 h=0.25");
+
+  assert.equal(rk4.summary, "RK4 numerical ODE");
+  assert.equal(rk4.answer, "y(1) ~= 3.43642");
+  assert.equal(artifactValue(rk4, "Step size"), "0.25");
+  assert.equal(euler.summary, "Euler numerical ODE");
+  assert.equal(euler.answer, "y(1) ~= 2.882813");
+});
+
 runTest("equation mode approximates higher-degree real roots", () => {
   const result = analyzeEquation("x^3 - x - 2 = 0", "x");
 
@@ -717,6 +728,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
   assert.equal(analyzeUniversal("simpson integrate sin(x) from 0 to pi n=100").summary, "simpson numerical integration");
+  assert.equal(analyzeUniversal("rk4 dy/dt = t + y y0=1 from t=0 to 1 h=0.25").summary, "RK4 numerical ODE");
   assert.equal(analyzeUniversal("ode dy/dt = 0.3y y0=2 t=5").summary, "exponential ODE");
   assert.equal(analyzeUniversal("newton cooling ambient=70 initial=100 k=0.2 t=10").summary, "Newton cooling");
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");

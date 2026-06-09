@@ -2723,6 +2723,10 @@ function analyzeNumericalIntegration(request, expression) {
 }
 
 export function analyzeDifferentialEquation(statement) {
+  if (isNumericalOdeQuestion(statement.toLowerCase())) {
+    return analyzeNumericalDifferentialEquation(statement);
+  }
+
   const request = extractDifferentialEquation(statement);
   const steps = [
     {
@@ -2864,6 +2868,77 @@ export function analyzeDifferentialEquation(statement) {
       headers: [request.variable, request.dependent],
       rows: tableRows,
     },
+  };
+}
+
+function analyzeNumericalDifferentialEquation(statement) {
+  const request = extractNumericalDifferentialEquation(statement);
+  const expression = parseMath(request.expression);
+  if (expression.kind === "equation") {
+    throw new Error("Numerical ODE mode expects a derivative expression, not an equation.");
+  }
+  const solution = solveNumericalOde(request, expression);
+  const methodName = request.method === "rk4" ? "Runge-Kutta 4" : "Euler method";
+  const finalRow = solution.rows[solution.rows.length - 1];
+  const tree = {
+    kind: "mathNumericalOde",
+    label: request.method.toUpperCase(),
+    children: [
+      expression,
+      statsMetricNode("t0", request.initialTime),
+      statsMetricNode("y0", request.initialValue),
+      statsMetricNode("target", request.target),
+      statsMetricNode("h", solution.stepSize),
+    ],
+  };
+
+  return {
+    mode: "ode",
+    tree,
+    answer: `${request.dependent}(${formatNumber(request.target)}) ~= ${formatNumber(finalRow.y)}`,
+    summary: request.method === "rk4" ? "RK4 numerical ODE" : "Euler numerical ODE",
+    details: `${methodName} for first-order ODE`,
+    variables: [request.variable, request.dependent],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Parse first-order ODE",
+        expression: `${request.dependent}' = ${formatMath(expression)}`,
+        detail: "The right-hand side is evaluated as a function of the independent variable and current dependent value.",
+      },
+      {
+        title: "Set initial condition and step",
+        expression: `${request.dependent}(${formatNumber(request.initialTime)}) = ${formatNumber(request.initialValue)}, h = ${formatNumber(solution.stepSize)}`,
+        detail: "The solver advances from the initial point to the target using equal-width steps.",
+      },
+      {
+        title: `Apply ${methodName}`,
+        expression: `${request.dependent}(${formatNumber(request.target)}) ~= ${formatNumber(finalRow.y)}`,
+        detail: request.method === "rk4"
+          ? "RK4 combines four slope estimates per step for a higher-accuracy update."
+          : "Euler's method advances with the slope at the start of each step.",
+      },
+    ],
+    table: {
+      headers: ["Step", request.variable, request.dependent, "Slope"],
+      rows: solution.rows.map((row) => row.step === "..."
+        ? ["...", "...", "...", "..."]
+        : [
+            String(row.step),
+            formatNumber(row.t),
+            formatNumber(row.y),
+            Number.isFinite(row.slope) ? formatNumber(row.slope) : "",
+          ]),
+    },
+    artifacts: [
+      ["Method", methodName],
+      ["Equation", `${request.dependent}' = ${formatMath(expression)}`],
+      ["Initial condition", `${request.dependent}(${formatNumber(request.initialTime)}) = ${formatNumber(request.initialValue)}`],
+      ["Target", `${request.variable} = ${formatNumber(request.target)}`],
+      ["Step size", formatNumber(solution.stepSize)],
+      ["Steps", formatNumber(request.steps)],
+      ["Approximation", `${request.dependent}(${formatNumber(request.target)}) ~= ${formatNumber(finalRow.y)}`],
+    ],
   };
 }
 
@@ -7471,6 +7546,86 @@ function extractDifferentialEquation(statement) {
   };
 }
 
+function extractNumericalDifferentialEquation(statement) {
+  const method = statement.toLowerCase().includes("euler") ? "euler" : "rk4";
+  let text = statement
+    .replace(/^(?:rk4|runge-kutta(?:\s+4)?|runge kutta(?:\s+4)?|euler(?:\s+method)?)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  const derivativeMatch = text.match(/(?:d([A-Za-z_]\w*)\s*\/\s*d([A-Za-z_]\w*)|([A-Za-z_]\w*)\s*'|([A-Za-z_]\w*)prime)\s*=\s*(.+)$/i);
+  if (!derivativeMatch) {
+    throw new Error("Numerical ODE mode needs a first-order equation, such as rk4 y' = t + y y0=1 from t=0 to 1 h=0.25.");
+  }
+
+  const dependent = derivativeMatch[1] ?? derivativeMatch[3] ?? derivativeMatch[4] ?? "y";
+  let variable = derivativeMatch[2] ?? "t";
+  let expression = derivativeMatch[5].trim();
+
+  const y0Match = expression.match(/\b(?:y0|initial|start)\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
+  if (!y0Match) {
+    throw new Error("Numerical ODE mode needs an initial value, such as y0=1.");
+  }
+  const initialValue = Number(y0Match[1]);
+  expression = expression.replace(y0Match[0], "").trim();
+
+  const rangeMatch = expression.match(/\bfrom\s+(?:([A-Za-z_]\w*)\s*=\s*)?(.+?)\s+to\s+(.+?)(?=\s+\b(?:h|step|n)\s*=|$)/i);
+  if (!rangeMatch) {
+    throw new Error("Numerical ODE mode needs a range, such as from t=0 to 1.");
+  }
+  if (rangeMatch[1]) {
+    variable = rangeMatch[1];
+  }
+  const initialTime = evaluateBoundExpression(rangeMatch[2]);
+  const target = evaluateBoundExpression(rangeMatch[3]);
+  expression = expression.replace(rangeMatch[0], "").trim();
+
+  const stepMatch = expression.match(/\b(?:h|step)\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
+  const countMatch = expression.match(/\bn\s*=\s*(\d+)\b/i);
+  let steps;
+  let stepSize;
+  if (stepMatch) {
+    stepSize = Number(stepMatch[1]);
+    expression = expression.replace(stepMatch[0], "").trim();
+  }
+  if (countMatch) {
+    steps = Number(countMatch[1]);
+    expression = expression.replace(countMatch[0], "").trim();
+  }
+  if (Number.isFinite(stepSize)) {
+    if (!(stepSize > 0)) {
+      throw new Error("Numerical ODE step size must be positive.");
+    }
+    steps = Math.round(Math.abs((target - initialTime) / stepSize));
+    const impliedStep = Math.abs((target - initialTime) / steps);
+    if (!Number.isFinite(impliedStep) || Math.abs(impliedStep - stepSize) > 1e-7) {
+      throw new Error("Numerical ODE step size must divide the requested interval.");
+    }
+  } else if (!Number.isFinite(steps)) {
+    steps = 10;
+  }
+
+  if (!Number.isSafeInteger(steps) || steps < 1 || steps > 10000) {
+    throw new Error("Numerical ODE mode needs n between 1 and 10000.");
+  }
+  if (!Number.isFinite(initialValue) || !Number.isFinite(initialTime) || !Number.isFinite(target) || nearlyEqual(initialTime, target)) {
+    throw new Error("Numerical ODE mode needs finite, distinct start and target values.");
+  }
+  if (!expression) {
+    throw new Error("Numerical ODE mode needs a derivative expression.");
+  }
+
+  return {
+    method,
+    expression,
+    variable,
+    dependent,
+    initialTime,
+    initialValue,
+    target,
+    steps,
+  };
+}
+
 function readOdeEquation(text) {
   const match = text.match(/(?:dy\s*\/\s*d[A-Za-z_]\w*|y\s*'|yprime)\s*=\s*([+-]?\s*(?:\d*\.?\d+(?:e[-+]?\d+)?)?)\s*\*?\s*y(?:\s*\^\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?))?/i);
   if (!match) {
@@ -7674,6 +7829,60 @@ function approximateDefiniteIntegral(evaluator, lower, upper, subintervals, meth
       headers: ["i", "x", "f(x)", "weight"],
       rows: samples,
     },
+  };
+}
+
+function solveNumericalOde(request, expression) {
+  const stepSize = (request.target - request.initialTime) / request.steps;
+  const evaluator = (t, y) => {
+    const value = evaluateMath(expression, {
+      [request.variable]: t,
+      [request.dependent]: y,
+    });
+    if (!Number.isFinite(value)) {
+      throw new Error("The ODE derivative is not finite at a step point.");
+    }
+    return value;
+  };
+  const rows = [{
+    step: 0,
+    t: normalizeNumber(request.initialTime),
+    y: normalizeNumber(request.initialValue),
+    slope: Number.NaN,
+  }];
+  let t = request.initialTime;
+  let y = request.initialValue;
+
+  for (let step = 1; step <= request.steps; step += 1) {
+    const slope = evaluator(t, y);
+    if (request.method === "rk4") {
+      const k1 = slope;
+      const k2 = evaluator(t + stepSize / 2, y + (stepSize * k1) / 2);
+      const k3 = evaluator(t + stepSize / 2, y + (stepSize * k2) / 2);
+      const k4 = evaluator(t + stepSize, y + stepSize * k3);
+      y += (stepSize / 6) * (k1 + 2 * k2 + 2 * k3 + k4);
+    } else {
+      y += stepSize * slope;
+    }
+    t += stepSize;
+    if (!Number.isFinite(y)) {
+      throw new Error("The numerical ODE solution became non-finite.");
+    }
+    if (step <= 20 || step === request.steps) {
+      rows.push({
+        step,
+        t: normalizeNumber(t),
+        y: normalizeNumber(y),
+        slope: normalizeNumber(slope),
+      });
+    } else if (step === 21) {
+      rows.push({ step: "...", t: Number.NaN, y: Number.NaN, slope: Number.NaN });
+    }
+  }
+
+  return {
+    stepSize: normalizeNumber(stepSize),
+    rows,
   };
 }
 
@@ -9908,7 +10117,8 @@ function isLinearProgrammingQuestion(lower) {
 }
 
 function isDifferentialEquationQuestion(lower) {
-  return lower.startsWith("ode ") ||
+  return isNumericalOdeQuestion(lower) ||
+    lower.startsWith("ode ") ||
     lower.startsWith("solve ode ") ||
     lower.includes("differential equation") ||
     lower.includes("dy/d") ||
@@ -9916,6 +10126,14 @@ function isDifferentialEquationQuestion(lower) {
     lower.includes("newton cooling") ||
     lower.includes("newton's cooling") ||
     (lower.includes("logistic") && (lower.includes("y0") || lower.includes("carrying") || lower.includes("capacity")));
+}
+
+function isNumericalOdeQuestion(lower) {
+  return lower.startsWith("rk4 ") ||
+    lower.startsWith("runge-kutta ") ||
+    lower.startsWith("runge kutta ") ||
+    lower.startsWith("euler ") ||
+    lower.includes("euler method");
 }
 
 function isNumericalQuestion(lower) {
