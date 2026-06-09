@@ -1133,6 +1133,10 @@ export function analyzeStatistics(statement) {
     return analyzeRocAnalysis(statement);
   }
 
+  if (isDecisionTreeQuestion(lower)) {
+    return analyzeDecisionTreeClassifier(statement);
+  }
+
   if (isNaiveBayesQuestion(lower)) {
     return analyzeNaiveBayes(statement);
   }
@@ -5430,6 +5434,96 @@ function analyzeRocAnalysis(statement) {
   };
 }
 
+function analyzeDecisionTreeClassifier(statement) {
+  const request = parseDecisionTreeInput(statement);
+  const model = fitDecisionTreeClassifier(request.classes, request.predictors, request.maxDepth, request.minLeaf);
+  const predictorNames = request.predictors.map((predictor) => predictor.name);
+  const trainingPredictions = request.classes.map((_, row) =>
+    predictDecisionTree(model.root, request.predictors.map((predictor) => predictor.values[row]), predictorNames),
+  );
+  const correct = trainingPredictions.filter((prediction, index) => prediction.classValue === request.classes[index]).length;
+  const accuracy = correct / request.classes.length;
+  const hasPrediction = request.prediction.every(Number.isFinite);
+  const prediction = hasPrediction ? predictDecisionTree(model.root, request.prediction, predictorNames) : null;
+  const rootLabel = model.root.leaf
+    ? `leaf ${formatNumber(model.root.predictedClass)}`
+    : `${predictorNames[model.root.featureIndex]} <= ${formatNumber(model.root.threshold)}`;
+  const classLabels = model.classes.map(formatNumber).join(", ");
+  const tree = {
+    kind: "statsRegression",
+    label: "TREE",
+    children: [
+      statsDatasetNode(request.classes, [], "CLASS"),
+      ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+      statsMetricNode("ACC", accuracy),
+      statsMetricNode("NODES", model.nodeCount),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: prediction
+      ? `predicted class = ${formatNumber(prediction.classValue)}`
+      : `root split = ${rootLabel}`,
+    summary: "decision tree classifier",
+    details: `${request.classes.length} observations, ${model.classes.length} classes, depth ${model.depth}`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read classes and numeric features",
+        expression: `classes = ${classLabels}, features = ${predictorNames.join(", ")}`,
+        detail: "The tree classifier learns numeric split rules from labeled feature data.",
+      },
+      {
+        title: "Choose Gini splits",
+        expression: `root: ${rootLabel}`,
+        detail: "Each internal node picks the split that most reduces weighted Gini impurity.",
+      },
+      {
+        title: "Evaluate training predictions",
+        expression: `accuracy = ${formatNumber(accuracy)}, nodes = ${model.nodeCount}`,
+        detail: "Training rows are passed through the learned tree and compared with their labels.",
+      },
+      ...(prediction
+        ? [{
+            title: "Trace prediction path",
+            expression: prediction.path.join(" -> "),
+            detail: "The new feature values follow split decisions until they reach a leaf.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Obs", "Actual", "Predicted", "Leaf Samples"],
+      rows: request.classes.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(trainingPredictions[index].classValue),
+        formatNumber(trainingPredictions[index].samples),
+      ]),
+    },
+    artifacts: [
+      ["Classes", classLabels],
+      ["Max depth", formatNumber(request.maxDepth)],
+      ["Min leaf", formatNumber(request.minLeaf)],
+      ["Tree depth", formatNumber(model.depth)],
+      ["Node count", formatNumber(model.nodeCount)],
+      ["Training accuracy", formatNumber(accuracy)],
+      ["Root split", rootLabel],
+      ["Root Gini", formatNumber(model.root.gini)],
+      ...decisionTreeRuleArtifacts(model.root, predictorNames),
+      ...(prediction
+        ? [
+            ["Predicted class", formatNumber(prediction.classValue)],
+            ["Prediction path", prediction.path.join(" -> ")],
+            ["Prediction leaf samples", formatNumber(prediction.samples)],
+          ]
+        : []),
+    ],
+  };
+}
+
 function analyzePoissonRegression(statement) {
   const request = parsePoissonRegressionInput(statement);
   const design = request.y.map((_, row) => [
@@ -7613,6 +7707,156 @@ function rocThresholdMetrics(labels, scores, threshold, positives, negatives) {
     accuracy: normalizeNumber(accuracy),
     youden: normalizeNumber(youden),
   };
+}
+
+function fitDecisionTreeClassifier(classes, predictors, maxDepth, minLeaf) {
+  const rows = classes.map((_, index) => index);
+  const root = buildDecisionTreeNode(rows, classes, predictors, 0, maxDepth, minLeaf);
+  return {
+    root,
+    classes: [...new Set(classes)].sort((left, right) => left - right),
+    nodeCount: countDecisionTreeNodes(root),
+    depth: decisionTreeDepth(root),
+  };
+}
+
+function buildDecisionTreeNode(rows, classes, predictors, depth, maxDepth, minLeaf) {
+  const counts = decisionClassCounts(rows, classes);
+  const predictedClass = majorityClassFromCounts(counts);
+  const gini = giniFromCounts(counts, rows.length);
+  const nodeBase = {
+    depth,
+    samples: rows.length,
+    counts,
+    predictedClass,
+    gini: normalizeNumber(gini),
+  };
+
+  if (depth >= maxDepth || counts.size === 1 || rows.length < 2 * minLeaf) {
+    return {
+      ...nodeBase,
+      leaf: true,
+    };
+  }
+
+  const split = bestDecisionTreeSplit(rows, classes, predictors, gini, minLeaf);
+  if (!split || split.gain <= EPSILON) {
+    return {
+      ...nodeBase,
+      leaf: true,
+    };
+  }
+
+  return {
+    ...nodeBase,
+    leaf: false,
+    featureIndex: split.featureIndex,
+    threshold: normalizeNumber(split.threshold),
+    gain: normalizeNumber(split.gain),
+    left: buildDecisionTreeNode(split.leftRows, classes, predictors, depth + 1, maxDepth, minLeaf),
+    right: buildDecisionTreeNode(split.rightRows, classes, predictors, depth + 1, maxDepth, minLeaf),
+  };
+}
+
+function bestDecisionTreeSplit(rows, classes, predictors, parentGini, minLeaf) {
+  let best = null;
+
+  for (let featureIndex = 0; featureIndex < predictors.length; featureIndex += 1) {
+    const values = [...new Set(rows.map((row) => predictors[featureIndex].values[row]))].sort((left, right) => left - right);
+    for (let index = 0; index < values.length - 1; index += 1) {
+      const threshold = (values[index] + values[index + 1]) / 2;
+      const leftRows = rows.filter((row) => predictors[featureIndex].values[row] <= threshold);
+      const rightRows = rows.filter((row) => predictors[featureIndex].values[row] > threshold);
+      if (leftRows.length < minLeaf || rightRows.length < minLeaf) continue;
+
+      const leftCounts = decisionClassCounts(leftRows, classes);
+      const rightCounts = decisionClassCounts(rightRows, classes);
+      const weightedGini = (
+        leftRows.length * giniFromCounts(leftCounts, leftRows.length) +
+        rightRows.length * giniFromCounts(rightCounts, rightRows.length)
+      ) / rows.length;
+      const gain = parentGini - weightedGini;
+      if (!best || gain > best.gain + EPSILON) {
+        best = {
+          featureIndex,
+          threshold,
+          gain,
+          leftRows,
+          rightRows,
+        };
+      }
+    }
+  }
+
+  return best;
+}
+
+function decisionClassCounts(rows, classes) {
+  const counts = new Map();
+  for (const row of rows) {
+    counts.set(classes[row], (counts.get(classes[row]) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function majorityClassFromCounts(counts) {
+  return [...counts.entries()]
+    .sort(([leftClass, leftCount], [rightClass, rightCount]) =>
+      rightCount - leftCount || leftClass - rightClass,
+    )[0][0];
+}
+
+function giniFromCounts(counts, total) {
+  return 1 - [...counts.values()].reduce((sum, count) => sum + (count / total) ** 2, 0);
+}
+
+function predictDecisionTree(node, values, predictorNames) {
+  const path = [];
+  let current = node;
+
+  while (!current.leaf) {
+    const featureName = predictorNames[current.featureIndex];
+    const threshold = current.threshold;
+    const goLeft = values[current.featureIndex] <= threshold;
+    path.push(`${featureName} ${goLeft ? "<=" : ">"} ${formatNumber(threshold)}`);
+    current = goLeft ? current.left : current.right;
+  }
+
+  path.push(`leaf ${formatNumber(current.predictedClass)}`);
+  return {
+    classValue: current.predictedClass,
+    samples: current.samples,
+    path,
+  };
+}
+
+function countDecisionTreeNodes(node) {
+  return node.leaf ? 1 : 1 + countDecisionTreeNodes(node.left) + countDecisionTreeNodes(node.right);
+}
+
+function decisionTreeDepth(node) {
+  return node.leaf ? node.depth : Math.max(decisionTreeDepth(node.left), decisionTreeDepth(node.right));
+}
+
+function decisionTreeRuleArtifacts(root, predictorNames) {
+  return decisionTreeRules(root, predictorNames).map((rule, index) => [`Rule ${index + 1}`, rule]);
+}
+
+function decisionTreeRules(node, predictorNames, conditions = []) {
+  if (node.leaf) {
+    const classCounts = [...node.counts.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([classValue, count]) => `${formatNumber(classValue)}:${count}`)
+      .join(", ");
+    return [`${conditions.length ? conditions.join(" and ") : "all rows"} => class ${formatNumber(node.predictedClass)} (${classCounts})`];
+  }
+
+  const featureName = predictorNames[node.featureIndex];
+  const threshold = formatNumber(node.threshold);
+  return [
+    ...decisionTreeRules(node.left, predictorNames, [...conditions, `${featureName} <= ${threshold}`]),
+    ...decisionTreeRules(node.right, predictorNames, [...conditions, `${featureName} > ${threshold}`]),
+  ];
 }
 
 function fitKMeans(points, k) {
@@ -11745,6 +11989,67 @@ function parseRocInput(text) {
   };
 }
 
+function parseDecisionTreeInput(text) {
+  const lists = new Map();
+  const listText = text.replace(/\bpredict\b.*$/i, "");
+  for (const match of listText.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    const label = match[1];
+    const values = parseNumberList(match[2]);
+    if (values.length > 1) {
+      lists.set(label.toLowerCase(), { name: label, values });
+    }
+  }
+
+  const classEntry = lists.get("class") ??
+    lists.get("classes") ??
+    lists.get("label") ??
+    lists.get("labels") ??
+    lists.get("y") ??
+    lists.get("response") ??
+    lists.get("outcome");
+  if (!classEntry) {
+    throw new Error("Decision tree classification needs a class list, such as class: 0, 0, 1, 1.");
+  }
+
+  const predictors = [...lists.entries()]
+    .filter(([key]) => key !== classEntry.name.toLowerCase())
+    .filter(([key]) => /^x\d*$/i.test(key) || /^predictor\d+$/i.test(key) || /^feature\d+$/i.test(key))
+    .sort(([left], [right]) => naturalLabelNumber(left) - naturalLabelNumber(right))
+    .map(([, value]) => value);
+
+  if (predictors.length < 1) {
+    throw new Error("Decision tree classification needs at least one numeric feature list, such as x1: 1, 2, 3.");
+  }
+  for (const predictor of predictors) {
+    if (predictor.values.length !== classEntry.values.length) {
+      throw new Error("All decision-tree feature lists must have the same length as the class list.");
+    }
+  }
+  if ([...new Set(classEntry.values)].length < 2) {
+    throw new Error("Decision tree classification needs at least two classes.");
+  }
+
+  const maxDepth = readNamedNumber(text, ["maxDepth", "maxdepth", "depth"], 3);
+  const minLeaf = readNamedNumber(text, ["minLeaf", "minleaf", "minSize", "minsize"], 1);
+  if (!Number.isSafeInteger(maxDepth) || maxDepth < 1 || maxDepth > 8) {
+    throw new Error("Decision tree maxDepth must be an integer from 1 to 8.");
+  }
+  if (!Number.isSafeInteger(minLeaf) || minLeaf < 1) {
+    throw new Error("Decision tree minLeaf must be a positive integer.");
+  }
+  if (classEntry.values.length < 2 * minLeaf) {
+    throw new Error("Decision tree minLeaf is too large for this dataset.");
+  }
+
+  return {
+    classes: classEntry.values,
+    predictors,
+    prediction: parseLogisticRegressionPrediction(text, predictors.map((predictor) => predictor.name)),
+    maxDepth,
+    minLeaf,
+  };
+}
+
 function parseLogisticRegressionPrediction(text, predictorNames) {
   const match = text.match(/\bpredict\b(.+)$/i);
   if (!match) {
@@ -12648,6 +12953,12 @@ function isNaiveBayesQuestion(lower) {
     lower.includes("bayes classifier");
 }
 
+function isDecisionTreeQuestion(lower) {
+  return lower.includes("decision tree") ||
+    lower.includes("classification tree") ||
+    lower.includes("tree classifier");
+}
+
 function isRocQuestion(lower) {
   return /\broc\b/.test(lower) ||
     /\bauc\b/.test(lower) ||
@@ -12905,7 +13216,7 @@ function isSystemQuestion(lower) {
 }
 
 function isStatisticsQuestion(lower) {
-  if (isRocQuestion(lower)) {
+  if (isRocQuestion(lower) || isDecisionTreeQuestion(lower)) {
     return true;
   }
 
@@ -12989,6 +13300,9 @@ function isStatisticsQuestion(lower) {
     "naive bayes",
     "naïve bayes",
     "bayes classifier",
+    "decision tree",
+    "classification tree",
+    "tree classifier",
     "bayes",
     "posterior",
     "prior",

@@ -299,6 +299,18 @@ runTest("statistics mode computes Gaussian Naive Bayes classifiers", () => {
   assert.deepEqual(result.table.rows[0], ["1", "0", "0", "1"]);
 });
 
+runTest("statistics mode computes decision tree classifiers", () => {
+  const result = analyzeStatistics("decision tree class: 0, 0, 0, 1, 1, 1; x1: 1, 2, 1.5, 5, 6, 5.5; x2: 1, 1.2, 0.8, 5, 5.5, 4.8; maxDepth=2 predict x1=5.2 x2=5");
+
+  assert.equal(result.summary, "decision tree classifier");
+  assert.equal(result.answer, "predicted class = 1");
+  assert.equal(artifactValue(result, "Root split"), "x1 <= 3.5");
+  assert.equal(artifactValue(result, "Training accuracy"), "1");
+  assert.equal(artifactValue(result, "Rule 2"), "x1 > 3.5 => class 1 (1:3)");
+  assert.equal(artifactValue(result, "Prediction path"), "x1 > 3.5 -> leaf 1");
+  assert.deepEqual(result.table.rows[5], ["6", "1", "1", "3"]);
+});
+
 runTest("statistics mode computes ROC AUC analysis", () => {
   const result = analyzeStatistics("roc actual: 1, 1, 0, 1, 0, 0; scores: 0.9, 0.75, 0.6, 0.55, 0.3, 0.1");
 
