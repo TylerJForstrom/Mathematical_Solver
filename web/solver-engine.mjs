@@ -992,6 +992,10 @@ export function analyzeStatistics(statement) {
     return analyzeCoxRegression(statement);
   }
 
+  if (isTimeSeriesQuestion(lower)) {
+    return analyzeTimeSeries(statement);
+  }
+
   if (isLogRankQuestion(lower)) {
     return analyzeLogRankTest(statement);
   }
@@ -4603,6 +4607,114 @@ function analyzeRegression(statement) {
       ["Correlation r", formatNumber(r)],
       ["R squared", formatNumber(rSquared)],
     ],
+  };
+}
+
+function analyzeTimeSeries(statement) {
+  const request = parseTimeSeriesInput(statement);
+  const result = fitAr1TimeSeries(request.values, request.forecastSteps);
+  const lastForecast = result.forecasts[result.forecasts.length - 1];
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(request.values, [
+      statsMetricNode("PHI", result.phi),
+      statsMetricNode("A", result.intercept),
+      statsMetricNode("R2", result.rSquared),
+      statsMetricNode("FORECAST", lastForecast.value),
+    ], "AR(1)"),
+    answer: `${request.forecastSteps}-step forecast = ${formatNumber(lastForecast.value)}`,
+    summary: "AR(1) time-series forecast",
+    details: "Autoregressive model with lag-1 dependence",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.values)),
+    steps: [
+      {
+        title: "Build lagged pairs",
+        expression: `${request.values.length - 1} pairs: y_t on y_(t-1)`,
+        detail: "AR(1) fits the current value as a linear function of the previous value.",
+      },
+      {
+        title: "Estimate autoregressive model",
+        expression: `y_t = ${formatNumber(result.intercept)} + ${formatNumber(result.phi)}y_(t-1)`,
+        detail: "Least squares estimates the intercept and lag coefficient.",
+      },
+      {
+        title: "Measure fit",
+        expression: `R^2 = ${formatNumber(result.rSquared)}, lag-1 r = ${formatNumber(result.lagCorrelation)}`,
+        detail: "The lag-1 correlation and R squared describe serial dependence.",
+      },
+      {
+        title: "Forecast forward",
+        expression: `${request.forecastSteps}-step forecast = ${formatNumber(lastForecast.value)}`,
+        detail: "Each forecast becomes the previous value for the next step.",
+      },
+    ],
+    table: {
+      headers: ["Step", "Forecast"],
+      rows: result.forecasts.map((forecast) => [
+        formatNumber(forecast.step),
+        formatNumber(forecast.value),
+      ]),
+    },
+    artifacts: [
+      ["Intercept", formatNumber(result.intercept)],
+      ["Lag coefficient phi", formatNumber(result.phi)],
+      ["Lag-1 correlation", formatNumber(result.lagCorrelation)],
+      ["R squared", formatNumber(result.rSquared)],
+      ["Residual SSE", formatNumber(result.sse)],
+      ["Innovation SD", formatNumber(result.innovationSd)],
+      ["Last observed value", formatNumber(request.values.at(-1))],
+      [`${request.forecastSteps}-step forecast`, formatNumber(lastForecast.value)],
+    ],
+  };
+}
+
+function fitAr1TimeSeries(values, forecastSteps) {
+  const lagged = values.slice(0, -1);
+  const current = values.slice(1);
+  const meanLag = mean(lagged);
+  const meanCurrent = mean(current);
+  const sxx = lagged.reduce((sum, value) => sum + (value - meanLag) ** 2, 0);
+  const syy = current.reduce((sum, value) => sum + (value - meanCurrent) ** 2, 0);
+  const sxy = lagged.reduce(
+    (sum, value, index) => sum + (value - meanLag) * (current[index] - meanCurrent),
+    0,
+  );
+
+  if (nearlyEqual(sxx, 0) || nearlyEqual(syy, 0)) {
+    throw new Error("AR(1) needs variation in both lagged and current values.");
+  }
+
+  const phi = sxy / sxx;
+  const intercept = meanCurrent - phi * meanLag;
+  const fitted = lagged.map((value) => intercept + phi * value);
+  const residuals = current.map((value, index) => value - fitted[index]);
+  const sse = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const rSquared = 1 - sse / syy;
+  const lagCorrelation = sxy / Math.sqrt(sxx * syy);
+  const innovationSd = Math.sqrt(sse / Math.max(1, current.length - 2));
+  const forecasts = [];
+  let previous = values.at(-1);
+
+  for (let step = 1; step <= forecastSteps; step += 1) {
+    previous = intercept + phi * previous;
+    forecasts.push({
+      step,
+      value: normalizeNumber(previous),
+    });
+  }
+
+  return {
+    intercept: normalizeNumber(intercept),
+    phi: normalizeNumber(phi),
+    fitted: fitted.map(normalizeNumber),
+    residuals: residuals.map(normalizeNumber),
+    sse: normalizeNumber(sse),
+    rSquared: normalizeNumber(rSquared),
+    lagCorrelation: normalizeNumber(lagCorrelation),
+    innovationSd: normalizeNumber(innovationSd),
+    forecasts,
   };
 }
 
@@ -10458,6 +10570,34 @@ function parseMultivariateStatsInput(text) {
   throw new Error("Use labeled lists such as pca x: 1,2,3; y: 2,4,6.");
 }
 
+function parseTimeSeriesInput(text) {
+  let cleaned = text;
+  let forecastSteps = 1;
+  const forecastMatch = cleaned.match(/\b(?:forecast|steps|horizon|ahead)\s*=?\s*(\d+)\b/i);
+
+  if (forecastMatch) {
+    forecastSteps = Number(forecastMatch[1]);
+    cleaned = cleaned.replace(forecastMatch[0], "");
+  }
+
+  cleaned = cleaned
+    .replace(/\bar\s*\(?\s*1\s*\)?/gi, "")
+    .replace(/\bautoregressive\b/gi, "")
+    .replace(/\btime(?:-|\s*)series\b/gi, "")
+    .replace(/\bseries\b/gi, "")
+    .replace(/\bdata\b/gi, "");
+
+  const values = parseNumbers(cleaned);
+  if (values.length < 4) {
+    throw new Error("AR(1) forecasting needs at least four time-series values.");
+  }
+  if (!Number.isSafeInteger(forecastSteps) || forecastSteps < 1 || forecastSteps > 100) {
+    throw new Error("AR(1) forecast steps must be an integer from 1 to 100.");
+  }
+
+  return { values, forecastSteps };
+}
+
 function buildMultivariateDataset(columns) {
   if (columns.length < 2) {
     throw new Error("Multivariate statistics need at least two variables.");
@@ -11432,6 +11572,15 @@ function isCoxQuestion(lower) {
     lower.startsWith("cox ");
 }
 
+function isTimeSeriesQuestion(lower) {
+  return lower.includes("ar(1)") ||
+    lower.includes("ar1") ||
+    lower.includes("autoregressive") ||
+    lower.includes("time series") ||
+    lower.includes("time-series") ||
+    lower.includes("forecast");
+}
+
 function isMultivariableQuestion(lower) {
   return lower.includes("partial derivative") ||
     lower.startsWith("partial ") ||
@@ -11660,6 +11809,12 @@ function isStatisticsQuestion(lower) {
     "cox regression",
     "cox proportional",
     "proportional hazards",
+    "ar(1)",
+    "ar1",
+    "autoregressive",
+    "time series",
+    "time-series",
+    "forecast",
     "regression",
     "correlation",
     "covariance",

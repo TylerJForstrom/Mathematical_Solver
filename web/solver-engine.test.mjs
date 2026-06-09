@@ -260,6 +260,16 @@ runTest("statistics mode computes logistic regression", () => {
   assert.equal(artifactValue(result, "Predicted probability"), "0.771011");
 });
 
+runTest("statistics mode computes AR(1) time-series forecasts", () => {
+  const result = analyzeStatistics("ar(1) series: 10, 12, 13, 15, 16, 18 forecast=3");
+
+  assert.equal(result.summary, "AR(1) time-series forecast");
+  assert.equal(result.answer, "3-step forecast = 22.30573");
+  assert.equal(artifactValue(result, "Lag coefficient phi"), "0.973684");
+  assert.equal(artifactValue(result, "Innovation SD"), "0.628281");
+  assert.deepEqual(result.table.rows[2], ["3", "22.30573"]);
+});
+
 runTest("statistics mode computes binomial probability", () => {
   const result = analyzeStatistics("binomial n=10 p=0.5 k=3");
 
@@ -807,6 +817,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("kaplan-meier times: 5, 6, 6, 8, 10; events: 1, 1, 0, 1, 0").summary, "Kaplan-Meier survival");
   assert.equal(analyzeUniversal("log-rank group1 times: 5, 6, 6, 8, 10 events: 1, 1, 0, 1, 0; group2 times: 4, 6, 7, 9, 12 events: 1, 0, 1, 1, 0").summary, "log-rank test");
   assert.equal(analyzeUniversal("cox regression times: 5, 6, 6, 8, 10, 12; events: 1, 1, 0, 1, 0, 1; x: 0, 1, 0, 1, 1, 0").summary, "Cox proportional hazards");
+  assert.equal(analyzeUniversal("ar(1) series: 10, 12, 13, 15, 16, 18 forecast=3").summary, "AR(1) time-series forecast");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
