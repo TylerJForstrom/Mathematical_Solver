@@ -51,7 +51,8 @@ The frontend currently supports:
   first-order differential equations
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression/correlation for coordinate pairs, plus multiple linear
-  regression with several predictor lists, residuals, R squared, and prediction
+  regression with several predictor lists, residuals, coefficient standard
+  errors, t tests, p-values, confidence intervals, R squared, and prediction
 - Polynomial regression for nonlinear curve fitting with degree selection,
   residuals, R squared, and prediction
 - Logistic regression for binary outcomes with fitted probabilities,
@@ -186,7 +187,8 @@ The same idea works for algebra and calculus:
   and `logistic r=0.4 K=100 y0=10 t=8` solve closed-form differential equations.
 - `rk4 dy/dt = t + y y0=1 from t=0 to 1 h=0.25` approximates a first-order
   ODE with fourth-order Runge-Kutta.
-- `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
+- `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree
+  with coefficient standard errors, t tests, p-values, and confidence intervals.
 - `quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5`
   fits a nonlinear polynomial curve and predicts `26`.
 - `multiple regression y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
@@ -298,6 +300,7 @@ The demo includes:
 - Dataset summaries, confidence intervals, bootstrap intervals,
   regression/correlation, polynomial regression,
   multiple regression,
+  coefficient inference for linear models,
   logistic regression,
   Poisson regression,
   AR(1) time-series forecasting,

@@ -4560,6 +4560,18 @@ function analyzeRegression(statement) {
   const intercept = meanY - slope * meanX;
   const r = sxy / Math.sqrt(sxx * syy);
   const rSquared = r ** 2;
+  const fitted = xValues.map((value) => intercept + slope * value);
+  const residuals = yValues.map((value, index) => yValues[index] - fitted[index]);
+  const sse = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const degreesFreedom = yValues.length - 2;
+  const mse = degreesFreedom > 0 ? sse / degreesFreedom : Number.NaN;
+  const normalMatrixInverse = invertMatrix([
+    [yValues.length, xValues.reduce((sum, value) => sum + value, 0)],
+    [xValues.reduce((sum, value) => sum + value, 0), xValues.reduce((sum, value) => sum + value ** 2, 0)],
+  ]);
+  const inference = Number.isFinite(mse)
+    ? regressionCoefficientInference([intercept, slope], normalMatrixInverse, mse, degreesFreedom, ["Intercept", "Slope"])
+    : [];
   const wantsCorrelation = statement.toLowerCase().includes("correlation") && !statement.toLowerCase().includes("regression");
 
   const steps = [
@@ -4583,6 +4595,13 @@ function analyzeRegression(statement) {
       expression: `r = ${formatNumber(r)}, r^2 = ${formatNumber(rSquared)}`,
       detail: "Correlation measures linear association from -1 to 1.",
     },
+    ...(inference.length
+      ? [{
+          title: "Infer coefficient uncertainty",
+          expression: `df = ${degreesFreedom}, slope p = ${formatNumber(inference[1].pValue)}`,
+          detail: "The residual variance and inverse normal-equation matrix give standard errors, t statistics, p-values, and confidence intervals.",
+        }]
+      : []),
   ];
 
   return {
@@ -4606,6 +4625,15 @@ function analyzeRegression(statement) {
       children: [statsDatasetNode(xValues), statsDatasetNode(yValues)],
     }),
     steps,
+    table: {
+      headers: ["Obs", "Actual", "Fitted", "Residual"],
+      rows: yValues.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(fitted[index]),
+        formatNumber(residuals[index]),
+      ]),
+    },
     artifacts: [
       ["Mean x", formatNumber(meanX)],
       ["Mean y", formatNumber(meanY)],
@@ -4613,6 +4641,9 @@ function analyzeRegression(statement) {
       ["Intercept", formatNumber(intercept)],
       ["Correlation r", formatNumber(r)],
       ["R squared", formatNumber(rSquared)],
+      ["SSE", formatNumber(sse)],
+      ["Residual standard error", Number.isFinite(mse) ? formatNumber(Math.sqrt(mse)) : "undefined"],
+      ...regressionInferenceArtifacts(inference),
     ],
   };
 }
@@ -4838,6 +4869,11 @@ function analyzeMultipleRegression(statement) {
     ? 1 - (1 - rSquared) * (request.y.length - 1) / degreesFreedom
     : Number.NaN;
   const residualStdError = degreesFreedom > 0 ? Math.sqrt(sse / degreesFreedom) : Number.NaN;
+  const normalMatrixInverse = degreesFreedom > 0 ? invertMatrix(normalMatrix) : [];
+  const coefficientNames = ["Intercept", ...request.predictors.map((predictor) => predictor.name)];
+  const inference = degreesFreedom > 0
+    ? regressionCoefficientInference(coefficients, normalMatrixInverse, sse / degreesFreedom, degreesFreedom, coefficientNames)
+    : [];
   const equation = formatMultipleRegressionEquation(coefficients, request.predictors.map((predictor) => predictor.name));
   const hasPrediction = request.prediction.every(Number.isFinite);
   const prediction = hasPrediction
@@ -4883,6 +4919,13 @@ function analyzeMultipleRegression(statement) {
         expression: `R^2 = ${formatNumber(rSquared)}, SSE = ${formatNumber(sse)}`,
         detail: "R squared measures how much response variation the model explains.",
       },
+      ...(inference.length
+        ? [{
+            title: "Infer coefficient uncertainty",
+            expression: `df = ${degreesFreedom}, ${inference.slice(1).map((item) => `${item.label} p=${formatNumber(item.pValue)}`).join(", ")}`,
+            detail: "The residual variance and inverse of X'X produce standard errors, t tests, and coefficient confidence intervals.",
+          }]
+        : []),
       ...(hasPrediction
         ? [{
             title: "Predict new response",
@@ -4908,6 +4951,7 @@ function analyzeMultipleRegression(statement) {
       ["R squared", formatNumber(rSquared)],
       ["Adjusted R squared", Number.isFinite(adjustedRSquared) ? formatNumber(adjustedRSquared) : "undefined"],
       ["Residual standard error", Number.isFinite(residualStdError) ? formatNumber(residualStdError) : "undefined"],
+      ...regressionInferenceArtifacts(inference),
       ...(hasPrediction ? [["Prediction", formatNumber(prediction)]] : []),
     ],
   };
@@ -11109,6 +11153,61 @@ function formatPoissonRegressionEquation(coefficients, predictorNames) {
     expression += ` ${formatSignedTerm(coefficients[index + 1], predictorNames[index])}`;
   }
   return expression;
+}
+
+function regressionCoefficientInference(coefficients, covarianceBase, mse, degreesFreedom, labels, level = 0.95) {
+  const critical = inverseStudentTCdf((1 + level) / 2, degreesFreedom);
+  return coefficients.map((coefficient, index) => {
+    const variance = mse * covarianceBase[index][index];
+    const standardError = Math.sqrt(Math.max(0, variance));
+    const tStatistic = standardError > EPSILON ? coefficient / standardError : Number.NaN;
+    const pValue = Number.isFinite(tStatistic) ? twoSidedStudentTPValue(tStatistic, degreesFreedom) : Number.NaN;
+    return {
+      label: labels[index],
+      coefficient: normalizeNumber(coefficient),
+      standardError: normalizeNumber(standardError),
+      tStatistic: normalizeNumber(tStatistic),
+      pValue: normalizeNumber(pValue),
+      lower: normalizeNumber(coefficient - critical * standardError),
+      upper: normalizeNumber(coefficient + critical * standardError),
+      level,
+    };
+  });
+}
+
+function regressionInferenceArtifacts(inference) {
+  return inference.flatMap((item) => {
+    const percent = formatNumber(item.level * 100);
+    return [
+      [`${item.label} SE`, formatNumber(item.standardError)],
+      [`${item.label} t`, formatNumber(item.tStatistic)],
+      [`${item.label} p`, formatNumber(item.pValue)],
+      [`${item.label} ${percent}% CI`, `[${formatNumber(item.lower)}, ${formatNumber(item.upper)}]`],
+    ];
+  });
+}
+
+function twoSidedStudentTPValue(tStatistic, degreesFreedom) {
+  const cdf = studentTCdf(tStatistic, degreesFreedom);
+  return Math.max(0, Math.min(1, 2 * Math.min(cdf, 1 - cdf)));
+}
+
+function inverseStudentTCdf(probability, degreesFreedom) {
+  if (!(probability > 0 && probability < 1) || !(degreesFreedom > 0)) {
+    return Number.NaN;
+  }
+
+  let low = -50;
+  let high = 50;
+  for (let index = 0; index < 100; index += 1) {
+    const mid = (low + high) / 2;
+    if (studentTCdf(mid, degreesFreedom) < probability) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return normalizeNumber((low + high) / 2);
 }
 
 function formatLinearExpression(coefficients, variables, constant = 0) {

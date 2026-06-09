@@ -232,6 +232,10 @@ runTest("statistics mode computes linear regression", () => {
 
   assert.equal(result.summary, "linear regression");
   assert.equal(result.answer, "y = 1.5x + 0.333333");
+  assert.equal(artifactValue(result, "Slope SE"), "0.288675");
+  assert.equal(artifactValue(result, "Slope p"), "0.121038");
+  assert.equal(artifactValue(result, "Slope 95% CI"), "[-2.167965, 5.167965]");
+  assert.deepEqual(result.table.rows[1], ["2", "3", "3.333333", "-0.333333"]);
 });
 
 runTest("statistics mode computes polynomial regression", () => {
@@ -249,6 +253,9 @@ runTest("statistics mode computes multiple linear regression", () => {
   assert.equal(result.summary, "multiple linear regression");
   assert.equal(result.answer, "y = 1.3 + 2.6x1 + 0.5x2; prediction = 16.9");
   assert.equal(artifactValue(result, "R squared"), "0.998634");
+  assert.equal(artifactValue(result, "x1 SE"), "0.086603");
+  assert.equal(artifactValue(result, "x1 p"), "0.001108");
+  assert.equal(artifactValue(result, "x2 95% CI"), "[-0.575663, 1.575663]");
 });
 
 runTest("statistics mode computes logistic regression", () => {
