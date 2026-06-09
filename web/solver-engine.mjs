@@ -450,6 +450,53 @@ export function analyzeTaylor(statement, variableHint = "x") {
   };
 }
 
+export function analyzeComplex(statement) {
+  const expressionText = cleanComplexQuestion(statement);
+  const parsed = parseMath(expressionText);
+  if (parsed.kind === "equation") {
+    throw new Error("Complex mode evaluates expressions. Use Equation mode for equations with complex roots.");
+  }
+
+  const steps = [
+    {
+      title: "Parse complex expression",
+      expression: formatMath(parsed),
+      detail: "The expression is parsed into the same math tree used by the algebra solvers.",
+    },
+    {
+      title: "Set imaginary unit",
+      expression: "i^2 = -1",
+      detail: "Every number is evaluated as a complex pair a + bi, with i as the imaginary unit.",
+    },
+  ];
+  const value = evaluateComplex(parsed);
+  const magnitude = complexAbs(value);
+  const argument = Math.atan2(value.im, value.re);
+  steps.push({
+    title: "Evaluate recursively",
+    expression: formatComplex(value),
+    detail: "Each tree node combines the complex values returned by its child nodes.",
+  });
+
+  return {
+    mode: "complex",
+    tree: parsed,
+    answer: formatComplex(value),
+    summary: "complex arithmetic",
+    details: "Complex-number evaluation through the expression tree",
+    variables: [],
+    metrics: treeMetrics(parsed),
+    steps,
+    artifacts: [
+      ["Expression", formatMath(parsed)],
+      ["Real part", formatNumber(value.re)],
+      ["Imaginary part", formatNumber(value.im)],
+      ["Magnitude", formatNumber(magnitude)],
+      ["Argument", formatNumber(argument)],
+    ],
+  };
+}
+
 export function analyzeCombinatorics(statement) {
   const request = parseCombinatoricsInput(statement);
   const nText = String(request.n);
@@ -662,6 +709,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isTaylorQuestion(lower)) {
     routed = analyzeTaylor(question);
     routedLabel = "Taylor";
+  } else if (isComplexQuestion(lower)) {
+    routed = analyzeComplex(question);
+    routedLabel = "Complex";
   } else if (isFactorQuestion(lower)) {
     routed = analyzeFactoring(question);
     routedLabel = "Factor";
@@ -5011,6 +5061,27 @@ function isTaylorQuestion(lower) {
     lower.includes("maclaurin series");
 }
 
+function isComplexQuestion(lower) {
+  if (lower.includes("=")) {
+    return false;
+  }
+  if (
+    lower.startsWith("complex ") ||
+    lower.startsWith("evaluate complex ") ||
+    lower.startsWith("calculate complex ") ||
+    lower.startsWith("compute complex ") ||
+    lower.startsWith("simplify complex ")
+  ) {
+    return true;
+  }
+  return hasImaginaryUnit(lower) &&
+    (looksLikeMathExpression(lower) || /[()]/.test(lower) || /^\s*-?\s*i\s*$/.test(lower));
+}
+
+function hasImaginaryUnit(text) {
+  return /(^|[^A-Za-z_])(?:\d+(?:\.\d+)?)?i([^A-Za-z_]|$)/i.test(text);
+}
+
 function isMatrixQuestion(lower) {
   return lower.includes("matrix") ||
     lower.includes("determinant") ||
@@ -5281,6 +5352,14 @@ function cleanSimplifyQuestion(question) {
   return question
     .replace(/^(simplify|combine like terms|calculate|compute|what is|find)\s+/i, "")
     .replace(/[?!.]+$/, "")
+    .trim();
+}
+
+function cleanComplexQuestion(question) {
+  return question
+    .replace(/[?!.]+$/, "")
+    .replace(/^(evaluate|calculate|compute|simplify|what is)\s+(?:the\s+)?/i, "")
+    .replace(/^complex\s+(?:number|expression|arithmetic)?\s*/i, "")
     .trim();
 }
 
@@ -5947,6 +6026,168 @@ function evaluateFunction(name, value) {
   if (name === "ln") return Math.log(value);
   if (name === "sqrt") return Math.sqrt(value);
   return Number.NaN;
+}
+
+function evaluateComplex(node) {
+  if (node.kind === "mathNumber") {
+    return complex(node.value, 0);
+  }
+  if (node.kind === "mathSymbol") {
+    if (node.name.toLowerCase() === "i") {
+      return complex(0, 1);
+    }
+    throw new Error(`Complex mode only knows the imaginary unit i. '${node.name}' looks like a variable.`);
+  }
+  if (node.kind === "mathUnary") {
+    return complexNeg(evaluateComplex(node.operand));
+  }
+  if (node.kind === "mathFunction") {
+    return evaluateComplexFunction(node.name, evaluateComplex(node.argument));
+  }
+  if (node.kind === "mathBinary") {
+    const left = evaluateComplex(node.left);
+    const right = evaluateComplex(node.right);
+    if (node.operator === "+") return complexAdd(left, right);
+    if (node.operator === "-") return complexSub(left, right);
+    if (node.operator === "*") return complexMul(left, right);
+    if (node.operator === "/") return complexDiv(left, right);
+    if (node.operator === "^") return complexPow(left, right);
+    throw new Error(`Cannot evaluate complex operator '${node.operator}'.`);
+  }
+  throw new Error("Complex mode expects a math expression.");
+}
+
+function evaluateComplexFunction(name, value) {
+  if (name === "sin") {
+    return complex(Math.sin(value.re) * Math.cosh(value.im), Math.cos(value.re) * Math.sinh(value.im));
+  }
+  if (name === "cos") {
+    return complex(Math.cos(value.re) * Math.cosh(value.im), -Math.sin(value.re) * Math.sinh(value.im));
+  }
+  if (name === "tan") {
+    return complexDiv(evaluateComplexFunction("sin", value), evaluateComplexFunction("cos", value));
+  }
+  if (name === "exp") {
+    const scale = Math.exp(value.re);
+    return complex(scale * Math.cos(value.im), scale * Math.sin(value.im));
+  }
+  if (name === "ln") {
+    if (nearlyEqual(complexAbs(value), 0)) {
+      throw new Error("Complex logarithm is undefined at 0.");
+    }
+    return complex(Math.log(complexAbs(value)), Math.atan2(value.im, value.re));
+  }
+  if (name === "sqrt") {
+    return complexSqrt(value);
+  }
+  throw new Error(`Complex mode does not support the function '${name}'.`);
+}
+
+function complex(re, im = 0) {
+  if (!Number.isFinite(re) || !Number.isFinite(im)) {
+    throw new Error("Complex evaluation produced a non-finite value.");
+  }
+  return {
+    re: normalizeComplexPart(re),
+    im: normalizeComplexPart(im),
+  };
+}
+
+function normalizeComplexPart(value) {
+  if (nearlyEqual(value, 0)) {
+    return 0;
+  }
+  return Number(value.toFixed(10));
+}
+
+function complexAdd(left, right) {
+  return complex(left.re + right.re, left.im + right.im);
+}
+
+function complexSub(left, right) {
+  return complex(left.re - right.re, left.im - right.im);
+}
+
+function complexNeg(value) {
+  return complex(-value.re, -value.im);
+}
+
+function complexMul(left, right) {
+  return complex(
+    left.re * right.re - left.im * right.im,
+    left.re * right.im + left.im * right.re,
+  );
+}
+
+function complexDiv(left, right) {
+  const denominator = right.re ** 2 + right.im ** 2;
+  if (nearlyEqual(denominator, 0)) {
+    throw new Error("Division by zero is undefined for complex numbers.");
+  }
+  return complex(
+    (left.re * right.re + left.im * right.im) / denominator,
+    (left.im * right.re - left.re * right.im) / denominator,
+  );
+}
+
+function complexPow(base, exponent) {
+  if (nearlyEqual(exponent.im, 0) && Number.isInteger(exponent.re) && Math.abs(exponent.re) <= 32) {
+    return complexIntegerPower(base, exponent.re);
+  }
+  if (nearlyEqual(complexAbs(base), 0)) {
+    throw new Error("Complex powers with base 0 are only supported for integer exponents.");
+  }
+  return evaluateComplexFunction("exp", complexMul(exponent, evaluateComplexFunction("ln", base)));
+}
+
+function complexIntegerPower(base, exponent) {
+  if (exponent === 0) {
+    return complex(1, 0);
+  }
+
+  let power = Math.abs(exponent);
+  let result = complex(1, 0);
+  let factor = base;
+  while (power > 0) {
+    if (power % 2 === 1) {
+      result = complexMul(result, factor);
+    }
+    factor = complexMul(factor, factor);
+    power = Math.floor(power / 2);
+  }
+
+  return exponent < 0 ? complexDiv(complex(1, 0), result) : result;
+}
+
+function complexSqrt(value) {
+  const radius = complexAbs(value);
+  const real = Math.sqrt((radius + value.re) / 2);
+  const sign = value.im < 0 ? -1 : 1;
+  const imaginary = sign * Math.sqrt((radius - value.re) / 2);
+  return complex(real, imaginary);
+}
+
+function complexAbs(value) {
+  return Math.hypot(value.re, value.im);
+}
+
+function formatComplex(value) {
+  const real = normalizeComplexPart(value.re);
+  const imaginary = normalizeComplexPart(value.im);
+  if (nearlyEqual(imaginary, 0)) {
+    return formatNumber(real);
+  }
+  if (nearlyEqual(real, 0)) {
+    return formatImaginary(imaginary);
+  }
+  const sign = imaginary < 0 ? "-" : "+";
+  return `${formatNumber(real)} ${sign} ${formatImaginary(Math.abs(imaginary))}`;
+}
+
+function formatImaginary(value) {
+  const magnitude = Math.abs(normalizeComplexPart(value));
+  const text = nearlyEqual(magnitude, 1) ? "i" : `${formatNumber(magnitude)}i`;
+  return value < 0 ? `-${text}` : text;
 }
 
 function isZero(node) {
@@ -6822,12 +7063,9 @@ function quadraticRoots(a, b, c, discriminant) {
 
   const real = -b / denominator;
   const imaginary = Math.sqrt(-discriminant) / Math.abs(denominator);
-  if (nearlyEqual(real, 0)) {
-    return [`${formatNumber(imaginary)}i`, `-${formatNumber(imaginary)}i`];
-  }
   return [
-    `${formatNumber(real)} + ${formatNumber(imaginary)}i`,
-    `${formatNumber(real)} - ${formatNumber(imaginary)}i`,
+    formatComplex(complex(real, imaginary)),
+    formatComplex(complex(real, -imaginary)),
   ];
 }
 

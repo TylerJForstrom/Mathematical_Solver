@@ -16,7 +16,8 @@ The frontend currently supports:
   one-variable polynomials with rational roots
 - Exact combinatorics for factorials, permutations, and combinations
 - One-variable polynomial inequalities with sign charts and interval notation
-- Linear and quadratic equation solving
+- Linear and quadratic equation solving, including complex roots
+- Complex-number arithmetic and elementary complex functions through Ask mode
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations through Universal Ask mode
 - Matrix determinants, inverses, multiplication, row reduction, rank, null spaces,
@@ -91,6 +92,10 @@ The same idea works for algebra and calculus:
   `x in (-inf, 2) U (3, inf)`.
 - `x^3` becomes a power node, so the derivative engine can apply the power rule.
 - `x^2 - 5x + 6 = 0` becomes an equation node with left and right expression trees.
+- `x^2 + 1 = 0` keeps the quadratic formula in the complex plane and returns
+  `x = i, x = -i`.
+- `complex (3+4i)*(2-i)` evaluates the same math tree with complex pairs and
+  returns `10 + 5i`.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
 - `det [[1,2],[3,4]]` becomes a matrix-operation tree.
 - `rref [[1,2,1],[2,4,2],[1,1,0]]` becomes a row-operation tree with rank and pivots.
@@ -174,6 +179,7 @@ The demo includes:
 - Polynomial inequalities with interval answers through Ask mode
 - Numeric limits through Ask mode
 - Taylor/Maclaurin approximations through Ask mode
+- Complex arithmetic and complex quadratic roots through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
   Poisson probability, hypergeometric probability, normal probability, z-scores,
   discrete expected value, Bayes theorem, one-sample/two-sample/paired t tests,

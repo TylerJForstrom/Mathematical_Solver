@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  analyzeComplex,
   analyzeCombinatorics,
   analyzeDerivative,
   analyzeEquation,
@@ -109,6 +110,11 @@ runTest("equation mode solves quadratics", () => {
   assert.equal(result.answer, "x = 3, x = 2");
 });
 
+runTest("equation mode reports complex quadratic roots", () => {
+  assert.equal(analyzeEquation("x^2 + 1 = 0", "x").answer, "x = i, x = -i");
+  assert.equal(analyzeEquation("x^2 + 2x + 5 = 0", "x").answer, "x = -1 + 2i, x = -1 - 2i");
+});
+
 runTest("equation mode solves linear equations", () => {
   const result = analyzeEquation("2x + 5 = 17", "x");
 
@@ -134,6 +140,13 @@ runTest("taylor mode builds Maclaurin polynomials", () => {
 
 runTest("taylor mode expands around nonzero centers", () => {
   assert.equal(analyzeTaylor("taylor ln(x) around 1 order=3").answer, "(x - 1) - 0.5(x - 1)^2 + 0.333333(x - 1)^3");
+});
+
+runTest("complex mode evaluates arithmetic and functions", () => {
+  assert.equal(analyzeComplex("complex (3+4i)*(2-i)").answer, "10 + 5i");
+  assert.equal(analyzeComplex("complex (3+4i)/(1-2i)").answer, "-1 + 2i");
+  assert.equal(analyzeComplex("complex sqrt(-1)").answer, "i");
+  assert.equal(analyzeComplex("complex (1+i)^2").answer, "2i");
 });
 
 runTest("statistics mode computes descriptive summaries", () => {
@@ -485,6 +498,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("integrate sin(x)").answer, "-cos(x) + C");
   assert.equal(analyzeUniversal("limit (x^2 - 1)/(x - 1) as x approaches 1").answer, "limit = 2");
   assert.equal(analyzeUniversal("taylor sin(x) order=5").summary, "Maclaurin polynomial");
+  assert.equal(analyzeUniversal("complex (3+4i)*(2-i)").answer, "10 + 5i");
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
