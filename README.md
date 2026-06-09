@@ -23,6 +23,7 @@ The frontend currently supports:
   and 2x2 eigenvalues/eigenvectors
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
 - Finite and one-sided numeric limits, including removable discontinuities
+- Taylor and Maclaurin polynomial expansions for supported elementary functions
 - Polynomial and elementary indefinite/definite integrals, including trig,
   exponential, logarithmic, square-root, and reciprocal forms
 - Polynomial critical points and local max/min classification
@@ -98,6 +99,8 @@ The same idea works for algebra and calculus:
   finds each eigenspace.
 - `limit (x^2 - 1)/(x - 1) as x approaches 1` samples both sides of a
   removable discontinuity and returns `limit = 2`.
+- `taylor sin(x) order=5` repeatedly differentiates and returns
+  `x - 0.166667x^3 + 0.008333x^5`.
 - `integrate x^2 from 0 to 3` builds an antiderivative tree and evaluates the bounds.
 - `integrate sin(x)` uses a function node and returns `-cos(x) + C`.
 - `integrate exp(x) from 0 to 1` evaluates an elementary definite integral.
@@ -170,6 +173,7 @@ The demo includes:
 - Exact combinatorics through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
 - Numeric limits through Ask mode
+- Taylor/Maclaurin approximations through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
   Poisson probability, hypergeometric probability, normal probability, z-scores,
   discrete expected value, Bayes theorem, one-sample/two-sample/paired t tests,

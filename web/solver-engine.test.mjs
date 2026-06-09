@@ -16,6 +16,7 @@ import {
   analyzeSimplification,
   analyzeStatistics,
   analyzeSystem,
+  analyzeTaylor,
   analyzeUniversal,
 } from "./solver-engine.mjs";
 
@@ -124,6 +125,15 @@ runTest("derivative mode supports product rule", () => {
   const result = analyzeDerivative("x(x + 1)", "x");
 
   assert.equal(result.answer, "2x + 1");
+});
+
+runTest("taylor mode builds Maclaurin polynomials", () => {
+  assert.equal(analyzeTaylor("taylor sin(x) order=5").answer, "x - 0.166667x^3 + 0.008333x^5");
+  assert.equal(analyzeTaylor("maclaurin exp(x) degree=4").answer, "1 + x + 0.5x^2 + 0.166667x^3 + 0.041667x^4");
+});
+
+runTest("taylor mode expands around nonzero centers", () => {
+  assert.equal(analyzeTaylor("taylor ln(x) around 1 order=3").answer, "(x - 1) - 0.5(x - 1)^2 + 0.333333(x - 1)^3");
 });
 
 runTest("statistics mode computes descriptive summaries", () => {
@@ -474,6 +484,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("integrate x^2 from 0 to 3").summary, "definite integral");
   assert.equal(analyzeUniversal("integrate sin(x)").answer, "-cos(x) + C");
   assert.equal(analyzeUniversal("limit (x^2 - 1)/(x - 1) as x approaches 1").answer, "limit = 2");
+  assert.equal(analyzeUniversal("taylor sin(x) order=5").summary, "Maclaurin polynomial");
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");

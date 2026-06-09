@@ -379,6 +379,77 @@ export function analyzeDerivative(statement, variable = "x") {
   };
 }
 
+export function analyzeTaylor(statement, variableHint = "x") {
+  const request = extractTaylorQuestion(statement, variableHint);
+  const expression = parseMath(request.expression);
+  if (expression.kind === "equation") {
+    throw new Error("Taylor mode expects a function expression, not an equation.");
+  }
+
+  const steps = [
+    {
+      title: "Parse expansion request",
+      expression: `${formatMath(expression)} around ${request.variable} = ${formatNumber(request.center)}`,
+      detail: `The solver will build terms through degree ${request.order}.`,
+    },
+  ];
+  const terms = [];
+  let derivative = expression;
+  for (let order = 0; order <= request.order; order += 1) {
+    const derivativeSteps = [];
+    const simplifiedDerivative = simplifyNode(derivative, derivativeSteps);
+    const value = safeEvaluateMath(simplifiedDerivative, { [request.variable]: request.center });
+    if (!Number.isFinite(value)) {
+      throw new Error(`Taylor expansion needs a finite derivative value at order ${order}.`);
+    }
+    const coefficient = value / factorial(order);
+    terms.push({ order, derivative: simplifiedDerivative, value, coefficient });
+    if (order < request.order) {
+      derivative = differentiate(simplifiedDerivative, request.variable, []);
+    }
+  }
+
+  const polynomial = formatTaylorPolynomial(terms, request.variable, request.center);
+  steps.push(
+    {
+      title: "Evaluate derivatives",
+      expression: terms.map((term) => `f^(${term.order})(${formatNumber(request.center)})=${formatNumber(term.value)}`).join(", "),
+      detail: "Each Taylor coefficient uses a derivative value divided by factorial.",
+    },
+    {
+      title: "Assemble polynomial",
+      expression: polynomial,
+      detail: "The polynomial is the sum of coefficient times powers of the shifted variable.",
+    },
+  );
+
+  return {
+    mode: "taylor",
+    tree: expression,
+    answer: polynomial,
+    summary: request.center === 0 ? "Maclaurin polynomial" : "Taylor polynomial",
+    details: `degree ${request.order} around ${request.variable} = ${formatNumber(request.center)}`,
+    variables: mathVariables(expression),
+    metrics: treeMetrics(expression),
+    steps,
+    table: {
+      headers: ["Order", "Derivative at center", "Coefficient"],
+      rows: terms.map((term) => [
+        formatNumber(term.order),
+        formatNumber(term.value),
+        formatNumber(term.coefficient),
+      ]),
+    },
+    artifacts: [
+      ["Function", formatMath(expression)],
+      ["Variable", request.variable],
+      ["Center", formatNumber(request.center)],
+      ["Degree", formatNumber(request.order)],
+      ["Polynomial", polynomial],
+    ],
+  };
+}
+
 export function analyzeCombinatorics(statement) {
   const request = parseCombinatoricsInput(statement);
   const nText = String(request.n);
@@ -588,6 +659,9 @@ export function analyzeUniversal(question, values = {}) {
     const request = extractDerivativeQuestion(question);
     routed = analyzeDerivative(request.expression, request.variable);
     routedLabel = "Derivative";
+  } else if (isTaylorQuestion(lower)) {
+    routed = analyzeTaylor(question);
+    routedLabel = "Taylor";
   } else if (isFactorQuestion(lower)) {
     routed = analyzeFactoring(question);
     routedLabel = "Factor";
@@ -3646,6 +3720,40 @@ function cleanLimitExpression(text) {
     .trim();
 }
 
+function formatTaylorPolynomial(terms, variable, center) {
+  const pieces = [];
+  for (const term of terms) {
+    if (nearlyEqual(term.coefficient, 0)) {
+      continue;
+    }
+    pieces.push(formatTaylorTerm(term.coefficient, term.order, variable, center, pieces.length === 0));
+  }
+  return pieces.length ? pieces.join("") : "0";
+}
+
+function formatTaylorTerm(coefficient, order, variable, center, first) {
+  const sign = coefficient < 0 ? "-" : "+";
+  const magnitude = Math.abs(coefficient);
+  const variablePart = formatTaylorVariablePart(order, variable, center);
+  const coefficientText = nearlyEqual(magnitude, 1) && variablePart ? "" : formatNumber(magnitude);
+  const body = `${coefficientText}${variablePart}`;
+  if (first) {
+    return sign === "-" ? `-${body}` : body;
+  }
+  return ` ${sign} ${body}`;
+}
+
+function formatTaylorVariablePart(order, variable, center) {
+  if (order === 0) {
+    return "";
+  }
+  let base = variable;
+  if (!nearlyEqual(center, 0)) {
+    base = center > 0 ? `(${variable} - ${formatNumber(center)})` : `(${variable} + ${formatNumber(Math.abs(center))})`;
+  }
+  return order === 1 ? base : `${base}^${order}`;
+}
+
 function sampleFunction(expression, variable, xMin, xMax, count) {
   const points = [];
   for (let index = 0; index < count; index += 1) {
@@ -4894,6 +5002,15 @@ function isDerivativeQuestion(lower) {
   return lower.includes("derivative") || lower.includes("differentiate") || /d\s*\/\s*d[a-z]\w*/i.test(lower);
 }
 
+function isTaylorQuestion(lower) {
+  return lower.startsWith("taylor ") ||
+    lower.startsWith("maclaurin ") ||
+    lower.includes("taylor polynomial") ||
+    lower.includes("taylor series") ||
+    lower.includes("maclaurin polynomial") ||
+    lower.includes("maclaurin series");
+}
+
 function isMatrixQuestion(lower) {
   return lower.includes("matrix") ||
     lower.includes("determinant") ||
@@ -5076,6 +5193,63 @@ function extractDerivativeQuestion(question) {
   return {
     variable: "x",
     expression: cleanSimplifyQuestion(question),
+  };
+}
+
+function extractTaylorQuestion(question, fallbackVariable) {
+  let text = question
+    .replace(/^(taylor|maclaurin)\s+(?:polynomial|series|expansion)?\s*/i, "")
+    .replace(/^(find|compute|calculate)\s+(?:the\s+)?(?:taylor|maclaurin)\s+(?:polynomial|series|expansion)\s+(?:of\s+)?/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  const lower = question.toLowerCase();
+  let center = lower.includes("maclaurin") ? 0 : Number.NaN;
+  let variable = fallbackVariable;
+  let order = 5;
+
+  const orderMatch = text.match(/\b(?:order|degree|through degree)\s*=?\s*(\d+)\b/i);
+  if (orderMatch) {
+    order = Number(orderMatch[1]);
+    text = text.replace(orderMatch[0], "").trim();
+  }
+
+  const aroundMatch = text.match(/\b(?:around|center(?:ed)? at|about|at)\s+([A-Za-z_]\w*\s*=\s*)?([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\b/i);
+  if (aroundMatch) {
+    center = Number(aroundMatch[2]);
+    if (aroundMatch[1]) {
+      variable = aroundMatch[1].replace(/=/g, "").trim();
+    }
+    text = text.replace(aroundMatch[0], "").trim();
+  }
+
+  const variableMatch = text.match(/\b(?:with respect to|wrt|for)\s+([A-Za-z_]\w*)\b/i);
+  if (variableMatch) {
+    variable = variableMatch[1];
+    text = text.replace(variableMatch[0], "").trim();
+  }
+
+  if (!Number.isFinite(center)) {
+    center = 0;
+  }
+  if (!Number.isInteger(order) || order < 0 || order > 8) {
+    throw new Error("Taylor mode supports integer degrees from 0 through 8.");
+  }
+
+  text = text
+    .replace(/^of\s+/i, "")
+    .replace(/^f\s*\([A-Za-z_]\w*\)\s*=\s*/i, "")
+    .replace(/^y\s*=\s*/i, "")
+    .trim();
+
+  if (!text) {
+    throw new Error("Use a Taylor request such as taylor sin(x) order=5.");
+  }
+
+  return {
+    expression: text,
+    variable,
+    center,
+    order,
   };
 }
 
