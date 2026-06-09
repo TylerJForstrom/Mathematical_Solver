@@ -69,8 +69,9 @@ The frontend currently supports:
   probability, exponential probability, uniform probability, hypergeometric
   probability, discrete expected value/variance, Bayes theorem, and z-score
   calculations
-- Kaplan-Meier survival analysis for right-censored data with risk sets,
-  censoring counts, standard errors, median survival, and plotted survival curves
+- Kaplan-Meier survival analysis and log-rank tests for right-censored data
+  with risk sets, censoring counts, standard errors, median survival, survival
+  curves, and two-group survival comparisons
 - Markov chains: n-step state distributions and stationary distributions from
   row-stochastic transition matrices
 - Bayesian beta-binomial proportion updates with posterior means, credible
@@ -210,6 +211,8 @@ The same idea works for algebra and calculus:
   shuffles group labels into a reproducible nonparametric p-value.
 - `kaplan-meier times: 5,6,6,8,10; events: 1,1,0,1,0` estimates a
   right-censored survival curve and reports median survival.
+- `log-rank group1 times: 5,6,6,8,10 events: 1,1,0,1,0; group2 times: 4,6,7,9,12 events: 1,0,1,1,0`
+  compares two right-censored survival curves with a chi-square p-value.
 - `bootstrap mean data 10,12,14,16,18 resamples=1000 seed=7 confidence=95`
   builds a reproducible percentile bootstrap interval for the mean.
 - `power mean effect=0.5 n=64 alpha=0.05` estimates statistical power, while
@@ -293,7 +296,7 @@ The demo includes:
   Markov chains, Bayesian beta-binomial updates,
   one-sample/two-sample/paired t tests, one-proportion/two-proportion z tests,
   proportion confidence intervals, permutation tests, ANOVA, chi-square tests,
-  nonparametric rank tests, Kaplan-Meier survival analysis,
+  nonparametric rank tests, Kaplan-Meier survival analysis, log-rank tests,
   power/sample-size analysis, effect sizes, and pairwise follow-up summaries in
   Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,

@@ -988,6 +988,10 @@ export function analyzeStatistics(statement) {
     return analyzeBayesianProportion(statement);
   }
 
+  if (isLogRankQuestion(lower)) {
+    return analyzeLogRankTest(statement);
+  }
+
   if (isSurvivalQuestion(lower)) {
     return analyzeKaplanMeier(statement);
   }
@@ -4319,6 +4323,75 @@ function analyzeKaplanMeier(statement) {
       ["Final standard error", formatNumber(finalRow?.standardError ?? 0)],
     ],
     graph: result.graph,
+  };
+}
+
+function analyzeLogRankTest(statement) {
+  const request = parseLogRankInput(statement);
+  const result = logRankTest(request);
+  const decision = result.pValue < request.alpha
+    ? `reject H0 at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject H0 at alpha=${formatNumber(request.alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode([...request.leftTimes, ...request.rightTimes], [
+      statsMetricNode("O1", result.observedLeft),
+      statsMetricNode("E1", result.expectedLeft),
+      statsMetricNode("X2", result.chiSquare),
+      statsMetricNode("P", result.pValue),
+    ], "LOG-RANK"),
+    answer: `chi-square = ${formatNumber(result.chiSquare)}, p = ${formatNumber(result.pValue)}`,
+    summary: "log-rank test",
+    details: "Two-group survival curve comparison",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([...request.leftTimes, ...request.rightTimes])),
+    steps: [
+      {
+        title: "Read two survival groups",
+        expression: `group1 n=${request.leftTimes.length}, group2 n=${request.rightTimes.length}`,
+        detail: "Each group contributes follow-up times and event indicators.",
+      },
+      {
+        title: "Build pooled event times",
+        expression: `${result.rows.length} event times`,
+        detail: "At each observed event time, the test compares observed group events to expected events under equal survival.",
+      },
+      {
+        title: "Accumulate observed and expected events",
+        expression: `O1 = ${formatNumber(result.observedLeft)}, E1 = ${formatNumber(result.expectedLeft)}`,
+        detail: "Expected events are proportional to each group's risk-set size at that time.",
+      },
+      {
+        title: "Compute chi-square statistic",
+        expression: `X^2 = ${formatNumber(result.chiSquare)}`,
+        detail: "The squared observed-minus-expected difference is scaled by the log-rank variance.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the survival curves differ.",
+      },
+    ],
+    table: {
+      headers: ["Time", "Risk 1", "Risk 2", "Events 1", "Events 2", "Expected 1"],
+      rows: result.rows.map((row) => [
+        formatNumber(row.time),
+        formatNumber(row.riskLeft),
+        formatNumber(row.riskRight),
+        formatNumber(row.eventsLeft),
+        formatNumber(row.eventsRight),
+        formatNumber(row.expectedLeft),
+      ]),
+    },
+    artifacts: [
+      ["Observed group 1 events", formatNumber(result.observedLeft)],
+      ["Expected group 1 events", formatNumber(result.expectedLeft)],
+      ["Variance", formatNumber(result.variance)],
+      ["chi-square", formatNumber(result.chiSquare)],
+      ["p-value", formatNumber(result.pValue)],
+      ["Decision", decision],
+    ],
   };
 }
 
@@ -8852,6 +8925,60 @@ function kaplanMeierEstimate(times, events) {
   };
 }
 
+function logRankTest(request) {
+  const eventTimes = [...new Set([
+    ...request.leftTimes.filter((time, index) => request.leftEvents[index] === 1),
+    ...request.rightTimes.filter((time, index) => request.rightEvents[index] === 1),
+  ])].sort((left, right) => left - right);
+  let observedLeft = 0;
+  let expectedLeft = 0;
+  let variance = 0;
+  const rows = [];
+
+  for (const time of eventTimes) {
+    const riskLeft = request.leftTimes.filter((value) => value >= time).length;
+    const riskRight = request.rightTimes.filter((value) => value >= time).length;
+    const eventsLeft = request.leftTimes.reduce((count, value, index) =>
+      nearlyEqual(value, time) && request.leftEvents[index] === 1 ? count + 1 : count, 0);
+    const eventsRight = request.rightTimes.reduce((count, value, index) =>
+      nearlyEqual(value, time) && request.rightEvents[index] === 1 ? count + 1 : count, 0);
+    const totalRisk = riskLeft + riskRight;
+    const totalEvents = eventsLeft + eventsRight;
+    if (totalRisk <= 0 || totalEvents <= 0) {
+      continue;
+    }
+
+    const expected = (totalEvents * riskLeft) / totalRisk;
+    const varianceTerm = totalRisk > 1
+      ? (riskLeft * riskRight * totalEvents * (totalRisk - totalEvents)) / (totalRisk ** 2 * (totalRisk - 1))
+      : 0;
+    observedLeft += eventsLeft;
+    expectedLeft += expected;
+    variance += varianceTerm;
+    rows.push({
+      time: normalizeNumber(time),
+      riskLeft,
+      riskRight,
+      eventsLeft,
+      eventsRight,
+      expectedLeft: normalizeNumber(expected),
+    });
+  }
+
+  if (!(variance > 0)) {
+    throw new Error("Log-rank test needs at least one comparable event with positive variance.");
+  }
+  const chiSquare = normalizeNumber((observedLeft - expectedLeft) ** 2 / variance);
+  return {
+    rows,
+    observedLeft: normalizeNumber(observedLeft),
+    expectedLeft: normalizeNumber(expectedLeft),
+    variance: normalizeNumber(variance),
+    chiSquare,
+    pValue: normalizeNumber(chiSquareRightTailApprox(chiSquare, 1)),
+  };
+}
+
 function bootstrapStatistic(values, statistic) {
   if (statistic === "median") {
     return median([...values].sort((left, right) => left - right));
@@ -9334,6 +9461,68 @@ function parseKaplanMeierInput(text) {
   }
 
   return { times, events };
+}
+
+function parseLogRankInput(text) {
+  const cleaned = text
+    .replace(/\blog-?rank\b/gi, "")
+    .replace(/\bsurvival\b/gi, "")
+    .replace(/\btest\b/gi, "");
+  const alpha = readNamedNumber(text, ["alpha"], 0.05);
+  if (!(alpha > 0 && alpha < 1)) {
+    throw new Error("Log-rank alpha must be between 0 and 1.");
+  }
+
+  const groupPattern = /(?:group|sample)\s*([12])\s*(?::|=)?\s*times?\s*[:=]\s*([^;]+?)\s+events?\s*[:=]\s*([^;]+)/gi;
+  const groups = {};
+  for (const match of cleaned.matchAll(groupPattern)) {
+    groups[match[1]] = {
+      times: parseNumbers(match[2]),
+      events: parseNumbers(match[3]),
+    };
+  }
+
+  if (!groups[1] || !groups[2]) {
+    const chunks = cleaned.split(";").map((chunk) => chunk.trim()).filter(Boolean);
+    if (chunks.length >= 2) {
+      for (let index = 0; index < 2; index += 1) {
+        const timesMatch = chunks[index].match(/\btimes?\s*[:=]\s*([^;]+?)(?=\s+events?\b|$)/i);
+        const eventsMatch = chunks[index].match(/\bevents?\s*[:=]\s*([^;]+)/i);
+        if (timesMatch && eventsMatch) {
+          groups[String(index + 1)] = {
+            times: parseNumbers(timesMatch[1]),
+            events: parseNumbers(eventsMatch[1]),
+          };
+        }
+      }
+    }
+  }
+
+  if (!groups[1] || !groups[2]) {
+    throw new Error("Log-rank needs group1 times/events and group2 times/events.");
+  }
+  validateSurvivalGroup(groups[1].times, groups[1].events, "Log-rank group 1");
+  validateSurvivalGroup(groups[2].times, groups[2].events, "Log-rank group 2");
+
+  return {
+    leftTimes: groups[1].times,
+    leftEvents: groups[1].events,
+    rightTimes: groups[2].times,
+    rightEvents: groups[2].events,
+    alpha,
+  };
+}
+
+function validateSurvivalGroup(times, events, context) {
+  if (times.length < 2 || events.length < 2 || times.length !== events.length) {
+    throw new Error(`${context} needs matching times and event indicators with at least two observations.`);
+  }
+  if (times.some((time) => !Number.isFinite(time) || time <= 0)) {
+    throw new Error(`${context} follow-up times must be finite positive numbers.`);
+  }
+  if (events.some((event) => !(event === 0 || event === 1))) {
+    throw new Error(`${context} event indicators must be 1 for event or 0 for censored.`);
+  }
 }
 
 function parseConfidenceLevel(text, fallback) {
@@ -11017,6 +11206,12 @@ function isSurvivalQuestion(lower) {
     lower.includes("censored");
 }
 
+function isLogRankQuestion(lower) {
+  return lower.includes("log-rank") ||
+    lower.includes("logrank") ||
+    lower.includes("log rank");
+}
+
 function isMultivariableQuestion(lower) {
   return lower.includes("partial derivative") ||
     lower.startsWith("partial ") ||
@@ -11239,6 +11434,9 @@ function isStatisticsQuestion(lower) {
     "survival curve",
     "survival times",
     "censored",
+    "log-rank",
+    "logrank",
+    "log rank",
     "regression",
     "correlation",
     "covariance",
