@@ -222,6 +222,15 @@ runTest("statistics mode computes linear regression", () => {
   assert.equal(result.answer, "y = 1.5x + 0.333333");
 });
 
+runTest("statistics mode computes polynomial regression", () => {
+  const result = analyzeStatistics("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5");
+
+  assert.equal(result.summary, "polynomial regression");
+  assert.equal(result.answer, "y = 1 + x^2; prediction = 26");
+  assert.equal(artifactValue(result, "R squared"), "1");
+  assert.deepEqual(result.table.rows[3], ["4", "4", "17", "17", "0"]);
+});
+
 runTest("statistics mode computes multiple linear regression", () => {
   const result = analyzeStatistics("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
 
@@ -674,6 +683,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("newton cooling ambient=70 initial=100 k=0.2 t=10").summary, "Newton cooling");
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
+  assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
   assert.equal(analyzeUniversal("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5").summary, "logistic regression");
   assert.equal(analyzeUniversal("pca x: 1,2,3,4; y: 2,3,5,8").summary, "principal component analysis");

@@ -1062,6 +1062,9 @@ export function analyzeStatistics(statement) {
     parsePairs(statement).length >= 2 ||
     parseXYLists(statement)
   ) {
+    if (isPolynomialRegressionQuestion(lower)) {
+      return analyzePolynomialRegression(statement);
+    }
     if (isLogisticRegressionQuestion(lower)) {
       return analyzeLogisticRegression(statement);
     }
@@ -3788,6 +3791,97 @@ function analyzeRegression(statement) {
       ["Intercept", formatNumber(intercept)],
       ["Correlation r", formatNumber(r)],
       ["R squared", formatNumber(rSquared)],
+    ],
+  };
+}
+
+function analyzePolynomialRegression(statement) {
+  const request = parsePolynomialRegressionInput(statement);
+  const design = request.x.map((x) =>
+    Array.from({ length: request.degree + 1 }, (_, power) => x ** power),
+  );
+  const transposed = transposeMatrix(design);
+  const normalMatrix = multiplyMatrices(transposed, design);
+  const normalVector = multiplyMatrixVector(transposed, request.y);
+  const coefficients = solveLinearSystem(normalMatrix, normalVector).map(normalizeNumber);
+  const fitted = design.map((row) => normalizeNumber(dotProduct(row, coefficients)));
+  const residuals = request.y.map((value, index) => normalizeNumber(value - fitted[index]));
+  const meanY = mean(request.y);
+  const sse = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const tss = request.y.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
+  const rSquared = nearlyEqual(tss, 0) ? 1 : 1 - sse / tss;
+  const equation = formatPolynomialRegressionEquation(coefficients, "x");
+  const prediction = Number.isFinite(request.prediction)
+    ? evaluatePolynomialRegression(coefficients, request.prediction)
+    : Number.NaN;
+  const hasPrediction = Number.isFinite(prediction);
+  const tree = {
+    kind: "statsRegression",
+    label: "POLY",
+    children: [
+      statsDatasetNode(request.x, [], "X"),
+      statsDatasetNode(request.y, [], "Y"),
+      statsMetricNode("degree", request.degree),
+      statsMetricNode("R2", rSquared),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: hasPrediction
+      ? `${equation}; prediction = ${formatNumber(prediction)}`
+      : equation,
+    summary: "polynomial regression",
+    details: `${request.x.length} observations, degree ${request.degree}`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read paired data and degree",
+        expression: `degree = ${request.degree}, points = ${request.x.map((x, index) => `(${formatNumber(x)}, ${formatNumber(request.y[index])})`).join(", ")}`,
+        detail: "Polynomial regression fits a nonlinear curve to paired data.",
+      },
+      {
+        title: "Build polynomial design matrix",
+        expression: `${request.x.length} x ${request.degree + 1}`,
+        detail: "Each row contains powers 1, x, x^2, and so on up to the requested degree.",
+      },
+      {
+        title: "Solve least-squares system",
+        expression: equation,
+        detail: "The coefficients solve the normal equations for the smallest squared residuals.",
+      },
+      {
+        title: "Measure curve fit",
+        expression: `R^2 = ${formatNumber(rSquared)}, SSE = ${formatNumber(sse)}`,
+        detail: "R squared compares the fitted curve against using only the mean response.",
+      },
+      ...(hasPrediction
+        ? [{
+            title: "Predict new response",
+            expression: `prediction = ${formatNumber(prediction)}`,
+            detail: "The new x value is evaluated through the fitted polynomial.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Obs", "x", "Actual", "Fitted", "Residual"],
+      rows: request.y.map((value, index) => [
+        String(index + 1),
+        formatNumber(request.x[index]),
+        formatNumber(value),
+        formatNumber(fitted[index]),
+        formatNumber(residuals[index]),
+      ]),
+    },
+    artifacts: [
+      ["Equation", equation],
+      ["Degree", formatNumber(request.degree)],
+      ...coefficients.map((coefficient, index) => [`Coefficient x^${index}`, formatNumber(coefficient)]),
+      ["SSE", formatNumber(sse)],
+      ["R squared", formatNumber(rSquared)],
+      ...(hasPrediction ? [["Prediction", formatNumber(prediction)]] : []),
     ],
   };
 }
@@ -8151,6 +8245,63 @@ function multivariateObservationTable(dataset) {
   };
 }
 
+function parsePolynomialRegressionInput(text) {
+  const parsedLists = parseXYLists(text);
+  const pairs = parsedLists ? zipPairs(parsedLists.x, parsedLists.y) : parsePairs(text);
+  if (pairs.length < 3) {
+    throw new Error("Polynomial regression needs at least three points, such as quadratic regression degree=2 for (1,2), (2,5), (3,10).");
+  }
+
+  const degree = readPolynomialRegressionDegree(text);
+  if (!Number.isSafeInteger(degree) || degree < 1 || degree > 5) {
+    throw new Error("Polynomial regression supports integer degree values from 1 through 5.");
+  }
+  if (pairs.length <= degree) {
+    throw new Error("Polynomial regression needs more observations than polynomial coefficients.");
+  }
+  const distinctX = new Set(pairs.map((pair) => formatNumber(pair.x)));
+  if (distinctX.size <= degree) {
+    throw new Error("Polynomial regression needs at least degree + 1 distinct x values.");
+  }
+
+  return {
+    degree,
+    x: pairs.map((pair) => pair.x),
+    y: pairs.map((pair) => pair.y),
+    prediction: parsePolynomialRegressionPrediction(text),
+  };
+}
+
+function readPolynomialRegressionDegree(text) {
+  const explicit = readNamedNumber(text, ["degree", "deg"], Number.NaN);
+  if (Number.isFinite(explicit)) {
+    return explicit;
+  }
+  const orderMatch = text.match(/\b(?:order|power)\s+(\d+)\b/i);
+  if (orderMatch) {
+    return Number(orderMatch[1]);
+  }
+  const lower = text.toLowerCase();
+  if (lower.includes("quadratic")) return 2;
+  if (lower.includes("cubic")) return 3;
+  if (lower.includes("quartic")) return 4;
+  if (lower.includes("quintic")) return 5;
+  return 2;
+}
+
+function parsePolynomialRegressionPrediction(text) {
+  const match = text.match(/\bpredict\b(.+)$/i);
+  if (!match) {
+    return Number.NaN;
+  }
+  const named = readNamedNumber(match[1], ["x"], Number.NaN);
+  if (Number.isFinite(named)) {
+    return named;
+  }
+  const numbers = parseNumbers(match[1]);
+  return numbers.length ? numbers[0] : Number.NaN;
+}
+
 function parseKMeansInput(text) {
   const points = parsePairs(text).map((point) => [point.x, point.y]);
   if (points.length < 2) {
@@ -8309,6 +8460,24 @@ function formatMultipleRegressionEquation(coefficients, predictorNames) {
     expression += ` ${formatSignedTerm(coefficients[index + 1], predictorNames[index])}`;
   }
   return expression;
+}
+
+function formatPolynomialRegressionEquation(coefficients, variable) {
+  let expression = `y = ${formatNumber(coefficients[0])}`;
+  for (let power = 1; power < coefficients.length; power += 1) {
+    const coefficient = normalizeNumber(coefficients[power]);
+    if (nearlyEqual(coefficient, 0)) continue;
+    const sign = coefficient < 0 ? "-" : "+";
+    const magnitude = Math.abs(coefficient);
+    const coefficientText = nearlyEqual(magnitude, 1) ? "" : formatNumber(magnitude);
+    const variableText = power === 1 ? variable : `${variable}^${power}`;
+    expression += ` ${sign} ${coefficientText}${variableText}`;
+  }
+  return expression;
+}
+
+function evaluatePolynomialRegression(coefficients, x) {
+  return normalizeNumber(coefficients.reduce((sum, coefficient, power) => sum + coefficient * x ** power, 0));
 }
 
 function formatLogisticRegressionEquation(coefficients, predictorNames) {
@@ -8933,6 +9102,15 @@ function isMultipleRegressionQuestion(lower, statement) {
     /\bx1\s*[:=].*;\s*x2\s*[:=]/is.test(statement);
 }
 
+function isPolynomialRegressionQuestion(lower) {
+  return lower.includes("polynomial regression") ||
+    lower.includes("quadratic regression") ||
+    lower.includes("cubic regression") ||
+    lower.includes("quartic regression") ||
+    lower.includes("curve fit") ||
+    lower.includes("curve fitting");
+}
+
 function isLogisticRegressionQuestion(lower) {
   return lower.includes("logistic regression") ||
     lower.includes("binary regression") ||
@@ -9126,6 +9304,11 @@ function isStatisticsQuestion(lower) {
     "covariance",
     "pca",
     "principal component",
+    "polynomial regression",
+    "quadratic regression",
+    "cubic regression",
+    "curve fit",
+    "curve fitting",
     "logistic regression",
     "binary regression",
     "logit regression",

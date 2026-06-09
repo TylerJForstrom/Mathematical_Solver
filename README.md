@@ -44,6 +44,8 @@ The frontend currently supports:
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression/correlation for coordinate pairs, plus multiple linear
   regression with several predictor lists, residuals, R squared, and prediction
+- Polynomial regression for nonlinear curve fitting with degree selection,
+  residuals, R squared, and prediction
 - Logistic regression for binary outcomes with fitted probabilities,
   classification accuracy, McFadden R squared, and probability prediction
 - Multivariate statistics: covariance matrices, correlation matrices, and
@@ -154,6 +156,8 @@ The same idea works for algebra and calculus:
 - `ode dy/dt = 0.3y y0=2 t=5`, `newton cooling ambient=70 initial=100 k=0.2 t=10`,
   and `logistic r=0.4 K=100 y0=10 t=8` solve closed-form differential equations.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
+- `quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5`
+  fits a nonlinear polynomial curve and predicts `26`.
 - `multiple regression y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a least-squares model with multiple predictors.
 - `logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5`
@@ -246,7 +250,8 @@ The demo includes:
 - Partial derivatives, gradients, and directional derivatives through Ask mode
 - Taylor/Maclaurin approximations through Ask mode
 - Complex arithmetic and complex quadratic roots through Ask mode
-- Dataset summaries, confidence intervals, regression/correlation, multiple regression,
+- Dataset summaries, confidence intervals, regression/correlation, polynomial regression,
+  multiple regression,
   logistic regression,
   covariance/correlation matrices, 2D PCA, k-means clustering,
   binomial probability,
