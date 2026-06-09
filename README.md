@@ -15,6 +15,8 @@ The frontend currently supports:
 - Rational-root polynomial factoring for quadratics, cubics, and higher-degree
   one-variable polynomials with rational roots
 - Exact combinatorics for factorials, permutations, and combinations
+- Number theory tools: gcd, lcm, prime factorization, modular powers,
+  modular inverses, and Chinese remainder theorem systems
 - One-variable polynomial inequalities with sign charts and interval notation
 - Linear and quadratic equation solving, including complex roots
 - Complex-number arithmetic and elementary complex functions through Ask mode
@@ -89,6 +91,10 @@ The same idea works for algebra and calculus:
 - `factor x^3 - 6x^2 + 11x - 6` uses rational roots and synthetic division
   to produce `(x - 1)(x - 2)(x - 3)`.
 - `10 choose 3` uses exact integer combinatorics and returns `C(10, 3) = 120`.
+- `gcd 84 126` and `lcm 36 84` run integer divisibility algorithms.
+- `prime factors of 84` returns `84 = 2^2 * 3 * 7`.
+- `7^128 mod 13`, `mod inverse 3 mod 11`, and
+  `crt x=2 mod 3; x=3 mod 5; x=2 mod 7` solve modular arithmetic problems.
 - `solve x^2 - 5x + 6 > 0` finds critical points and returns
   `x in (-inf, 2) U (3, inf)`.
 - `x^3` becomes a power node, so the derivative engine can apply the power rule.
@@ -182,6 +188,7 @@ The demo includes:
 - Truth tables for logic mode
 - Polynomial factoring through Ask mode
 - Exact combinatorics through Ask mode
+- Number theory and modular arithmetic through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
 - Numeric limits through Ask mode
 - Taylor/Maclaurin approximations through Ask mode

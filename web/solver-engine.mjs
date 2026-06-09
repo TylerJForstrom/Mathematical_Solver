@@ -570,6 +570,185 @@ export function analyzeCombinatorics(statement) {
   };
 }
 
+export function analyzeNumberTheory(statement) {
+  const request = parseNumberTheoryInput(statement);
+  const steps = [
+    {
+      title: "Read number theory request",
+      expression: request.expression,
+      detail: "The solver identifies the integer operation and validates the inputs.",
+    },
+  ];
+  let answer;
+  let summary;
+  let details;
+  let artifacts;
+  let table;
+  let treeChildren;
+
+  if (request.operation === "gcd") {
+    const result = request.values.reduce((current, value) => gcdInt(current, value));
+    answer = `gcd(${request.values.join(", ")}) = ${result}`;
+    summary = "greatest common divisor";
+    details = "Euclidean algorithm";
+    artifacts = [
+      ["Values", request.values.join(", ")],
+      ["GCD", String(result)],
+    ];
+    table = {
+      headers: ["Value", "Running gcd"],
+      rows: runningNumberTheoryRows(request.values, gcdInt),
+    };
+    treeChildren = [
+      ...request.values.map((value, index) => statsMetricNode(`n${index + 1}`, value)),
+      statsMetricNode("gcd", result),
+    ];
+    steps.push({
+      title: "Apply Euclidean algorithm",
+      expression: answer,
+      detail: "Repeated remainders reduce the inputs to their greatest shared factor.",
+    });
+  } else if (request.operation === "lcm") {
+    const result = request.values.reduce((current, value) => lcmInt(current, value));
+    answer = `lcm(${request.values.join(", ")}) = ${result}`;
+    summary = "least common multiple";
+    details = "GCD-based multiple";
+    artifacts = [
+      ["Values", request.values.join(", ")],
+      ["LCM", String(result)],
+    ];
+    table = {
+      headers: ["Value", "Running lcm"],
+      rows: runningNumberTheoryRows(request.values, lcmInt),
+    };
+    treeChildren = [
+      ...request.values.map((value, index) => statsMetricNode(`n${index + 1}`, value)),
+      statsMetricNode("lcm", result),
+    ];
+    steps.push({
+      title: "Use gcd relationship",
+      expression: "lcm(a,b) = |ab| / gcd(a,b)",
+      detail: "The solver folds the input list one pair at a time.",
+    });
+  } else if (request.operation === "prime-factorization") {
+    const factors = primeFactorization(request.value);
+    const factorText = formatPrimeFactorization(factors);
+    answer = `${request.value} = ${factorText}`;
+    summary = "prime factorization";
+    details = "Trial division over integers";
+    artifacts = [
+      ["Value", String(request.value)],
+      ["Prime factors", factorText],
+    ];
+    table = {
+      headers: ["Prime", "Exponent"],
+      rows: factors.map((factor) => [String(factor.prime), String(factor.exponent)]),
+    };
+    treeChildren = [
+      statsMetricNode("n", request.value),
+      ...factors.map((factor) => statsMetricNode(String(factor.prime), factor.exponent)),
+    ];
+    steps.push({
+      title: "Divide by prime factors",
+      expression: factorText,
+      detail: "The solver tests increasing divisors and records prime exponents.",
+    });
+  } else if (request.operation === "modpow") {
+    const result = modularPower(request.base, request.exponent, request.modulus);
+    answer = `${request.base}^${request.exponent} mod ${request.modulus} = ${result}`;
+    summary = "modular exponentiation";
+    details = "Repeated squaring";
+    artifacts = [
+      ["Base", String(request.base)],
+      ["Exponent", String(request.exponent)],
+      ["Modulus", String(request.modulus)],
+      ["Result", String(result)],
+    ];
+    treeChildren = [
+      statsMetricNode("base", request.base),
+      statsMetricNode("exp", request.exponent),
+      statsMetricNode("mod", request.modulus),
+      statsMetricNode("result", result),
+    ];
+    steps.push({
+      title: "Reduce powers modulo n",
+      expression: answer,
+      detail: "Repeated squaring keeps the intermediate values small.",
+    });
+  } else if (request.operation === "modinverse") {
+    const inverse = modularInverse(request.value, request.modulus);
+    answer = inverse === null
+      ? `${request.value} has no inverse mod ${request.modulus}`
+      : `${request.value}^-1 mod ${request.modulus} = ${inverse}`;
+    summary = inverse === null ? "no modular inverse" : "modular inverse";
+    details = "Extended Euclidean algorithm";
+    artifacts = [
+      ["Value", String(request.value)],
+      ["Modulus", String(request.modulus)],
+      ["GCD", String(gcdInt(request.value, request.modulus))],
+      ["Inverse", inverse === null ? "none" : String(inverse)],
+    ];
+    treeChildren = [
+      statsMetricNode("a", request.value),
+      statsMetricNode("mod", request.modulus),
+      statsMetricNode("gcd", gcdInt(request.value, request.modulus)),
+      statsMetricNode("inverse", inverse ?? 0),
+    ];
+    steps.push({
+      title: "Run extended Euclidean algorithm",
+      expression: answer,
+      detail: inverse === null
+        ? "An inverse exists only when the value and modulus are relatively prime."
+        : "The Bezout coefficient is normalized into the modular inverse.",
+    });
+  } else {
+    const result = solveChineseRemainder(request.congruences);
+    answer = result
+      ? `x = ${result.remainder} mod ${result.modulus}`
+      : "no simultaneous solution";
+    summary = result ? "Chinese remainder theorem" : "inconsistent congruences";
+    details = "System of modular congruences";
+    artifacts = [
+      ["Congruences", request.congruences.map((item) => `x = ${item.remainder} mod ${item.modulus}`).join("; ")],
+      ["Solution", answer],
+    ];
+    table = {
+      headers: ["Remainder", "Modulus"],
+      rows: request.congruences.map((item) => [String(item.remainder), String(item.modulus)]),
+    };
+    treeChildren = [
+      ...request.congruences.map((item) => statsMetricNode(`mod ${item.modulus}`, item.remainder)),
+      statsMetricNode("modulus", result?.modulus ?? 0),
+    ];
+    steps.push({
+      title: "Combine congruences",
+      expression: answer,
+      detail: result
+        ? "Congruences are merged pairwise with modular inverses."
+        : "At least one pair of congruences conflicts modulo their shared divisor.",
+    });
+  }
+
+  const tree = {
+    kind: "statsDistribution",
+    label: "NUMBER",
+    children: treeChildren,
+  };
+
+  return {
+    mode: "numberTheory",
+    tree,
+    answer,
+    summary,
+    details,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps,
+    table,
+    artifacts,
+  };
+}
+
 export function analyzeStatistics(statement) {
   const lower = statement.toLowerCase();
 
@@ -738,6 +917,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isCombinatoricsQuestion(lower)) {
     routed = analyzeCombinatorics(question);
     routedLabel = "Combinatorics";
+  } else if (isNumberTheoryQuestion(lower)) {
+    routed = analyzeNumberTheory(question);
+    routedLabel = "Number theory";
   } else if (isStatisticsQuestion(lower)) {
     routed = analyzeStatistics(question);
     routedLabel = "Statistics";
@@ -4775,6 +4957,128 @@ function parseCombinatoricsInput(text) {
   return { operation, n, k };
 }
 
+function parseNumberTheoryInput(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes("chinese remainder") || lower.startsWith("crt ") || lower.includes("congruence system")) {
+    const congruences = parseCongruences(text);
+    if (congruences.length < 2) {
+      throw new Error("CRT needs at least two congruences, such as crt x=2 mod 3; x=3 mod 5.");
+    }
+    return {
+      operation: "crt",
+      congruences,
+      expression: congruences.map((item) => `x = ${item.remainder} mod ${item.modulus}`).join("; "),
+    };
+  }
+
+  if (lower.includes("mod inverse") || lower.includes("modular inverse")) {
+    const numbers = parseNumbers(text);
+    const value = readNamedInteger(text, ["value", "a", "base"], numbers[0], "Modular inverse value");
+    const modulus = readNamedInteger(text, ["mod", "modulus", "m"], numbers[1], "Modular inverse modulus");
+    validateModulus(modulus);
+    return {
+      operation: "modinverse",
+      value,
+      modulus,
+      expression: `${value} inverse mod ${modulus}`,
+    };
+  }
+
+  if (
+    lower.includes("modpow") ||
+    lower.includes("powmod") ||
+    lower.includes("modular exponent") ||
+    /\b\d+\s*\^\s*\d+\s+mod\s+\d+\b/i.test(lower)
+  ) {
+    const numbers = parseNumbers(text);
+    const base = readNamedInteger(text, ["base", "a"], numbers[0], "Modular exponentiation base");
+    const exponent = readNamedInteger(text, ["exp", "exponent", "power"], numbers[1], "Modular exponentiation exponent");
+    const modulus = readNamedInteger(text, ["mod", "modulus", "m"], numbers[2], "Modular exponentiation modulus");
+    if (exponent < 0) {
+      throw new Error("Modular exponentiation needs a nonnegative exponent.");
+    }
+    validateModulus(modulus);
+    return {
+      operation: "modpow",
+      base,
+      exponent,
+      modulus,
+      expression: `${base}^${exponent} mod ${modulus}`,
+    };
+  }
+
+  if (lower.startsWith("gcd ") || lower.includes("greatest common divisor")) {
+    const values = parseIntegerValues(text, "GCD");
+    if (values.length < 2) {
+      throw new Error("GCD needs at least two integers.");
+    }
+    return {
+      operation: "gcd",
+      values,
+      expression: `gcd(${values.join(", ")})`,
+    };
+  }
+
+  if (lower.startsWith("lcm ") || lower.includes("least common multiple")) {
+    const values = parseIntegerValues(text, "LCM");
+    if (values.length < 2) {
+      throw new Error("LCM needs at least two integers.");
+    }
+    return {
+      operation: "lcm",
+      values,
+      expression: `lcm(${values.join(", ")})`,
+    };
+  }
+
+  const numbers = parseNumbers(text);
+  const value = readNamedInteger(text, ["n", "value"], numbers[0], "Prime factorization value");
+  if (value < 2) {
+    throw new Error("Prime factorization needs an integer greater than 1.");
+  }
+  return {
+    operation: "prime-factorization",
+    value,
+    expression: `factor ${value}`,
+  };
+}
+
+function parseIntegerValues(text, context) {
+  const values = parseNumbers(text);
+  if (values.some((value) => !Number.isSafeInteger(value))) {
+    throw new Error(`${context} needs safe integer inputs.`);
+  }
+  return values;
+}
+
+function readNamedInteger(text, names, fallback, context) {
+  const value = readNamedNumber(text, names, fallback);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`${context} must be a safe integer.`);
+  }
+  return value;
+}
+
+function validateModulus(modulus) {
+  if (!Number.isSafeInteger(modulus) || modulus <= 1) {
+    throw new Error("Modular arithmetic needs an integer modulus greater than 1.");
+  }
+}
+
+function parseCongruences(text) {
+  const congruences = [];
+  for (const match of text.matchAll(/(?:x\s*(?:=|\u2261|congruent\s+to)\s*)?([-+]?\d+)\s*(?:mod|modulo)\s*(\d+)/gi)) {
+    const remainder = Number(match[1]);
+    const modulus = Number(match[2]);
+    validateModulus(modulus);
+    congruences.push({
+      remainder: modNormalize(remainder, modulus),
+      modulus,
+    });
+  }
+  return congruences;
+}
+
 function extractAlpha(text) {
   const match = text.match(/\balpha\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
   const alpha = match ? Number(match[1]) : 0.05;
@@ -5332,6 +5636,137 @@ function hypergeometricProbability(population, successes, draws, k) {
   ) / combination(population, draws);
 }
 
+function gcdInt(left, right) {
+  let a = Math.abs(left);
+  let b = Math.abs(right);
+  while (b !== 0) {
+    const remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+  return a;
+}
+
+function lcmInt(left, right) {
+  if (left === 0 || right === 0) {
+    return 0;
+  }
+  return Math.abs((left / gcdInt(left, right)) * right);
+}
+
+function extendedGcd(left, right) {
+  let oldR = left;
+  let r = right;
+  let oldS = 1;
+  let s = 0;
+  let oldT = 0;
+  let t = 1;
+
+  while (r !== 0) {
+    const quotient = Math.trunc(oldR / r);
+    [oldR, r] = [r, oldR - quotient * r];
+    [oldS, s] = [s, oldS - quotient * s];
+    [oldT, t] = [t, oldT - quotient * t];
+  }
+
+  return {
+    gcd: Math.abs(oldR),
+    x: oldS,
+    y: oldT,
+  };
+}
+
+function modularInverse(value, modulus) {
+  const normalized = modNormalize(value, modulus);
+  const result = extendedGcd(normalized, modulus);
+  if (result.gcd !== 1) {
+    return null;
+  }
+  return modNormalize(result.x, modulus);
+}
+
+function modularPower(base, exponent, modulus) {
+  let result = 1n;
+  let factor = BigInt(modNormalize(base, modulus));
+  let power = BigInt(exponent);
+  const mod = BigInt(modulus);
+
+  while (power > 0n) {
+    if (power % 2n === 1n) {
+      result = (result * factor) % mod;
+    }
+    factor = (factor * factor) % mod;
+    power /= 2n;
+  }
+
+  return Number(result);
+}
+
+function primeFactorization(value) {
+  let remaining = value;
+  const factors = [];
+  for (let divisor = 2; divisor * divisor <= remaining; divisor += divisor === 2 ? 1 : 2) {
+    if (remaining % divisor !== 0) {
+      continue;
+    }
+    let exponent = 0;
+    while (remaining % divisor === 0) {
+      remaining /= divisor;
+      exponent += 1;
+    }
+    factors.push({ prime: divisor, exponent });
+  }
+  if (remaining > 1) {
+    factors.push({ prime: remaining, exponent: 1 });
+  }
+  return factors;
+}
+
+function solveChineseRemainder(congruences) {
+  let remainder = congruences[0].remainder;
+  let modulus = congruences[0].modulus;
+
+  for (const next of congruences.slice(1)) {
+    const divisor = gcdInt(modulus, next.modulus);
+    const difference = next.remainder - remainder;
+    if (difference % divisor !== 0) {
+      return null;
+    }
+
+    const leftModulus = modulus / divisor;
+    const rightModulus = next.modulus / divisor;
+    const inverse = modularInverse(leftModulus, rightModulus);
+    if (inverse === null) {
+      return null;
+    }
+    const multiplier = modNormalize((difference / divisor) * inverse, rightModulus);
+    remainder = modNormalize(remainder + modulus * multiplier, modulus * rightModulus);
+    modulus *= rightModulus;
+  }
+
+  return { remainder, modulus };
+}
+
+function modNormalize(value, modulus) {
+  return ((value % modulus) + modulus) % modulus;
+}
+
+function formatPrimeFactorization(factors) {
+  return factors
+    .map((factor) => factor.exponent === 1 ? String(factor.prime) : `${factor.prime}^${factor.exponent}`)
+    .join(" * ");
+}
+
+function runningNumberTheoryRows(values, combiner) {
+  let current = Math.abs(values[0]);
+  return values.map((value, index) => {
+    if (index > 0) {
+      current = combiner(current, value);
+    }
+    return [String(value), String(current)];
+  });
+}
+
 function factorial(value) {
   let result = 1;
   for (let index = 2; index <= value; index += 1) {
@@ -5639,6 +6074,24 @@ function isCombinatoricsQuestion(lower) {
     lower.includes("npr") ||
     lower.includes("factorial") ||
     /^\s*\d+\s*!\s*$/.test(lower);
+}
+
+function isNumberTheoryQuestion(lower) {
+  return lower.startsWith("gcd ") ||
+    lower.includes("greatest common divisor") ||
+    lower.startsWith("lcm ") ||
+    lower.includes("least common multiple") ||
+    lower.includes("prime factor") ||
+    lower.includes("integer factorization") ||
+    lower.includes("mod inverse") ||
+    lower.includes("modular inverse") ||
+    lower.includes("modpow") ||
+    lower.includes("powmod") ||
+    lower.includes("modular exponent") ||
+    lower.includes("chinese remainder") ||
+    lower.startsWith("crt ") ||
+    lower.includes("congruence system") ||
+    /\b\d+\s*\^\s*\d+\s+mod\s+\d+\b/i.test(lower);
 }
 
 function isInequalityQuestion(question) {

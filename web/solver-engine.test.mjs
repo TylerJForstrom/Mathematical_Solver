@@ -13,6 +13,7 @@ import {
   analyzeLogic,
   analyzeMatrix,
   analyzeNumerical,
+  analyzeNumberTheory,
   analyzeOptimization,
   analyzeSimplification,
   analyzeStatistics,
@@ -75,6 +76,15 @@ runTest("combinatorics mode computes exact counts", () => {
   assert.equal(analyzeCombinatorics("10 choose 3").answer, "C(10, 3) = 120");
   assert.equal(analyzeCombinatorics("permutation n=10 k=3").answer, "P(10, 3) = 720");
   assert.equal(analyzeCombinatorics("6!").answer, "6! = 720");
+});
+
+runTest("number theory mode computes integer operations", () => {
+  assert.equal(analyzeNumberTheory("gcd 84 126").answer, "gcd(84, 126) = 42");
+  assert.equal(analyzeNumberTheory("lcm 36 84").answer, "lcm(36, 84) = 252");
+  assert.equal(analyzeNumberTheory("prime factors of 84").answer, "84 = 2^2 * 3 * 7");
+  assert.equal(analyzeNumberTheory("7^128 mod 13").answer, "7^128 mod 13 = 3");
+  assert.equal(analyzeNumberTheory("mod inverse 3 mod 11").answer, "3^-1 mod 11 = 4");
+  assert.equal(analyzeNumberTheory("crt x=2 mod 3; x=3 mod 5; x=2 mod 7").answer, "x = 23 mod 105");
 });
 
 runTest("inequality mode solves strict quadratic inequalities", () => {
@@ -505,6 +515,9 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("det [[1,2],[3,4]]").summary, "determinant");
   assert.equal(analyzeUniversal("factor x^2 - 5x + 6").answer, "(x - 2)(x - 3)");
   assert.equal(analyzeUniversal("10 choose 3").answer, "C(10, 3) = 120");
+  assert.equal(analyzeUniversal("gcd 84 126").answer, "gcd(84, 126) = 42");
+  assert.equal(analyzeUniversal("mod inverse 3 mod 11").summary, "modular inverse");
+  assert.equal(analyzeUniversal("crt x=2 mod 3; x=3 mod 5; x=2 mod 7").summary, "Chinese remainder theorem");
   assert.equal(analyzeUniversal("solve x^2 - 5x + 6 > 0").answer, "x in (-inf, 2) U (3, inf)");
   assert.equal(analyzeUniversal("integrate x^2").summary, "indefinite integral");
   assert.equal(analyzeUniversal("integrate x^2 from 0 to 3").summary, "definite integral");
