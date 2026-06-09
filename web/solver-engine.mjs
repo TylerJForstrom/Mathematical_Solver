@@ -1058,6 +1058,9 @@ export function analyzeStatistics(statement) {
     parsePairs(statement).length >= 2 ||
     parseXYLists(statement)
   ) {
+    if (isLogisticRegressionQuestion(lower)) {
+      return analyzeLogisticRegression(statement);
+    }
     if (isMultipleRegressionQuestion(lower, statement)) {
       return analyzeMultipleRegression(statement);
     }
@@ -3882,6 +3885,102 @@ function analyzeMultipleRegression(statement) {
   };
 }
 
+function analyzeLogisticRegression(statement) {
+  const request = parseLogisticRegressionInput(statement);
+  const design = request.y.map((_, row) => [
+    1,
+    ...request.predictors.map((predictor) => predictor.values[row]),
+  ]);
+  const fit = fitLogisticRegression(design, request.y);
+  const probabilities = fit.probabilities;
+  const predictedClasses = probabilities.map((probability) => (probability >= 0.5 ? 1 : 0));
+  const correct = predictedClasses.filter((value, index) => value === request.y[index]).length;
+  const accuracy = correct / request.y.length;
+  const nullProbability = mean(request.y);
+  const nullLogLikelihood = request.y.reduce((sum, value) => {
+    const probability = clampLogLikelihoodProbability(value === 1 ? nullProbability : 1 - nullProbability);
+    return sum + Math.log(probability);
+  }, 0);
+  const deviance = -2 * fit.logLikelihood;
+  const mcfaddenR2 = nullLogLikelihood < 0 ? 1 - fit.logLikelihood / nullLogLikelihood : Number.NaN;
+  const equation = formatLogisticRegressionEquation(fit.coefficients, request.predictors.map((predictor) => predictor.name));
+  const hasPrediction = request.prediction.every(Number.isFinite);
+  const predictedProbability = hasPrediction
+    ? logisticSigmoid(dotProduct([1, ...request.prediction], fit.coefficients))
+    : Number.NaN;
+  const tree = {
+    kind: "statsRegression",
+    label: "LOGISTIC",
+    children: [
+      statsDatasetNode(request.y, [], "Y"),
+      ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+      statsMetricNode("LL", fit.logLikelihood),
+      statsMetricNode("ACC", accuracy),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: hasPrediction
+      ? `${equation}; P(y=1) = ${formatNumber(predictedProbability)}`
+      : equation,
+    summary: "logistic regression",
+    details: `${request.y.length} observations, ${request.predictors.length} predictors`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read binary response and predictors",
+        expression: `n = ${request.y.length}, predictors = ${request.predictors.map((predictor) => predictor.name).join(", ")}`,
+        detail: "Logistic regression models a 0/1 response with probabilities instead of direct numeric predictions.",
+      },
+      {
+        title: "Build logit model",
+        expression: "logit(p) = b0 + b1x1 + ...",
+        detail: "The logit link converts probabilities into a linear predictor.",
+      },
+      {
+        title: "Fit by Newton iterations",
+        expression: `${fit.iterations} iterations, ${fit.converged ? "converged" : "stopped"}`,
+        detail: "Each iteration updates the coefficient vector using the likelihood gradient and information matrix.",
+      },
+      {
+        title: "Measure classification fit",
+        expression: `log likelihood = ${formatNumber(fit.logLikelihood)}, accuracy = ${formatNumber(accuracy)}`,
+        detail: "The fitted probabilities are converted into classes using a 0.5 threshold.",
+      },
+      ...(hasPrediction
+        ? [{
+            title: "Predict probability",
+            expression: `P(y=1) = ${formatNumber(predictedProbability)}`,
+            detail: "The requested predictor values are plugged into the fitted logit model.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Obs", "Actual", "P(y=1)", "Predicted"],
+      rows: request.y.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(probabilities[index]),
+        formatNumber(predictedClasses[index]),
+      ]),
+    },
+    artifacts: [
+      ["Equation", equation],
+      ["Intercept", formatNumber(fit.coefficients[0])],
+      ...request.predictors.map((predictor, index) => [`Coefficient ${predictor.name}`, formatNumber(fit.coefficients[index + 1])]),
+      ["Log likelihood", formatNumber(fit.logLikelihood)],
+      ["Deviance", formatNumber(deviance)],
+      ["McFadden R squared", Number.isFinite(mcfaddenR2) ? formatNumber(mcfaddenR2) : "undefined"],
+      ["Accuracy", formatNumber(accuracy)],
+      ["Converged", fit.converged ? "yes" : "no"],
+      ...(hasPrediction ? [["Predicted probability", formatNumber(predictedProbability)]] : []),
+    ],
+  };
+}
+
 function analyzeMultivariateStatistics(statement) {
   const lower = statement.toLowerCase();
   const dataset = parseMultivariateStatsInput(statement);
@@ -5429,6 +5528,74 @@ function multiplyMatrixVector(matrix, vector) {
     throw new Error("Matrix-vector multiplication dimensions do not match.");
   }
   return matrix.map((row) => dotProduct(row, vector));
+}
+
+function fitLogisticRegression(design, yValues) {
+  const parameterCount = design[0].length;
+  let coefficients = Array(parameterCount).fill(0);
+  let converged = false;
+  let iterations = 0;
+  let probabilities = design.map(() => 0.5);
+  const ridge = 1e-6;
+
+  for (let iteration = 0; iteration < 60; iteration += 1) {
+    probabilities = design.map((row) => logisticSigmoid(dotProduct(row, coefficients)));
+    const gradient = Array(parameterCount).fill(0);
+    const information = Array.from({ length: parameterCount }, () => Array(parameterCount).fill(0));
+
+    for (let rowIndex = 0; rowIndex < design.length; rowIndex += 1) {
+      const row = design[rowIndex];
+      const probability = probabilities[rowIndex];
+      const residual = yValues[rowIndex] - probability;
+      const weight = probability * (1 - probability);
+
+      for (let left = 0; left < parameterCount; left += 1) {
+        gradient[left] += row[left] * residual;
+        for (let right = 0; right < parameterCount; right += 1) {
+          information[left][right] += row[left] * row[right] * weight;
+        }
+      }
+    }
+
+    for (let index = 0; index < parameterCount; index += 1) {
+      information[index][index] += ridge;
+    }
+
+    const delta = solveLinearSystem(information, gradient);
+    coefficients = coefficients.map((coefficient, index) => normalizeNumber(coefficient + delta[index]));
+    iterations = iteration + 1;
+
+    if (Math.max(...delta.map(Math.abs)) < 1e-7) {
+      converged = true;
+      break;
+    }
+  }
+
+  probabilities = design.map((row) => logisticSigmoid(dotProduct(row, coefficients)));
+  const logLikelihood = yValues.reduce((sum, value, index) => {
+    const probability = clampLogLikelihoodProbability(probabilities[index]);
+    return sum + (value === 1 ? Math.log(probability) : Math.log(1 - probability));
+  }, 0);
+
+  return {
+    coefficients,
+    probabilities: probabilities.map(normalizeNumber),
+    logLikelihood: normalizeNumber(logLikelihood),
+    iterations,
+    converged,
+  };
+}
+
+function logisticSigmoid(value) {
+  if (value >= 0) {
+    return 1 / (1 + Math.exp(-value));
+  }
+  const scaled = Math.exp(value);
+  return scaled / (1 + scaled);
+}
+
+function clampLogLikelihoodProbability(value) {
+  return Math.min(1 - 1e-12, Math.max(1e-12, value));
 }
 
 function covarianceMatrixFromColumns(columns) {
@@ -7828,6 +7995,74 @@ function multivariateObservationTable(dataset) {
   };
 }
 
+function parseLogisticRegressionInput(text) {
+  const lists = new Map();
+  const listText = text.replace(/\bpredict\b.*$/i, "");
+  for (const match of listText.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    const label = match[1];
+    const values = parseNumberList(match[2]);
+    if (values.length > 1) {
+      lists.set(label.toLowerCase(), { name: label, values });
+    }
+  }
+
+  const responseEntry = lists.get("y") ??
+    lists.get("response") ??
+    lists.get("outcome") ??
+    lists.get("class") ??
+    lists.get("label");
+  if (!responseEntry) {
+    throw new Error("Logistic regression needs a binary response list, such as y: 0, 1, 0, 1.");
+  }
+
+  const predictors = [...lists.entries()]
+    .filter(([key]) => key !== responseEntry.name.toLowerCase())
+    .filter(([key]) => /^x\d*$/i.test(key) || /^predictor\d+$/i.test(key))
+    .sort(([left], [right]) => naturalLabelNumber(left) - naturalLabelNumber(right))
+    .map(([, value]) => value);
+
+  if (predictors.length < 1) {
+    throw new Error("Logistic regression needs at least one predictor list, such as x: 1, 2, 3.");
+  }
+  for (const predictor of predictors) {
+    if (predictor.values.length !== responseEntry.values.length) {
+      throw new Error("All logistic-regression lists must have the same length.");
+    }
+  }
+  if (responseEntry.values.length <= predictors.length + 1) {
+    throw new Error("Logistic regression needs more observations than model coefficients.");
+  }
+  if (!responseEntry.values.every((value) => value === 0 || value === 1)) {
+    throw new Error("Logistic regression response values must be 0 or 1.");
+  }
+  if (!responseEntry.values.some((value) => value === 0) || !responseEntry.values.some((value) => value === 1)) {
+    throw new Error("Logistic regression needs both 0 and 1 response classes.");
+  }
+
+  const prediction = parseLogisticRegressionPrediction(text, predictors.map((predictor) => predictor.name));
+  return {
+    y: responseEntry.values,
+    predictors,
+    prediction,
+  };
+}
+
+function parseLogisticRegressionPrediction(text, predictorNames) {
+  const match = text.match(/\bpredict\b(.+)$/i);
+  if (!match) {
+    return predictorNames.map(() => Number.NaN);
+  }
+  const namedPrediction = predictorNames.map((name) => readNamedNumber(match[1], [name], Number.NaN));
+  if (namedPrediction.every(Number.isFinite)) {
+    return namedPrediction;
+  }
+  const numbers = parseNumbers(match[1]);
+  if (numbers.length === predictorNames.length) {
+    return numbers;
+  }
+  return namedPrediction;
+}
+
 function parseMultipleRegressionInput(text) {
   const lists = new Map();
   const listText = text.replace(/\bpredict\b.*$/i, "");
@@ -7888,6 +8123,14 @@ function zipPairs(xValues, yValues) {
 
 function formatMultipleRegressionEquation(coefficients, predictorNames) {
   let expression = `y = ${formatNumber(coefficients[0])}`;
+  for (let index = 0; index < predictorNames.length; index += 1) {
+    expression += ` ${formatSignedTerm(coefficients[index + 1], predictorNames[index])}`;
+  }
+  return expression;
+}
+
+function formatLogisticRegressionEquation(coefficients, predictorNames) {
+  let expression = `logit(p) = ${formatNumber(coefficients[0])}`;
   for (let index = 0; index < predictorNames.length; index += 1) {
     expression += ` ${formatSignedTerm(coefficients[index + 1], predictorNames[index])}`;
   }
@@ -8508,6 +8751,12 @@ function isMultipleRegressionQuestion(lower, statement) {
     /\bx1\s*[:=].*;\s*x2\s*[:=]/is.test(statement);
 }
 
+function isLogisticRegressionQuestion(lower) {
+  return lower.includes("logistic regression") ||
+    lower.includes("binary regression") ||
+    lower.includes("logit regression");
+}
+
 function isMultivariateStatsQuestion(lower, statement = lower) {
   return lower.includes("pca") ||
     lower.includes("principal component") ||
@@ -8687,6 +8936,9 @@ function isStatisticsQuestion(lower) {
     "covariance",
     "pca",
     "principal component",
+    "logistic regression",
+    "binary regression",
+    "logit regression",
     "binomial",
     "poisson",
     "geometric",

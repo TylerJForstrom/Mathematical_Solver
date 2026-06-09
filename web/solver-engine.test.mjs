@@ -230,6 +230,15 @@ runTest("statistics mode computes multiple linear regression", () => {
   assert.equal(artifactValue(result, "R squared"), "0.998634");
 });
 
+runTest("statistics mode computes logistic regression", () => {
+  const result = analyzeStatistics("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5");
+
+  assert.equal(result.summary, "logistic regression");
+  assert.equal(result.answer, "logit(p) = -4.249097 + 1.214028x; P(y=1) = 0.771011");
+  assert.equal(artifactValue(result, "McFadden R squared"), "0.40417");
+  assert.equal(artifactValue(result, "Predicted probability"), "0.771011");
+});
+
 runTest("statistics mode computes binomial probability", () => {
   const result = analyzeStatistics("binomial n=10 p=0.5 k=3");
 
@@ -657,6 +666,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
+  assert.equal(analyzeUniversal("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5").summary, "logistic regression");
   assert.equal(analyzeUniversal("pca x: 1,2,3,4; y: 2,3,5,8").summary, "principal component analysis");
   assert.equal(analyzeUniversal("correlation matrix x: 1,2,3,4; y: 2,3,5,8").answer, "correlation matrix = [[1, 0.9759], [0.9759, 1]]");
   assert.equal(analyzeUniversal("one-proportion z-test successes=56 n=100 p0=0.5").summary, "one-proportion z test");

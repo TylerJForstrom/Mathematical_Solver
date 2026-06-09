@@ -44,6 +44,8 @@ The frontend currently supports:
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression/correlation for coordinate pairs, plus multiple linear
   regression with several predictor lists, residuals, R squared, and prediction
+- Logistic regression for binary outcomes with fitted probabilities,
+  classification accuracy, McFadden R squared, and probability prediction
 - Multivariate statistics: covariance matrices, correlation matrices, and
   2D principal component analysis with explained variance and component directions
 - Confidence intervals, one-sample/two-sample/paired t tests with Student t p-values,
@@ -152,6 +154,8 @@ The same idea works for algebra and calculus:
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
 - `multiple regression y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a least-squares model with multiple predictors.
+- `logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5`
+  fits a binary-response model and returns a predicted probability.
 - `covariance matrix x: 1,2,3,4; y: 2,3,5,8` returns a sample covariance
   matrix, and `correlation matrix ...` scales it to pairwise correlations.
 - `pca x: 1,2,3,4; y: 2,3,5,8` finds the covariance eigenvectors and reports
@@ -239,6 +243,7 @@ The demo includes:
 - Taylor/Maclaurin approximations through Ask mode
 - Complex arithmetic and complex quadratic roots through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, multiple regression,
+  logistic regression,
   covariance/correlation matrices, 2D PCA,
   binomial probability,
   Poisson probability, geometric probability, exponential probability, uniform
