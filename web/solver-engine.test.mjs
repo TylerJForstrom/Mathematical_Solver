@@ -333,6 +333,15 @@ runTest("statistics mode computes log-rank survival tests", () => {
   assert.deepEqual(result.table.rows[0], ["4", "5", "5", "0", "1", "0.5"]);
 });
 
+runTest("statistics mode computes Cox proportional hazards regression", () => {
+  const result = analyzeStatistics("cox regression times: 5, 6, 6, 8, 10, 12; events: 1, 1, 0, 1, 0, 1; x: 0, 1, 0, 1, 1, 0");
+
+  assert.equal(result.summary, "Cox proportional hazards");
+  assert.equal(result.answer, "hazard ratio = 1.40515, p = 0.783144");
+  assert.equal(artifactValue(result, "Coefficient beta"), "0.340144");
+  assert.deepEqual(result.table.rows[1], ["6", "1", "5", "1", "0.678221"]);
+});
+
 runTest("statistics mode computes one-proportion confidence intervals", () => {
   const result = analyzeStatistics("proportion ci successes=42 n=100 confidence=95");
 
@@ -797,6 +806,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("permutation test group1: 10, 12, 9; group2: 8, 7, 11 resamples=2000 seed=5").summary, "permutation test");
   assert.equal(analyzeUniversal("kaplan-meier times: 5, 6, 6, 8, 10; events: 1, 1, 0, 1, 0").summary, "Kaplan-Meier survival");
   assert.equal(analyzeUniversal("log-rank group1 times: 5, 6, 6, 8, 10 events: 1, 1, 0, 1, 0; group2 times: 4, 6, 7, 9, 12 events: 1, 0, 1, 1, 0").summary, "log-rank test");
+  assert.equal(analyzeUniversal("cox regression times: 5, 6, 6, 8, 10, 12; events: 1, 1, 0, 1, 0, 1; x: 0, 1, 0, 1, 1, 0").summary, "Cox proportional hazards");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");

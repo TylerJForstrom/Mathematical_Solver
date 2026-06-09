@@ -988,6 +988,10 @@ export function analyzeStatistics(statement) {
     return analyzeBayesianProportion(statement);
   }
 
+  if (isCoxQuestion(lower)) {
+    return analyzeCoxRegression(statement);
+  }
+
   if (isLogRankQuestion(lower)) {
     return analyzeLogRankTest(statement);
   }
@@ -4390,6 +4394,76 @@ function analyzeLogRankTest(statement) {
       ["Variance", formatNumber(result.variance)],
       ["chi-square", formatNumber(result.chiSquare)],
       ["p-value", formatNumber(result.pValue)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeCoxRegression(statement) {
+  const request = parseCoxInput(statement);
+  const result = coxProportionalHazards(request);
+  const decision = result.pValue < request.alpha
+    ? `reject H0 at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject H0 at alpha=${formatNumber(request.alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(request.times, [
+      statsMetricNode("BETA", result.beta),
+      statsMetricNode("HR", result.hazardRatio),
+      statsMetricNode("Z", result.zStatistic),
+      statsMetricNode("P", result.pValue),
+    ], "COX"),
+    answer: `hazard ratio = ${formatNumber(result.hazardRatio)}, p = ${formatNumber(result.pValue)}`,
+    summary: "Cox proportional hazards",
+    details: "One-covariate Cox survival regression",
+    variables: ["x"],
+    metrics: treeMetrics(statsDatasetNode(request.times)),
+    steps: [
+      {
+        title: "Read survival regression data",
+        expression: `${request.times.length} subjects, ${result.eventCount} events`,
+        detail: "Cox regression models event hazard using follow-up times, event indicators, and a covariate.",
+      },
+      {
+        title: "Build partial likelihood",
+        expression: "L(beta) from event risk sets",
+        detail: "Each event compares the event subject's covariate against the covariates in its risk set.",
+      },
+      {
+        title: "Solve score equation",
+        expression: `beta = ${formatNumber(result.beta)}`,
+        detail: "Newton iteration maximizes the Cox partial likelihood.",
+      },
+      {
+        title: "Convert to hazard ratio",
+        expression: `exp(beta) = ${formatNumber(result.hazardRatio)}`,
+        detail: "The hazard ratio is the multiplicative change in hazard for a one-unit covariate increase.",
+      },
+      {
+        title: "Run Wald test",
+        expression: `z = ${formatNumber(result.zStatistic)}, p = ${formatNumber(result.pValue)}`,
+        detail: "The Wald test compares the fitted coefficient to zero.",
+      },
+    ],
+    table: {
+      headers: ["Time", "Events", "Risk set", "Event x sum", "Expected x sum"],
+      rows: result.rows.map((row) => [
+        formatNumber(row.time),
+        formatNumber(row.events),
+        formatNumber(row.riskSet),
+        formatNumber(row.eventCovariateSum),
+        formatNumber(row.expectedCovariateSum),
+      ]),
+    },
+    artifacts: [
+      ["Coefficient beta", formatNumber(result.beta)],
+      ["Standard error", formatNumber(result.standardError)],
+      ["Hazard ratio", formatNumber(result.hazardRatio)],
+      ["z statistic", formatNumber(result.zStatistic)],
+      ["p-value", formatNumber(result.pValue)],
+      ["Log partial likelihood", formatNumber(result.logLikelihood)],
+      ["Iterations", formatNumber(result.iterations)],
       ["Decision", decision],
     ],
   };
@@ -8979,6 +9053,111 @@ function logRankTest(request) {
   };
 }
 
+function coxProportionalHazards(request) {
+  let beta = 0;
+  let iterations = 0;
+  let state = coxScoreInformation(request, beta);
+  for (; iterations < 50; iterations += 1) {
+    if (!(state.information > EPSILON)) {
+      throw new Error("Cox regression information matrix is singular for these data.");
+    }
+    const step = state.score / state.information;
+    beta += Math.max(-1, Math.min(1, step));
+    if (!Number.isFinite(beta)) {
+      throw new Error("Cox regression failed to converge.");
+    }
+    state = coxScoreInformation(request, beta);
+    if (Math.abs(step) < 1e-9) {
+      break;
+    }
+  }
+  if (iterations >= 50) {
+    throw new Error("Cox regression did not converge for these data.");
+  }
+
+  const standardError = Math.sqrt(1 / state.information);
+  const zStatistic = beta / standardError;
+  return {
+    beta: normalizeNumber(beta),
+    standardError: normalizeNumber(standardError),
+    hazardRatio: normalizeNumber(Math.exp(beta)),
+    zStatistic: normalizeNumber(zStatistic),
+    pValue: normalizeNumber(pValueForNormal(zStatistic, "two-sided")),
+    logLikelihood: normalizeNumber(state.logLikelihood),
+    rows: coxRiskRows(request, beta),
+    eventCount: request.events.filter((event) => event === 1).length,
+    iterations: iterations + 1,
+  };
+}
+
+function coxScoreInformation(request, beta) {
+  const eventTimes = coxEventTimes(request);
+  let score = 0;
+  let information = 0;
+  let logLikelihood = 0;
+
+  for (const time of eventTimes) {
+    const eventIndices = request.times
+      .map((value, index) => ({ value, index }))
+      .filter(({ value, index }) => nearlyEqual(value, time) && request.events[index] === 1)
+      .map(({ index }) => index);
+    const riskIndices = request.times
+      .map((value, index) => ({ value, index }))
+      .filter(({ value }) => value >= time)
+      .map(({ index }) => index);
+    const eventCovariateSum = eventIndices.reduce((sum, index) => sum + request.covariate[index], 0);
+    const riskSums = coxRiskSums(request, riskIndices, beta);
+    if (!(riskSums.s0 > 0)) {
+      throw new Error("Cox regression encountered an empty risk set.");
+    }
+    const eventsAtTime = eventIndices.length;
+    const expected = riskSums.s1 / riskSums.s0;
+    const variance = riskSums.s2 / riskSums.s0 - expected ** 2;
+    logLikelihood += beta * eventCovariateSum - eventsAtTime * Math.log(riskSums.s0);
+    score += eventCovariateSum - eventsAtTime * expected;
+    information += eventsAtTime * variance;
+  }
+
+  return { score, information, logLikelihood };
+}
+
+function coxRiskRows(request, beta) {
+  return coxEventTimes(request).map((time) => {
+    const eventIndices = request.times
+      .map((value, index) => ({ value, index }))
+      .filter(({ value, index }) => nearlyEqual(value, time) && request.events[index] === 1)
+      .map(({ index }) => index);
+    const riskIndices = request.times
+      .map((value, index) => ({ value, index }))
+      .filter(({ value }) => value >= time)
+      .map(({ index }) => index);
+    const riskSums = coxRiskSums(request, riskIndices, beta);
+    return {
+      time: normalizeNumber(time),
+      events: eventIndices.length,
+      riskSet: riskIndices.length,
+      eventCovariateSum: normalizeNumber(eventIndices.reduce((sum, index) => sum + request.covariate[index], 0)),
+      expectedCovariateSum: normalizeNumber(eventIndices.length * (riskSums.s1 / riskSums.s0)),
+    };
+  });
+}
+
+function coxRiskSums(request, indices, beta) {
+  return indices.reduce((sums, index) => {
+    const weight = Math.exp(beta * request.covariate[index]);
+    return {
+      s0: sums.s0 + weight,
+      s1: sums.s1 + weight * request.covariate[index],
+      s2: sums.s2 + weight * request.covariate[index] ** 2,
+    };
+  }, { s0: 0, s1: 0, s2: 0 });
+}
+
+function coxEventTimes(request) {
+  return [...new Set(request.times.filter((time, index) => request.events[index] === 1))]
+    .sort((left, right) => left - right);
+}
+
 function bootstrapStatistic(values, statistic) {
   if (statistic === "median") {
     return median([...values].sort((left, right) => left - right));
@@ -9509,6 +9688,40 @@ function parseLogRankInput(text) {
     leftEvents: groups[1].events,
     rightTimes: groups[2].times,
     rightEvents: groups[2].events,
+    alpha,
+  };
+}
+
+function parseCoxInput(text) {
+  const timesMatch = text.match(/\b(?:times?|durations?|follow-?up)\s*[:=]\s*([^;]+)/i);
+  const eventsMatch = text.match(/\b(?:events?|status|statuses|event indicators?)\s*[:=]\s*([^;]+)/i);
+  const covariateMatch = text.match(/\b(?:x|covariate|predictor|exposure)\s*[:=]\s*([^;]+)/i);
+  const alpha = readNamedNumber(text, ["alpha"], 0.05);
+  if (!(alpha > 0 && alpha < 1)) {
+    throw new Error("Cox regression alpha must be between 0 and 1.");
+  }
+  if (!timesMatch || !eventsMatch || !covariateMatch) {
+    throw new Error("Cox regression needs times, events, and x lists.");
+  }
+
+  const times = parseNumbers(timesMatch[1]);
+  const events = parseNumbers(eventsMatch[1]);
+  const covariate = parseNumbers(covariateMatch[1]);
+  validateSurvivalGroup(times, events, "Cox regression");
+  if (covariate.length !== times.length || covariate.some((value) => !Number.isFinite(value))) {
+    throw new Error("Cox regression covariate x must have the same length as times and events.");
+  }
+  if (events.every((event) => event === 0)) {
+    throw new Error("Cox regression needs at least one observed event.");
+  }
+  if (new Set(covariate.map((value) => normalizeNumber(value))).size < 2) {
+    throw new Error("Cox regression covariate x needs variation.");
+  }
+
+  return {
+    times,
+    events,
+    covariate,
     alpha,
   };
 }
@@ -11212,6 +11425,13 @@ function isLogRankQuestion(lower) {
     lower.includes("log rank");
 }
 
+function isCoxQuestion(lower) {
+  return lower.includes("cox regression") ||
+    lower.includes("cox proportional") ||
+    lower.includes("proportional hazards") ||
+    lower.startsWith("cox ");
+}
+
 function isMultivariableQuestion(lower) {
   return lower.includes("partial derivative") ||
     lower.startsWith("partial ") ||
@@ -11437,6 +11657,9 @@ function isStatisticsQuestion(lower) {
     "log-rank",
     "logrank",
     "log rank",
+    "cox regression",
+    "cox proportional",
+    "proportional hazards",
     "regression",
     "correlation",
     "covariance",
