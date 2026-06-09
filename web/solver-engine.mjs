@@ -1054,6 +1054,9 @@ export function analyzeStatistics(statement) {
     parsePairs(statement).length >= 2 ||
     parseXYLists(statement)
   ) {
+    if (isMultipleRegressionQuestion(lower, statement)) {
+      return analyzeMultipleRegression(statement);
+    }
     return analyzeRegression(statement);
   }
 
@@ -3775,6 +3778,103 @@ function analyzeRegression(statement) {
   };
 }
 
+function analyzeMultipleRegression(statement) {
+  const request = parseMultipleRegressionInput(statement);
+  const design = request.y.map((_, row) => [
+    1,
+    ...request.predictors.map((predictor) => predictor.values[row]),
+  ]);
+  const transposed = transposeMatrix(design);
+  const normalMatrix = multiplyMatrices(transposed, design);
+  const normalVector = multiplyMatrixVector(transposed, request.y);
+  const coefficients = solveLinearSystem(normalMatrix, normalVector);
+  const fitted = design.map((row) => dotProduct(row, coefficients));
+  const residuals = request.y.map((value, index) => value - fitted[index]);
+  const meanY = mean(request.y);
+  const sse = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const tss = request.y.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
+  const rSquared = nearlyEqual(tss, 0) ? 1 : 1 - sse / tss;
+  const predictorCount = request.predictors.length;
+  const degreesFreedom = request.y.length - predictorCount - 1;
+  const adjustedRSquared = degreesFreedom > 0
+    ? 1 - (1 - rSquared) * (request.y.length - 1) / degreesFreedom
+    : Number.NaN;
+  const residualStdError = degreesFreedom > 0 ? Math.sqrt(sse / degreesFreedom) : Number.NaN;
+  const equation = formatMultipleRegressionEquation(coefficients, request.predictors.map((predictor) => predictor.name));
+  const hasPrediction = request.prediction.every(Number.isFinite);
+  const prediction = hasPrediction
+    ? dotProduct([1, ...request.prediction], coefficients)
+    : Number.NaN;
+  const tree = {
+    kind: "statsRegression",
+    children: [
+      statsDatasetNode(request.y, [], "Y"),
+      ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+      statsMetricNode("R2", rSquared),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: hasPrediction
+      ? `${equation}; prediction = ${formatNumber(prediction)}`
+      : equation,
+    summary: "multiple linear regression",
+    details: `${request.y.length} observations, ${predictorCount} predictors`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read response and predictors",
+        expression: `n = ${request.y.length}, predictors = ${request.predictors.map((predictor) => predictor.name).join(", ")}`,
+        detail: "Multiple regression models one response using several predictor columns.",
+      },
+      {
+        title: "Build design matrix",
+        expression: `${request.y.length} x ${predictorCount + 1}`,
+        detail: "The first design column is the intercept; the remaining columns are predictors.",
+      },
+      {
+        title: "Solve normal equations",
+        expression: equation,
+        detail: "Least squares solves (X'X)b = X'y for the coefficient vector.",
+      },
+      {
+        title: "Measure fit",
+        expression: `R^2 = ${formatNumber(rSquared)}, SSE = ${formatNumber(sse)}`,
+        detail: "R squared measures how much response variation the model explains.",
+      },
+      ...(hasPrediction
+        ? [{
+            title: "Predict new response",
+            expression: `prediction = ${formatNumber(prediction)}`,
+            detail: "The new predictor values are plugged into the fitted linear model.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Obs", "Actual", "Fitted", "Residual"],
+      rows: request.y.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(fitted[index]),
+        formatNumber(residuals[index]),
+      ]),
+    },
+    artifacts: [
+      ["Equation", equation],
+      ["Intercept", formatNumber(coefficients[0])],
+      ...request.predictors.map((predictor, index) => [`Coefficient ${predictor.name}`, formatNumber(coefficients[index + 1])]),
+      ["SSE", formatNumber(sse)],
+      ["R squared", formatNumber(rSquared)],
+      ["Adjusted R squared", Number.isFinite(adjustedRSquared) ? formatNumber(adjustedRSquared) : "undefined"],
+      ["Residual standard error", Number.isFinite(residualStdError) ? formatNumber(residualStdError) : "undefined"],
+      ...(hasPrediction ? [["Prediction", formatNumber(prediction)]] : []),
+    ],
+  };
+}
+
 function analyzeBinomial(statement) {
   const params = parseNamedProbabilityParams(statement);
   const n = params.n;
@@ -5182,6 +5282,17 @@ function multiplyMatrices(left, right) {
       row.reduce((sum, value, index) => sum + value * right[index][columnIndex], 0),
     ),
   );
+}
+
+function transposeMatrix(matrix) {
+  return matrix[0].map((_, column) => matrix.map((row) => row[column]));
+}
+
+function multiplyMatrixVector(matrix, vector) {
+  if (matrix[0].length !== vector.length) {
+    throw new Error("Matrix-vector multiplication dimensions do not match.");
+  }
+  return matrix.map((row) => dotProduct(row, vector));
 }
 
 function identityMatrix(size) {
@@ -7455,8 +7566,75 @@ function parseXYLists(text) {
   return { x, y };
 }
 
+function parseMultipleRegressionInput(text) {
+  const lists = new Map();
+  const listText = text.replace(/\bpredict\b.*$/i, "");
+  for (const match of listText.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    const label = match[1];
+    const values = parseNumberList(match[2]);
+    if (values.length > 1) {
+      lists.set(label.toLowerCase(), { name: label, values });
+    }
+  }
+
+  const responseEntry = lists.get("y") ?? lists.get("response") ?? lists.get("outcome");
+  if (!responseEntry) {
+    throw new Error("Multiple regression needs a response list, such as y: 4, 7, 9.");
+  }
+
+  const predictors = [...lists.entries()]
+    .filter(([key]) => /^x\d+$/i.test(key) || /^predictor\d+$/i.test(key))
+    .sort(([left], [right]) => naturalLabelNumber(left) - naturalLabelNumber(right))
+    .map(([, value]) => value);
+
+  if (predictors.length < 2) {
+    throw new Error("Multiple regression needs at least two predictor lists, such as x1: ...; x2: ....");
+  }
+  for (const predictor of predictors) {
+    if (predictor.values.length !== responseEntry.values.length) {
+      throw new Error("All multiple-regression lists must have the same length.");
+    }
+  }
+  if (responseEntry.values.length <= predictors.length) {
+    throw new Error("Multiple regression needs more observations than predictors.");
+  }
+
+  const prediction = parseMultipleRegressionPrediction(text, predictors.map((predictor) => predictor.name));
+  return {
+    y: responseEntry.values,
+    predictors,
+    prediction,
+  };
+}
+
+function parseMultipleRegressionPrediction(text, predictorNames) {
+  const match = text.match(/\bpredict\b(.+)$/i);
+  if (!match) {
+    return predictorNames.map(() => Number.NaN);
+  }
+  return predictorNames.map((name) => readNamedNumber(match[1], [name], Number.NaN));
+}
+
+function naturalLabelNumber(label) {
+  const match = label.match(/\d+/);
+  return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
+}
+
 function zipPairs(xValues, yValues) {
   return xValues.map((x, index) => ({ x, y: yValues[index] }));
+}
+
+function formatMultipleRegressionEquation(coefficients, predictorNames) {
+  let expression = `y = ${formatNumber(coefficients[0])}`;
+  for (let index = 0; index < predictorNames.length; index += 1) {
+    expression += ` ${formatSignedTerm(coefficients[index + 1], predictorNames[index])}`;
+  }
+  return expression;
+}
+
+function formatSignedTerm(coefficient, variable) {
+  const sign = coefficient < 0 ? "-" : "+";
+  return `${sign} ${formatNumber(Math.abs(coefficient))}${variable}`;
 }
 
 function parseNamedProbabilityParams(text) {
@@ -8060,6 +8238,12 @@ function isBayesianProportionQuestion(lower) {
     lower.includes("beta binomial") ||
     lower.includes("bayesian proportion") ||
     (lower.includes("posterior") && lower.includes("success"));
+}
+
+function isMultipleRegressionQuestion(lower, statement) {
+  return lower.includes("multiple regression") ||
+    lower.includes("multivariate regression") ||
+    /\bx1\s*[:=].*;\s*x2\s*[:=]/is.test(statement);
 }
 
 function isMultivariableQuestion(lower) {

@@ -222,6 +222,14 @@ runTest("statistics mode computes linear regression", () => {
   assert.equal(result.answer, "y = 1.5x + 0.333333");
 });
 
+runTest("statistics mode computes multiple linear regression", () => {
+  const result = analyzeStatistics("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
+
+  assert.equal(result.summary, "multiple linear regression");
+  assert.equal(result.answer, "y = 1.3 + 2.6x1 + 0.5x2; prediction = 16.9");
+  assert.equal(artifactValue(result, "R squared"), "0.998634");
+});
+
 runTest("statistics mode computes binomial probability", () => {
   const result = analyzeStatistics("binomial n=10 p=0.5 k=3");
 
@@ -635,6 +643,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("newton cooling ambient=70 initial=100 k=0.2 t=10").summary, "Newton cooling");
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
+  assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
   assert.equal(analyzeUniversal("one-proportion z-test successes=56 n=100 p0=0.5").summary, "one-proportion z test");
   assert.equal(analyzeUniversal("two-proportion z-test successes1=56 n1=100 successes2=44 n2=100").summary, "two-proportion z test");
   assert.equal(analyzeUniversal("chi-square observed 10,20,30 expected 15,15,30").summary, "chi-square goodness-of-fit");

@@ -42,7 +42,8 @@ The frontend currently supports:
 - Differential equations: exponential growth/decay, Newton cooling, logistic
   growth, and separable power ODEs
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
-- Linear regression and correlation for coordinate pairs
+- Linear regression/correlation for coordinate pairs, plus multiple linear
+  regression with several predictor lists, residuals, R squared, and prediction
 - Confidence intervals, one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
   one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis,
@@ -147,6 +148,8 @@ The same idea works for algebra and calculus:
 - `ode dy/dt = 0.3y y0=2 t=5`, `newton cooling ambient=70 initial=100 k=0.2 t=10`,
   and `logistic r=0.4 K=100 y0=10 t=8` solve closed-form differential equations.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
+- `multiple regression y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
+  solves a least-squares model with multiple predictors.
 - `mann-whitney group1: 10,12,9; group2: 8,7,11` ranks combined samples
   and computes a nonparametric U test.
 - `ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10` reports F,
@@ -229,7 +232,8 @@ The demo includes:
 - Partial derivatives, gradients, and directional derivatives through Ask mode
 - Taylor/Maclaurin approximations through Ask mode
 - Complex arithmetic and complex quadratic roots through Ask mode
-- Dataset summaries, confidence intervals, regression/correlation, binomial probability,
+- Dataset summaries, confidence intervals, regression/correlation, multiple regression,
+  binomial probability,
   Poisson probability, geometric probability, exponential probability, uniform
   probability, hypergeometric probability, normal probability, inverse-normal
   percentiles, z-scores, discrete expected value, Bayes theorem,
