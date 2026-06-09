@@ -258,6 +258,16 @@ runTest("statistics mode computes multiple linear regression", () => {
   assert.equal(artifactValue(result, "x2 95% CI"), "[-0.575663, 1.575663]");
 });
 
+runTest("statistics mode computes ridge regression", () => {
+  const result = analyzeStatistics("ridge regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
+
+  assert.equal(result.summary, "ridge regression");
+  assert.equal(result.answer, "y = 2.009901 + 2.366337x1 + 0.485149x2; prediction = 16.207921");
+  assert.equal(artifactValue(result, "Lambda"), "1");
+  assert.equal(artifactValue(result, "Ridge objective"), "6.49505");
+  assert.deepEqual(result.table.rows[4], ["5", "15", "14.326733", "0.673267"]);
+});
+
 runTest("statistics mode computes logistic regression", () => {
   const result = analyzeStatistics("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5");
 
@@ -838,6 +848,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
+  assert.equal(analyzeUniversal("ridge regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "ridge regression");
   assert.equal(analyzeUniversal("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5").summary, "logistic regression");
   assert.equal(analyzeUniversal("poisson regression y: 1, 2, 1, 3, 4, 5; x: 0, 1, 2, 3, 4, 5; predict x=6").summary, "Poisson regression");
   assert.equal(analyzeUniversal("pca x: 1,2,3,4; y: 2,3,5,8").summary, "principal component analysis");

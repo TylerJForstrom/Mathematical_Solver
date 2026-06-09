@@ -1161,6 +1161,9 @@ export function analyzeStatistics(statement) {
     if (isPoissonRegressionQuestion(lower)) {
       return analyzePoissonRegression(statement);
     }
+    if (isRidgeRegressionQuestion(lower)) {
+      return analyzeRidgeRegression(statement);
+    }
     if (isMultipleRegressionQuestion(lower, statement)) {
       return analyzeMultipleRegression(statement);
     }
@@ -4957,6 +4960,104 @@ function analyzeMultipleRegression(statement) {
   };
 }
 
+function analyzeRidgeRegression(statement) {
+  const request = parseRidgeRegressionInput(statement);
+  const design = request.y.map((_, row) => [
+    1,
+    ...request.predictors.map((predictor) => predictor.values[row]),
+  ]);
+  const transposed = transposeMatrix(design);
+  const normalMatrix = multiplyMatrices(transposed, design);
+  const penalizedMatrix = addRidgePenalty(normalMatrix, request.lambda);
+  const normalVector = multiplyMatrixVector(transposed, request.y);
+  const coefficients = solveLinearSystem(penalizedMatrix, normalVector);
+  const fitted = design.map((row) => dotProduct(row, coefficients));
+  const residuals = request.y.map((value, index) => value - fitted[index]);
+  const meanY = mean(request.y);
+  const rss = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const tss = request.y.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
+  const rSquared = nearlyEqual(tss, 0) ? 1 : 1 - rss / tss;
+  const penalty = request.lambda * coefficients.slice(1).reduce((sum, value) => sum + value ** 2, 0);
+  const objective = rss + penalty;
+  const predictorNames = request.predictors.map((predictor) => predictor.name);
+  const equation = formatMultipleRegressionEquation(coefficients, predictorNames);
+  const hasPrediction = request.prediction.every(Number.isFinite);
+  const prediction = hasPrediction
+    ? dotProduct([1, ...request.prediction], coefficients)
+    : Number.NaN;
+  const tree = {
+    kind: "statsRegression",
+    label: "RIDGE",
+    children: [
+      statsDatasetNode(request.y, [], "Y"),
+      ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+      statsMetricNode("lambda", request.lambda),
+      statsMetricNode("RSS", rss),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: hasPrediction
+      ? `${equation}; prediction = ${formatNumber(prediction)}`
+      : equation,
+    summary: "ridge regression",
+    details: `${request.y.length} observations, ${request.predictors.length} predictors, lambda = ${formatNumber(request.lambda)}`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read response, predictors, and penalty",
+        expression: `lambda = ${formatNumber(request.lambda)}, predictors = ${predictorNames.join(", ")}`,
+        detail: "Ridge regression fits a linear model while shrinking predictor coefficients.",
+      },
+      {
+        title: "Build penalized normal equations",
+        expression: "(X'X + lambda I*)b = X'y",
+        detail: "The penalty matrix leaves the intercept unpenalized and adds lambda to predictor diagonal entries.",
+      },
+      {
+        title: "Solve ridge system",
+        expression: equation,
+        detail: "The coefficients minimize residual squared error plus the coefficient penalty.",
+      },
+      {
+        title: "Measure penalized fit",
+        expression: `RSS = ${formatNumber(rss)}, penalty = ${formatNumber(penalty)}, objective = ${formatNumber(objective)}`,
+        detail: "The objective balances fit to the data against coefficient size.",
+      },
+      ...(hasPrediction
+        ? [{
+            title: "Predict new response",
+            expression: `prediction = ${formatNumber(prediction)}`,
+            detail: "The requested predictor values are plugged into the regularized linear model.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Obs", "Actual", "Fitted", "Residual"],
+      rows: request.y.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(fitted[index]),
+        formatNumber(residuals[index]),
+      ]),
+    },
+    artifacts: [
+      ["Equation", equation],
+      ["Lambda", formatNumber(request.lambda)],
+      ["Intercept", formatNumber(coefficients[0])],
+      ...request.predictors.map((predictor, index) => [`Coefficient ${predictor.name}`, formatNumber(coefficients[index + 1])]),
+      ["RSS", formatNumber(rss)],
+      ["R squared", formatNumber(rSquared)],
+      ["Penalty", formatNumber(penalty)],
+      ["Ridge objective", formatNumber(objective)],
+      ...(hasPrediction ? [["Prediction", formatNumber(prediction)]] : []),
+    ],
+  };
+}
+
 function analyzeLogisticRegression(statement) {
   const request = parseLogisticRegressionInput(statement);
   const design = request.y.map((_, row) => [
@@ -6747,6 +6848,14 @@ function multiplyMatrices(left, right) {
 
 function transposeMatrix(matrix) {
   return matrix[0].map((_, column) => matrix.map((row) => row[column]));
+}
+
+function addRidgePenalty(matrix, lambda) {
+  return matrix.map((row, rowIndex) =>
+    row.map((value, columnIndex) =>
+      rowIndex === columnIndex && rowIndex > 0 ? value + lambda : value,
+    ),
+  );
 }
 
 function multiplyMatrixVector(matrix, vector) {
@@ -11096,6 +11205,25 @@ function parseMultipleRegressionInput(text) {
   };
 }
 
+function parseRidgeRegressionInput(text) {
+  const lambda = readNamedNumber(text, ["lambda", "penalty", "alpha"], 1);
+  if (!(lambda >= 0)) {
+    throw new Error("Ridge regression lambda must be a nonnegative number.");
+  }
+
+  const base = parseMultipleRegressionInput(text
+    .replace(/\bridge\b/gi, "")
+    .replace(/\bregularized\b/gi, "")
+    .replace(/\bregularised\b/gi, "")
+    .replace(/\blambda\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, "")
+    .replace(/\balpha\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, "")
+    .replace(/\bpenalty\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, ""));
+  return {
+    ...base,
+    lambda,
+  };
+}
+
 function parseMultipleRegressionPrediction(text, predictorNames) {
   const match = text.match(/\bpredict\b(.+)$/i);
   if (!match) {
@@ -11865,6 +11993,12 @@ function isMultipleRegressionQuestion(lower, statement) {
     /\bx1\s*[:=].*;\s*x2\s*[:=]/is.test(statement);
 }
 
+function isRidgeRegressionQuestion(lower) {
+  return lower.includes("ridge regression") ||
+    lower.includes("regularized regression") ||
+    lower.includes("regularised regression");
+}
+
 function isPolynomialRegressionQuestion(lower) {
   return lower.includes("polynomial regression") ||
     lower.includes("quadratic regression") ||
@@ -12168,6 +12302,9 @@ function isStatisticsQuestion(lower) {
     "time-series",
     "forecast",
     "regression",
+    "ridge regression",
+    "regularized regression",
+    "regularised regression",
     "correlation",
     "covariance",
     "pca",

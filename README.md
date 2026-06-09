@@ -53,6 +53,8 @@ The frontend currently supports:
 - Linear regression/correlation for coordinate pairs, plus multiple linear
   regression with several predictor lists, residuals, coefficient standard
   errors, t tests, p-values, confidence intervals, R squared, and prediction
+- Ridge regression for regularized linear modeling with an unpenalized intercept,
+  shrinkage penalty, objective value, fitted values, residuals, and prediction
 - Polynomial regression for nonlinear curve fitting with degree selection,
   residuals, R squared, and prediction
 - Logistic regression for binary outcomes with fitted probabilities,
@@ -193,6 +195,8 @@ The same idea works for algebra and calculus:
   fits a nonlinear polynomial curve and predicts `26`.
 - `multiple regression y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a least-squares model with multiple predictors.
+- `ridge regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
+  solves a regularized model that shrinks predictor coefficients.
 - `logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5`
   fits a binary-response model and returns a predicted probability.
 - `poisson regression y: 1,2,1,3,4,5; x: 0,1,2,3,4,5; predict x=6`
@@ -301,6 +305,7 @@ The demo includes:
   regression/correlation, polynomial regression,
   multiple regression,
   coefficient inference for linear models,
+  ridge regression,
   logistic regression,
   Poisson regression,
   AR(1) time-series forecasting,
