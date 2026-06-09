@@ -26,6 +26,8 @@ The frontend currently supports:
   and 2x2 eigenvalues/eigenvectors
 - Vector geometry: dot products, cross products, magnitudes, angles,
   projections, and point distances
+- Geometry formulas: circles, rectangles, triangles, Pythagorean theorem,
+  coordinate distance, midpoint, and slope
 - Sequences and series: arithmetic sequences, geometric sequences, infinite
   geometric sums, and finite sigma notation
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
@@ -111,6 +113,8 @@ The same idea works for algebra and calculus:
 - `det [[1,2],[3,4]]` becomes a matrix-operation tree.
 - `dot [1,2,3] [4,5,6]`, `angle between [1,0] [0,1]`, and
   `projection [3,4] onto [1,0]` evaluate vector-geometry trees.
+- `circle radius=3`, `pythagorean a=3 b=4`, and
+  `distance between (1,2) and (4,6)` evaluate geometry formula trees.
 - `arithmetic sequence a1=3 d=5 n=10`, `geometric sequence a1=2 r=3 n=5`,
   and `sum k^2 from k=1 to 5` evaluate sequence and series trees.
 - `rref [[1,2,1],[2,4,2],[1,1,0]]` becomes a row-operation tree with rank and pivots.
@@ -209,7 +213,8 @@ The demo includes:
   proportion confidence intervals, ANOVA, chi-square tests, nonparametric rank
   tests, effect sizes, and pairwise follow-up summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
-  vector geometry, sequences/series, graphing, and numerical roots through Ask mode
+  vector geometry, geometry formulas, sequences/series, graphing, and numerical
+  roots through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
 

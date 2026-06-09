@@ -6,6 +6,7 @@ import {
   analyzeDerivative,
   analyzeEquation,
   analyzeFactoring,
+  analyzeGeometry,
   analyzeGraph,
   analyzeInequality,
   analyzeIntegral,
@@ -104,6 +105,17 @@ runTest("sequence mode computes sequences and series", () => {
   assert.equal(analyzeSequence("infinite geometric series a1=5 r=0.2").answer, "S_inf = 6.25");
   assert.equal(analyzeSequence("sum k^2 from k=1 to 5").answer, "sum = 55");
   assert.equal(analyzeSequence("sum k=1 to 4 of 2k + 1").answer, "sum = 24");
+});
+
+runTest("geometry mode computes formulas and coordinate geometry", () => {
+  assert.equal(analyzeGeometry("circle radius=3").answer, "area = 28.274334, circumference = 18.849556");
+  assert.equal(analyzeGeometry("rectangle length=5 width=8").answer, "area = 40, perimeter = 26");
+  assert.equal(analyzeGeometry("triangle base=10 height=6").answer, "area = 30");
+  assert.equal(analyzeGeometry("triangle sides 3 4 5").answer, "area = 6, perimeter = 12");
+  assert.equal(analyzeGeometry("pythagorean a=3 b=4").answer, "c = 5");
+  assert.equal(analyzeGeometry("distance between (1,2) and (4,6)").answer, "distance = 5");
+  assert.equal(analyzeGeometry("midpoint (1,2) (5,8)").answer, "midpoint = (3, 5)");
+  assert.equal(analyzeGeometry("slope between (1,2) and (4,6)").answer, "slope = 1.333333");
 });
 
 runTest("inequality mode solves strict quadratic inequalities", () => {
@@ -572,4 +584,6 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("angle between [1,0] [0,1]").summary, "vector angle");
   assert.equal(analyzeUniversal("arithmetic sequence a1=3 d=5 n=10").summary, "arithmetic sequence");
   assert.equal(analyzeUniversal("sum k^2 from k=1 to 5").answer, "sum = 55");
+  assert.equal(analyzeUniversal("circle radius=3").summary, "circle geometry");
+  assert.equal(analyzeUniversal("distance between (1,2) and (4,6)").summary, "coordinate distance");
 });

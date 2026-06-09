@@ -883,6 +883,9 @@ export function analyzeUniversal(question, values = {}) {
   if (isMatrixQuestion(lower)) {
     routed = analyzeMatrix(question);
     routedLabel = "Matrix";
+  } else if (isGeometryQuestion(lower)) {
+    routed = analyzeGeometry(question);
+    routedLabel = "Geometry";
   } else if (isVectorQuestion(lower)) {
     routed = analyzeVector(question);
     routedLabel = "Vector";
@@ -1426,6 +1429,219 @@ export function analyzeVector(statement) {
 
   return {
     mode: "vector",
+    tree,
+    answer,
+    summary,
+    details,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps,
+    table,
+    artifacts,
+  };
+}
+
+export function analyzeGeometry(statement) {
+  const request = parseGeometryInput(statement);
+  const steps = [
+    {
+      title: "Read geometry request",
+      expression: request.expression,
+      detail: "The solver identifies the shape or coordinate problem and extracts the measurements.",
+    },
+  ];
+  let answer;
+  let summary;
+  let details;
+  let artifacts;
+  let table;
+  let treeChildren;
+
+  if (request.operation === "circle") {
+    const area = Math.PI * request.radius ** 2;
+    const circumference = 2 * Math.PI * request.radius;
+    answer = request.metric === "circumference"
+      ? `circumference = ${formatNumber(circumference)}`
+      : request.metric === "area"
+        ? `area = ${formatNumber(area)}`
+        : `area = ${formatNumber(area)}, circumference = ${formatNumber(circumference)}`;
+    summary = "circle geometry";
+    details = "Circle area and circumference";
+    artifacts = [
+      ["Radius", formatNumber(request.radius)],
+      ["Area", formatNumber(area)],
+      ["Circumference", formatNumber(circumference)],
+    ];
+    treeChildren = [
+      statsMetricNode("r", request.radius),
+      statsMetricNode("area", area),
+      statsMetricNode("circ", circumference),
+    ];
+    steps.push({
+      title: "Apply circle formulas",
+      expression: "A = pi*r^2, C = 2*pi*r",
+      detail: "The radius determines both area and circumference.",
+    });
+  } else if (request.operation === "rectangle") {
+    const area = request.length * request.width;
+    const perimeter = 2 * (request.length + request.width);
+    answer = request.metric === "perimeter"
+      ? `perimeter = ${formatNumber(perimeter)}`
+      : request.metric === "area"
+        ? `area = ${formatNumber(area)}`
+        : `area = ${formatNumber(area)}, perimeter = ${formatNumber(perimeter)}`;
+    summary = "rectangle geometry";
+    details = "Rectangle area and perimeter";
+    artifacts = [
+      ["Length", formatNumber(request.length)],
+      ["Width", formatNumber(request.width)],
+      ["Area", formatNumber(area)],
+      ["Perimeter", formatNumber(perimeter)],
+    ];
+    treeChildren = [
+      statsMetricNode("length", request.length),
+      statsMetricNode("width", request.width),
+      statsMetricNode("area", area),
+      statsMetricNode("perimeter", perimeter),
+    ];
+    steps.push({
+      title: "Apply rectangle formulas",
+      expression: "A = length*width, P = 2(length+width)",
+      detail: "Rectangle geometry combines the two side lengths.",
+    });
+  } else if (request.operation === "triangle-base-height") {
+    const area = (request.base * request.height) / 2;
+    answer = `area = ${formatNumber(area)}`;
+    summary = "triangle area";
+    details = "Triangle area from base and height";
+    artifacts = [
+      ["Base", formatNumber(request.base)],
+      ["Height", formatNumber(request.height)],
+      ["Area", formatNumber(area)],
+    ];
+    treeChildren = [
+      statsMetricNode("base", request.base),
+      statsMetricNode("height", request.height),
+      statsMetricNode("area", area),
+    ];
+    steps.push({
+      title: "Apply triangle area formula",
+      expression: `A = bh/2 = ${formatNumber(area)}`,
+      detail: "A triangle is half of the rectangle with the same base and height.",
+    });
+  } else if (request.operation === "triangle-sides") {
+    const perimeter = request.a + request.b + request.c;
+    const semiperimeter = perimeter / 2;
+    const areaSquared = semiperimeter *
+      (semiperimeter - request.a) *
+      (semiperimeter - request.b) *
+      (semiperimeter - request.c);
+    if (!(areaSquared > 0)) {
+      throw new Error("Triangle side lengths must satisfy the triangle inequality.");
+    }
+    const area = Math.sqrt(areaSquared);
+    answer = `area = ${formatNumber(area)}, perimeter = ${formatNumber(perimeter)}`;
+    summary = "triangle side geometry";
+    details = "Heron's formula";
+    artifacts = [
+      ["Side a", formatNumber(request.a)],
+      ["Side b", formatNumber(request.b)],
+      ["Side c", formatNumber(request.c)],
+      ["Perimeter", formatNumber(perimeter)],
+      ["Area", formatNumber(area)],
+    ];
+    treeChildren = [
+      statsMetricNode("a", request.a),
+      statsMetricNode("b", request.b),
+      statsMetricNode("c", request.c),
+      statsMetricNode("area", area),
+      statsMetricNode("perimeter", perimeter),
+    ];
+    steps.push({
+      title: "Apply Heron's formula",
+      expression: `A = sqrt(s(s-a)(s-b)(s-c)) = ${formatNumber(area)}`,
+      detail: "The semiperimeter converts three side lengths into area.",
+    });
+  } else if (request.operation === "pythagorean") {
+    const value = solvePythagorean(request);
+    answer = `${request.missing} = ${formatNumber(value)}`;
+    summary = "Pythagorean theorem";
+    details = "Right-triangle side solving";
+    artifacts = [
+      ["a", Number.isFinite(request.a) ? formatNumber(request.a) : "unknown"],
+      ["b", Number.isFinite(request.b) ? formatNumber(request.b) : "unknown"],
+      ["c", Number.isFinite(request.c) ? formatNumber(request.c) : "unknown"],
+      [request.missing, formatNumber(value)],
+    ];
+    treeChildren = [
+      statsMetricNode("a", Number.isFinite(request.a) ? request.a : value),
+      statsMetricNode("b", Number.isFinite(request.b) ? request.b : value),
+      statsMetricNode("c", Number.isFinite(request.c) ? request.c : value),
+    ];
+    steps.push({
+      title: "Apply Pythagorean theorem",
+      expression: "a^2 + b^2 = c^2",
+      detail: `The missing side is ${formatNumber(value)}.`,
+    });
+  } else {
+    const left = request.points[0];
+    const right = request.points[1];
+    const dx = right.x - left.x;
+    const dy = right.y - left.y;
+    const distance = Math.hypot(dx, dy);
+    const midpoint = { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 };
+    const slope = nearlyEqual(dx, 0) ? null : dy / dx;
+    if (request.operation === "midpoint") {
+      answer = `midpoint = (${formatNumber(midpoint.x)}, ${formatNumber(midpoint.y)})`;
+      summary = "midpoint";
+      details = "Coordinate midpoint";
+    } else if (request.operation === "slope") {
+      answer = slope === null ? "slope = undefined" : `slope = ${formatNumber(slope)}`;
+      summary = "slope";
+      details = "Coordinate line slope";
+    } else {
+      answer = `distance = ${formatNumber(distance)}`;
+      summary = "coordinate distance";
+      details = "Distance formula";
+    }
+    artifacts = [
+      ["Point 1", `(${formatNumber(left.x)}, ${formatNumber(left.y)})`],
+      ["Point 2", `(${formatNumber(right.x)}, ${formatNumber(right.y)})`],
+      ["dx", formatNumber(dx)],
+      ["dy", formatNumber(dy)],
+      ["Distance", formatNumber(distance)],
+      ["Midpoint", `(${formatNumber(midpoint.x)}, ${formatNumber(midpoint.y)})`],
+      ["Slope", slope === null ? "undefined" : formatNumber(slope)],
+    ];
+    table = {
+      headers: ["Point", "x", "y"],
+      rows: [
+        ["1", formatNumber(left.x), formatNumber(left.y)],
+        ["2", formatNumber(right.x), formatNumber(right.y)],
+      ],
+    };
+    treeChildren = [
+      statsMetricNode("x1", left.x),
+      statsMetricNode("y1", left.y),
+      statsMetricNode("x2", right.x),
+      statsMetricNode("y2", right.y),
+      statsMetricNode("distance", distance),
+    ];
+    steps.push({
+      title: "Compute coordinate changes",
+      expression: `dx = ${formatNumber(dx)}, dy = ${formatNumber(dy)}`,
+      detail: "Coordinate formulas compare the two points component by component.",
+    });
+  }
+
+  const tree = {
+    kind: "statsDistribution",
+    label: "GEOMETRY",
+    children: treeChildren,
+  };
+
+  return {
+    mode: "geometry",
     tree,
     answer,
     summary,
@@ -3960,6 +4176,115 @@ function parseVectorLiteral(literal) {
     throw new Error("Vector entries must be numbers.");
   }
   return vector.map(Number);
+}
+
+function parseGeometryInput(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes("circle") || lower.startsWith("circumference")) {
+    const numbers = parseNumbers(text);
+    const radius = readNamedNumber(text, ["radius", "r"], numbers[0]);
+    if (!(radius > 0)) {
+      throw new Error("Circle geometry needs a positive radius.");
+    }
+    return {
+      operation: "circle",
+      radius,
+      metric: lower.includes("circumference") ? "circumference" : lower.includes("area") ? "area" : "both",
+      expression: `circle radius=${formatNumber(radius)}`,
+    };
+  }
+
+  if (lower.includes("rectangle")) {
+    const numbers = parseNumbers(text);
+    const length = readNamedNumber(text, ["length", "l"], numbers[0]);
+    const width = readNamedNumber(text, ["width", "w"], numbers[1]);
+    if (!(length > 0) || !(width > 0)) {
+      throw new Error("Rectangle geometry needs positive length and width.");
+    }
+    return {
+      operation: "rectangle",
+      length,
+      width,
+      metric: lower.includes("perimeter") ? "perimeter" : lower.includes("area") ? "area" : "both",
+      expression: `rectangle length=${formatNumber(length)}, width=${formatNumber(width)}`,
+    };
+  }
+
+  if (lower.includes("pythagorean") || lower.includes("hypotenuse")) {
+    const numbers = parseNumbers(text);
+    const a = readNamedNumber(text, ["a", "leg1"], numbers[0]);
+    const b = readNamedNumber(text, ["b", "leg2"], numbers[1]);
+    const c = readNamedNumber(text, ["c", "hypotenuse"], Number.NaN);
+    const known = [a, b, c].filter(Number.isFinite).length;
+    if (known !== 2) {
+      throw new Error("Pythagorean solving needs exactly two of a, b, and c.");
+    }
+    const missing = Number.isFinite(a) ? Number.isFinite(b) ? "c" : "b" : "a";
+    return {
+      operation: "pythagorean",
+      a,
+      b,
+      c,
+      missing,
+      expression: `a=${Number.isFinite(a) ? formatNumber(a) : "?"}, b=${Number.isFinite(b) ? formatNumber(b) : "?"}, c=${Number.isFinite(c) ? formatNumber(c) : "?"}`,
+    };
+  }
+
+  if (lower.includes("triangle")) {
+    const numbers = parseNumbers(text);
+    const base = readNamedNumber(text, ["base"], Number.NaN);
+    const height = readNamedNumber(text, ["height", "h"], Number.NaN);
+    if (Number.isFinite(base) && Number.isFinite(height)) {
+      if (!(base > 0) || !(height > 0)) {
+        throw new Error("Triangle base and height must be positive.");
+      }
+      return {
+        operation: "triangle-base-height",
+        base,
+        height,
+        expression: `triangle base=${formatNumber(base)}, height=${formatNumber(height)}`,
+      };
+    }
+    const a = readNamedNumber(text, ["a", "side1"], numbers[0]);
+    const b = readNamedNumber(text, ["b", "side2"], numbers[1]);
+    const c = readNamedNumber(text, ["c", "side3"], numbers[2]);
+    if (!(a > 0) || !(b > 0) || !(c > 0)) {
+      throw new Error("Triangle side geometry needs three positive side lengths.");
+    }
+    return {
+      operation: "triangle-sides",
+      a,
+      b,
+      c,
+      expression: `triangle sides ${formatNumber(a)}, ${formatNumber(b)}, ${formatNumber(c)}`,
+    };
+  }
+
+  const points = parsePairs(text);
+  if (points.length < 2) {
+    throw new Error("Coordinate geometry needs two points, such as distance between (1,2) and (4,6).");
+  }
+  return {
+    operation: lower.includes("midpoint") ? "midpoint" : lower.includes("slope") ? "slope" : "distance",
+    points: points.slice(0, 2),
+    expression: `(${formatNumber(points[0].x)}, ${formatNumber(points[0].y)}) to (${formatNumber(points[1].x)}, ${formatNumber(points[1].y)})`,
+  };
+}
+
+function solvePythagorean(request) {
+  if (request.missing === "c") {
+    return Math.sqrt(request.a ** 2 + request.b ** 2);
+  }
+  if (request.missing === "a") {
+    if (request.c <= request.b) {
+      throw new Error("Hypotenuse must be longer than each leg.");
+    }
+    return Math.sqrt(request.c ** 2 - request.b ** 2);
+  }
+  if (request.c <= request.a) {
+    throw new Error("Hypotenuse must be longer than each leg.");
+  }
+  return Math.sqrt(request.c ** 2 - request.a ** 2);
 }
 
 function parseSequenceInput(text) {
@@ -6535,6 +6860,22 @@ function isVectorQuestion(lower) {
     lower.startsWith("norm ") ||
     lower.startsWith("length of vector") ||
     lower.includes(" vector projection");
+}
+
+function isGeometryQuestion(lower) {
+  return lower.includes("pythagorean") ||
+    lower.includes("hypotenuse") ||
+    lower.includes("circle") ||
+    lower.includes("rectangle") ||
+    lower.includes("triangle") ||
+    lower.startsWith("area ") ||
+    lower.startsWith("perimeter ") ||
+    lower.startsWith("circumference ") ||
+    lower.startsWith("midpoint ") ||
+    lower.includes("midpoint between") ||
+    lower.startsWith("slope ") ||
+    lower.includes("slope between") ||
+    /distance\s+between\s*\(/i.test(lower);
 }
 
 function isSequenceQuestion(lower) {
