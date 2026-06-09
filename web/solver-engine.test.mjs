@@ -8,6 +8,7 @@ import {
   analyzeGraph,
   analyzeInequality,
   analyzeIntegral,
+  analyzeLimit,
   analyzeLogic,
   analyzeMatrix,
   analyzeNumerical,
@@ -398,6 +399,16 @@ runTest("integral mode handles logarithmic and square-root antiderivatives", () 
   assert.equal(analyzeIntegral("integrate sqrt(x)").answer, "0.666667x^(3/2) + C");
 });
 
+runTest("limit mode evaluates direct and removable limits", () => {
+  assert.equal(analyzeLimit("limit x^2 + 3x as x approaches 2").answer, "limit = 10");
+  assert.equal(analyzeLimit("limit (x^2 - 1)/(x - 1) as x approaches 1").answer, "limit = 2");
+});
+
+runTest("limit mode estimates trigonometric and one-sided limits", () => {
+  assert.equal(analyzeLimit("lim x->0 sin(x)/x").answer, "limit = 1");
+  assert.equal(analyzeLimit("limit 1/x as x approaches 0 from right").answer, "limit = infinity");
+});
+
 runTest("optimization mode finds polynomial critical points", () => {
   const result = analyzeOptimization("maximize -x^2 + 4x + 1");
 
@@ -462,6 +473,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("integrate x^2").summary, "indefinite integral");
   assert.equal(analyzeUniversal("integrate x^2 from 0 to 3").summary, "definite integral");
   assert.equal(analyzeUniversal("integrate sin(x)").answer, "-cos(x) + C");
+  assert.equal(analyzeUniversal("limit (x^2 - 1)/(x - 1) as x approaches 1").answer, "limit = 2");
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");

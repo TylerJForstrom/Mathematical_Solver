@@ -569,6 +569,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isGraphQuestion(lower)) {
     routed = analyzeGraph(question);
     routedLabel = "Graph";
+  } else if (isLimitQuestion(lower)) {
+    routed = analyzeLimit(question);
+    routedLabel = "Limit";
   } else if (isIntegralQuestion(lower)) {
     routed = analyzeIntegral(question);
     routedLabel = "Integral";
@@ -1084,6 +1087,85 @@ export function analyzeIntegral(statement, variableHint = "x") {
           ["Integrand", formatMath(expression)],
           ["Antiderivative", answer],
         ],
+  };
+}
+
+export function analyzeLimit(statement, variableHint = "x") {
+  const request = extractLimitQuestion(statement, variableHint);
+  const expression = parseMath(request.expression);
+  if (expression.kind === "equation") {
+    throw new Error("Limit mode expects a function expression, not an equation.");
+  }
+
+  const steps = [
+    {
+      title: "Parse limit",
+      expression: `${formatMath(expression)}, ${request.variable} -> ${formatNumber(request.target)}`,
+      detail: "The expression is parsed into a tree and the approach value is identified.",
+    },
+  ];
+  const directValue = safeEvaluateMath(expression, { [request.variable]: request.target });
+  let answerValue;
+  let answerText;
+  let summary;
+  let table;
+  let method;
+
+  if (Number.isFinite(directValue)) {
+    answerValue = directValue;
+    answerText = formatNumber(answerValue);
+    summary = "direct limit";
+    method = "direct substitution";
+    table = {
+      headers: [request.variable, "f(x)"],
+      rows: [[formatNumber(request.target), formatNumber(directValue)]],
+    };
+    steps.push({
+      title: "Substitute approach value",
+      expression: `f(${formatNumber(request.target)}) = ${formatNumber(directValue)}`,
+      detail: "The expression is continuous at the approach value, so direct substitution gives the limit.",
+    });
+  } else {
+    const estimate = estimateLimit(expression, request);
+    answerValue = estimate.value;
+    answerText = estimate.valueText ?? formatNumber(answerValue);
+    summary = request.direction === "both" ? "numeric two-sided limit" : `${request.direction}-hand limit`;
+    method = request.direction === "both" ? "two-sided sampling" : `${request.direction}-hand sampling`;
+    table = estimate.table;
+    steps.push(
+      {
+        title: "Direct substitution is indeterminate",
+        expression: `f(${formatNumber(request.target)}) is not finite`,
+        detail: "The solver samples values close to the approach point instead.",
+      },
+      {
+        title: "Sample near the approach value",
+        expression: `${method}: ${answerText}`,
+        detail: request.direction === "both"
+          ? "The left and right estimates must agree for a two-sided limit."
+          : "Only the requested one-sided approach is used.",
+      },
+    );
+  }
+
+  return {
+    mode: "limit",
+    tree: expression,
+    answer: `limit = ${answerText}`,
+    summary,
+    details: `${request.variable} approaches ${formatNumber(request.target)}`,
+    variables: mathVariables(expression),
+    metrics: treeMetrics(expression),
+    steps,
+    table,
+    artifacts: [
+      ["Expression", formatMath(expression)],
+      ["Variable", request.variable],
+      ["Approaches", formatNumber(request.target)],
+      ["Direction", request.direction],
+      ["Method", method],
+      ["Limit", answerText],
+    ],
   };
 }
 
@@ -3493,6 +3575,77 @@ function extractGraphQuestion(statement) {
   return { expression: text, variable, xMin, xMax };
 }
 
+function extractLimitQuestion(statement, fallbackVariable) {
+  let text = statement
+    .replace(/^(limit|lim)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  let direction = "both";
+  if (/\b(left-hand|from the left|from left)\b/i.test(text)) {
+    direction = "left";
+    text = text.replace(/\b(left-hand|from the left|from left)\b/gi, "").trim();
+  } else if (/\b(right-hand|from the right|from right)\b/i.test(text)) {
+    direction = "right";
+    text = text.replace(/\b(right-hand|from the right|from right)\b/gi, "").trim();
+  }
+
+  const numberPattern = "([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)";
+  const asMatch = text.match(new RegExp(`^(.+?)\\s+(?:as|when)\\s+([A-Za-z_]\\w*)\\s*(?:->|=>|approaches|goes\\s+to|tends\\s+to|to)\\s*${numberPattern}$`, "i"));
+  if (asMatch) {
+    return {
+      expression: cleanLimitExpression(asMatch[1]),
+      variable: asMatch[2],
+      target: Number(asMatch[3]),
+      direction,
+    };
+  }
+
+  const prefixMatch = text.match(new RegExp(`^([A-Za-z_]\\w*)\\s*(?:->|=>|approaches|goes\\s+to|tends\\s+to|to)\\s*${numberPattern}\\s+(.+)$`, "i"));
+  if (prefixMatch) {
+    return {
+      expression: cleanLimitExpression(prefixMatch[3]),
+      variable: prefixMatch[1],
+      target: Number(prefixMatch[2]),
+      direction,
+    };
+  }
+
+  const suffixMatch = text.match(new RegExp(`^(.+?)\\s*,?\\s+([A-Za-z_]\\w*)\\s*(?:->|=>)\\s*${numberPattern}$`, "i"));
+  if (suffixMatch) {
+    return {
+      expression: cleanLimitExpression(suffixMatch[1]),
+      variable: suffixMatch[2],
+      target: Number(suffixMatch[3]),
+      direction,
+    };
+  }
+
+  const target = readNamedNumber(text, ["target", "at", "approaches"], Number.NaN);
+  if (Number.isFinite(target)) {
+    const variableMatch = text.match(/\b(?:with respect to|wrt|for)\s+([A-Za-z_]\w*)\b/i);
+    const variable = variableMatch ? variableMatch[1] : fallbackVariable;
+    return {
+      expression: cleanLimitExpression(
+        text
+          .replace(/\b(?:target|at|approaches)\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, "")
+          .replace(/\b(?:with respect to|wrt|for)\s+[A-Za-z_]\w*\b/gi, ""),
+      ),
+      variable,
+      target,
+      direction,
+    };
+  }
+
+  throw new Error("Use a limit such as limit (x^2 - 1)/(x - 1) as x approaches 1.");
+}
+
+function cleanLimitExpression(text) {
+  return text
+    .replace(/^f\s*\([A-Za-z_]\w*\)\s*=\s*/i, "")
+    .replace(/^y\s*=\s*/i, "")
+    .trim();
+}
+
 function sampleFunction(expression, variable, xMin, xMax, count) {
   const points = [];
   for (let index = 0; index < count; index += 1) {
@@ -3503,6 +3656,132 @@ function sampleFunction(expression, variable, xMin, xMax, count) {
     }
   }
   return points;
+}
+
+function estimateLimit(expression, request) {
+  const scale = Math.max(1, Math.abs(request.target));
+  const distances = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6].map((value) => value * scale);
+  const rows = [];
+  let leftValue = Number.NaN;
+  let rightValue = Number.NaN;
+  const leftSamples = [];
+  const rightSamples = [];
+
+  for (const distance of distances) {
+    const leftX = request.target - distance;
+    const rightX = request.target + distance;
+    const left = request.direction === "right" ? Number.NaN : safeEvaluateMath(expression, { [request.variable]: leftX });
+    const right = request.direction === "left" ? Number.NaN : safeEvaluateMath(expression, { [request.variable]: rightX });
+    if (Number.isFinite(left)) {
+      leftValue = left;
+      leftSamples.push(left);
+    }
+    if (Number.isFinite(right)) {
+      rightValue = right;
+      rightSamples.push(right);
+    }
+    rows.push([
+      formatNumber(distance),
+      request.direction === "right" ? "" : formatNumber(leftX),
+      Number.isFinite(left) ? formatNumber(left) : "not finite",
+      request.direction === "left" ? "" : formatNumber(rightX),
+      Number.isFinite(right) ? formatNumber(right) : "not finite",
+    ]);
+  }
+
+  if (request.direction === "left") {
+    if (!Number.isFinite(leftValue)) {
+      throw new Error("Could not find finite left-hand samples for this limit.");
+    }
+    const unbounded = detectUnboundedLimit(leftSamples);
+    if (unbounded) {
+      return {
+        value: unbounded.value,
+        valueText: unbounded.text,
+        table: {
+          headers: ["Distance", `${request.variable} left`, "f(left)", `${request.variable} right`, "f(right)"],
+          rows,
+        },
+      };
+    }
+    return {
+      value: leftValue,
+      table: {
+        headers: ["Distance", `${request.variable} left`, "f(left)", `${request.variable} right`, "f(right)"],
+        rows,
+      },
+    };
+  }
+  if (request.direction === "right") {
+    if (!Number.isFinite(rightValue)) {
+      throw new Error("Could not find finite right-hand samples for this limit.");
+    }
+    const unbounded = detectUnboundedLimit(rightSamples);
+    if (unbounded) {
+      return {
+        value: unbounded.value,
+        valueText: unbounded.text,
+        table: {
+          headers: ["Distance", `${request.variable} left`, "f(left)", `${request.variable} right`, "f(right)"],
+          rows,
+        },
+      };
+    }
+    return {
+      value: rightValue,
+      table: {
+        headers: ["Distance", `${request.variable} left`, "f(left)", `${request.variable} right`, "f(right)"],
+        rows,
+      },
+    };
+  }
+
+  if (!Number.isFinite(leftValue) || !Number.isFinite(rightValue)) {
+    throw new Error("Could not find finite two-sided samples for this limit.");
+  }
+  const leftUnbounded = detectUnboundedLimit(leftSamples);
+  const rightUnbounded = detectUnboundedLimit(rightSamples);
+  if (leftUnbounded || rightUnbounded) {
+    if (leftUnbounded && rightUnbounded && leftUnbounded.text === rightUnbounded.text) {
+      return {
+        value: leftUnbounded.value,
+        valueText: leftUnbounded.text,
+        table: {
+          headers: ["Distance", `${request.variable} left`, "f(left)", `${request.variable} right`, "f(right)"],
+          rows,
+        },
+      };
+    }
+    throw new Error("The two-sided limit does not appear to exist because the left and right estimates are unbounded in different ways.");
+  }
+  const tolerance = 1e-4 * Math.max(1, Math.abs(leftValue), Math.abs(rightValue));
+  if (Math.abs(leftValue - rightValue) > tolerance) {
+    throw new Error("The two-sided limit does not appear to exist because the left and right estimates differ.");
+  }
+
+  return {
+    value: (leftValue + rightValue) / 2,
+    table: {
+      headers: ["Distance", `${request.variable} left`, "f(left)", `${request.variable} right`, "f(right)"],
+      rows,
+    },
+  };
+}
+
+function detectUnboundedLimit(samples) {
+  const finite = samples.filter(Number.isFinite);
+  if (finite.length < 4) return null;
+  const recent = finite.slice(-4);
+  const signsAgree = recent.every((value) => value > 0) || recent.every((value) => value < 0);
+  const magnitudes = recent.map(Math.abs);
+  const grows = magnitudes.every((value, index) => index === 0 || value > magnitudes[index - 1] * 5);
+  const large = magnitudes[magnitudes.length - 1] > 1e5;
+  if (!signsAgree || !grows || !large) return null;
+  const positive = recent[recent.length - 1] > 0;
+  return {
+    value: positive ? Infinity : -Infinity,
+    text: positive ? "infinity" : "-infinity",
+  };
 }
 
 function extractNumericalQuestion(statement) {
@@ -3563,6 +3842,15 @@ function evaluateMath(node, values = {}) {
     return evaluateBinary(node.operator, left, right);
   }
   throw new Error(`Cannot evaluate node '${node.kind}'.`);
+}
+
+function safeEvaluateMath(node, values = {}) {
+  try {
+    const value = evaluateMath(node, values);
+    return Number.isFinite(value) ? value : Number.NaN;
+  } catch {
+    return Number.NaN;
+  }
 }
 
 function newtonRoot(evaluator, initialGuess) {
@@ -4627,6 +4915,13 @@ function isMatrixQuestion(lower) {
 
 function isGraphQuestion(lower) {
   return lower.startsWith("graph ") || lower.startsWith("plot ") || lower.startsWith("draw ");
+}
+
+function isLimitQuestion(lower) {
+  return lower.startsWith("limit ") ||
+    lower.startsWith("lim ") ||
+    lower.includes(" as x approaches ") ||
+    /\blim\s+[a-z]\w*\s*(?:->|=>)/i.test(lower);
 }
 
 function isIntegralQuestion(lower) {

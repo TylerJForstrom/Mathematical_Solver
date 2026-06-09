@@ -22,6 +22,7 @@ The frontend currently supports:
 - Matrix determinants, inverses, multiplication, row reduction, rank, null spaces,
   and 2x2 eigenvalues/eigenvectors
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
+- Finite and one-sided numeric limits, including removable discontinuities
 - Polynomial and elementary indefinite/definite integrals, including trig,
   exponential, logarithmic, square-root, and reciprocal forms
 - Polynomial critical points and local max/min classification
@@ -95,6 +96,8 @@ The same idea works for algebra and calculus:
 - `nullspace [[1,2,1],[2,4,2],[1,1,0]]` extracts a basis from the RREF free variables.
 - `eigenvectors [[2,1],[1,2]]` solves the 2x2 characteristic polynomial and then
   finds each eigenspace.
+- `limit (x^2 - 1)/(x - 1) as x approaches 1` samples both sides of a
+  removable discontinuity and returns `limit = 2`.
 - `integrate x^2 from 0 to 3` builds an antiderivative tree and evaluates the bounds.
 - `integrate sin(x)` uses a function node and returns `-cos(x) + C`.
 - `integrate exp(x) from 0 to 1` evaluates an elementary definite integral.
@@ -166,6 +169,7 @@ The demo includes:
 - Polynomial factoring through Ask mode
 - Exact combinatorics through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
+- Numeric limits through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
   Poisson probability, hypergeometric probability, normal probability, z-scores,
   discrete expected value, Bayes theorem, one-sample/two-sample/paired t tests,
