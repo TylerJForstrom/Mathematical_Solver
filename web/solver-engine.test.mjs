@@ -177,6 +177,13 @@ runTest("statistics mode computes normal probabilities", () => {
   assert.equal(result.answer, "P(X <= 1.96) = 0.975002");
 });
 
+runTest("statistics mode computes inverse normal percentiles", () => {
+  const result = analyzeStatistics("inverse normal p=0.975 mean=0 sd=1");
+
+  assert.equal(result.summary, "inverse normal");
+  assert.equal(result.answer, "x = 1.959963");
+});
+
 runTest("statistics mode computes z-scores", () => {
   const result = analyzeStatistics("zscore value=85 mean=70 sd=10");
 
@@ -261,6 +268,12 @@ runTest("statistics mode computes Poisson probabilities", () => {
 
   assert.equal(result.summary, "Poisson probability");
   assert.equal(result.answer, "P(X <= 2) = 0.42319");
+});
+
+runTest("statistics mode computes more probability distributions", () => {
+  assert.equal(analyzeStatistics("geometric p=0.25 k=3").answer, "P(X = 3) = 0.140625");
+  assert.equal(analyzeStatistics("exponential lambda=2 x=1").answer, "P(X <= 1) = 0.864665");
+  assert.equal(analyzeStatistics("uniform min=2 max=10 between 4 and 7").answer, "P(4 <= X <= 7) = 0.375");
 });
 
 runTest("statistics mode computes hypergeometric probabilities", () => {
@@ -509,6 +522,10 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
   assert.equal(analyzeUniversal("poisson lambda=3 k=2").summary, "Poisson probability");
+  assert.equal(analyzeUniversal("geometric p=0.25 k=3").summary, "geometric probability");
+  assert.equal(analyzeUniversal("exponential lambda=2 x=1").summary, "exponential probability");
+  assert.equal(analyzeUniversal("uniform min=2 max=10 between 4 and 7").summary, "uniform probability");
+  assert.equal(analyzeUniversal("inverse normal p=0.975 mean=0 sd=1").summary, "inverse normal");
   assert.equal(analyzeUniversal("hypergeometric population=50 successes=5 draws=10 k=2").summary, "hypergeometric probability");
   assert.equal(analyzeUniversal("expected value values: 0, 1, 2 probabilities: 0.2, 0.5, 0.3").summary, "discrete expected value");
   assert.equal(analyzeUniversal("bayes prior=0.01 sensitivity=0.99 specificity=0.95").summary, "Bayes theorem");

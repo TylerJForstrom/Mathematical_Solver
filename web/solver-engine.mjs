@@ -640,6 +640,14 @@ export function analyzeStatistics(statement) {
   }
 
   if (lower.includes("normal")) {
+    if (
+      lower.includes("inverse") ||
+      lower.includes("quantile") ||
+      lower.includes("percentile") ||
+      lower.includes("critical")
+    ) {
+      return analyzeInverseNormal(statement);
+    }
     return analyzeNormalDistribution(statement);
   }
 
@@ -647,8 +655,20 @@ export function analyzeStatistics(statement) {
     return analyzeBinomial(statement);
   }
 
+  if (lower.includes("geometric")) {
+    return analyzeGeometric(statement);
+  }
+
   if (lower.includes("poisson")) {
     return analyzePoisson(statement);
+  }
+
+  if (lower.includes("exponential")) {
+    return analyzeExponential(statement);
+  }
+
+  if (lower.includes("uniform")) {
+    return analyzeUniform(statement);
   }
 
   if (lower.includes("expected value") || lower.includes("expectation") || lower.includes("expected distribution")) {
@@ -2692,6 +2712,230 @@ function analyzePoisson(statement) {
   };
 }
 
+function analyzeGeometric(statement) {
+  const request = parseGeometricInput(statement);
+  const p = request.p;
+  const k = request.k;
+
+  if (!(p > 0 && p <= 1)) {
+    throw new Error("Geometric probability needs p with 0 < p <= 1.");
+  }
+  if (!Number.isInteger(k) || k < 1) {
+    throw new Error("Geometric probability uses trial count k with integer k >= 1.");
+  }
+
+  const exact = geometricProbability(p, k);
+  const atMost = 1 - (1 - p) ** k;
+  const below = k === 1 ? 0 : 1 - (1 - p) ** (k - 1);
+  const atLeast = (1 - p) ** (k - 1);
+  const greater = (1 - p) ** k;
+  const probability = request.tail === "at-most"
+    ? atMost
+    : request.tail === "less"
+      ? below
+      : request.tail === "at-least"
+        ? atLeast
+        : request.tail === "greater"
+          ? greater
+          : exact;
+  const label = poissonProbabilityLabel(request.tail, k);
+  const expected = 1 / p;
+  const variance = (1 - p) / (p ** 2);
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "GEOMETRIC",
+      children: [
+        statsMetricNode("p", p),
+        statsMetricNode("k", k),
+        statsMetricNode("P", probability),
+      ],
+    },
+    answer: `${label} = ${formatNumber(probability)}`,
+    summary: "geometric probability",
+    details: "Trials until first success",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("p", p), statsMetricNode("k", k)],
+    }),
+    steps: [
+      {
+        title: "Read geometric parameters",
+        expression: `p = ${formatNumber(p)}, k = ${k}`,
+        detail: "A geometric model counts the trial on which the first success occurs.",
+      },
+      {
+        title: "Apply probability formula",
+        expression: "P(X = k) = (1-p)^(k-1) p",
+        detail: "The first k-1 trials fail and the kth trial succeeds.",
+      },
+      {
+        title: "Evaluate requested tail",
+        expression: `${label} = ${formatNumber(probability)}`,
+        detail: "Cumulative questions use the geometric series for repeated failures.",
+      },
+    ],
+    artifacts: [
+      [`P(X = ${k})`, formatNumber(exact)],
+      [`P(X <= ${k})`, formatNumber(atMost)],
+      [`P(X >= ${k})`, formatNumber(atLeast)],
+      ["Expected value", formatNumber(expected)],
+      ["Variance", formatNumber(variance)],
+      ["Standard deviation", formatNumber(Math.sqrt(variance))],
+    ],
+  };
+}
+
+function analyzeExponential(statement) {
+  const request = parseExponentialInput(statement);
+  const lambda = request.lambda;
+  const x = request.x;
+
+  if (!(lambda > 0)) {
+    throw new Error("Exponential probability needs lambda greater than 0, or a positive mean.");
+  }
+  if (!(x >= 0)) {
+    throw new Error("Exponential probability needs x >= 0.");
+  }
+
+  const leftTail = 1 - Math.exp(-lambda * x);
+  const rightTail = Math.exp(-lambda * x);
+  const probability = request.tail === "greater" || request.tail === "at-least" ? rightTail : leftTail;
+  const label = request.tail === "greater" || request.tail === "at-least"
+    ? `P(X > ${formatNumber(x)})`
+    : `P(X <= ${formatNumber(x)})`;
+  const expected = 1 / lambda;
+  const variance = 1 / (lambda ** 2);
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "EXPONENTIAL",
+      children: [
+        statsMetricNode("lambda", lambda),
+        statsMetricNode("x", x),
+        statsMetricNode("P", probability),
+      ],
+    },
+    answer: `${label} = ${formatNumber(probability)}`,
+    summary: "exponential probability",
+    details: "Continuous waiting-time distribution",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("lambda", lambda), statsMetricNode("x", x)],
+    }),
+    steps: [
+      {
+        title: "Read exponential parameters",
+        expression: `lambda = ${formatNumber(lambda)}, x = ${formatNumber(x)}`,
+        detail: "An exponential model measures waiting time between events.",
+      },
+      {
+        title: "Evaluate CDF or survival function",
+        expression: request.tail === "greater" || request.tail === "at-least"
+          ? "P(X > x) = e^(-lambda x)"
+          : "P(X <= x) = 1 - e^(-lambda x)",
+        detail: "Continuous tail probabilities come from the exponential curve.",
+      },
+      {
+        title: "Report probability",
+        expression: `${label} = ${formatNumber(probability)}`,
+        detail: "The solver also reports the distribution moments.",
+      },
+    ],
+    artifacts: [
+      [`P(X <= ${formatNumber(x)})`, formatNumber(leftTail)],
+      [`P(X > ${formatNumber(x)})`, formatNumber(rightTail)],
+      ["Expected value", formatNumber(expected)],
+      ["Variance", formatNumber(variance)],
+      ["Standard deviation", formatNumber(Math.sqrt(variance))],
+    ],
+  };
+}
+
+function analyzeUniform(statement) {
+  const request = parseUniformInput(statement);
+  const min = request.min;
+  const max = request.max;
+
+  if (!(max > min)) {
+    throw new Error("Uniform probability needs max greater than min.");
+  }
+
+  const width = max - min;
+  const density = 1 / width;
+  let probability;
+  let label;
+  let expression;
+  if (request.interval) {
+    const lower = Math.max(min, Math.min(request.interval.left, request.interval.right));
+    const upper = Math.min(max, Math.max(request.interval.left, request.interval.right));
+    probability = Math.max(0, upper - lower) / width;
+    label = `P(${formatNumber(request.interval.left)} <= X <= ${formatNumber(request.interval.right)})`;
+    expression = "P(a <= X <= b) = interval length / total length";
+  } else if (request.tail === "greater" || request.tail === "at-least") {
+    probability = clampProbability((max - request.x) / width);
+    label = `P(X > ${formatNumber(request.x)})`;
+    expression = "P(X > x) = (max - x) / (max - min)";
+  } else {
+    probability = clampProbability((request.x - min) / width);
+    label = `P(X <= ${formatNumber(request.x)})`;
+    expression = "P(X <= x) = (x - min) / (max - min)";
+  }
+  const expected = (min + max) / 2;
+  const variance = width ** 2 / 12;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "UNIFORM",
+      children: [
+        statsMetricNode("min", min),
+        statsMetricNode("max", max),
+        statsMetricNode("P", probability),
+      ],
+    },
+    answer: `${label} = ${formatNumber(probability)}`,
+    summary: "uniform probability",
+    details: "Continuous equal-density distribution",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("min", min), statsMetricNode("max", max)],
+    }),
+    steps: [
+      {
+        title: "Read uniform interval",
+        expression: `[${formatNumber(min)}, ${formatNumber(max)}]`,
+        detail: "A uniform model gives every equal-length subinterval the same probability.",
+      },
+      {
+        title: "Compute length ratio",
+        expression,
+        detail: "The probability is a length inside the interval divided by total interval length.",
+      },
+      {
+        title: "Report probability",
+        expression: `${label} = ${formatNumber(probability)}`,
+        detail: "The solver clamps probabilities to the valid support of the distribution.",
+      },
+    ],
+    artifacts: [
+      [label, formatNumber(probability)],
+      ["Density", formatNumber(density)],
+      ["Expected value", formatNumber(expected)],
+      ["Variance", formatNumber(variance)],
+      ["Standard deviation", formatNumber(Math.sqrt(variance))],
+    ],
+  };
+}
+
 function analyzeDiscreteDistribution(statement) {
   const { values, probabilities } = parseDiscreteDistributionInput(statement);
   const expectedValue = values.reduce((sum, value, index) => sum + value * probabilities[index], 0);
@@ -2891,6 +3135,58 @@ function analyzeNormalDistribution(statement) {
       ["z-score", formatNumber(z)],
       [`P(X <= ${formatNumber(xValue)})`, formatNumber(leftTail)],
       [`P(X > ${formatNumber(xValue)})`, formatNumber(rightTail)],
+    ],
+  };
+}
+
+function analyzeInverseNormal(statement) {
+  const request = parseInverseNormalInput(statement);
+  const z = inverseNormalCdf(request.probability);
+  const x = request.mean + request.sd * z;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "INV NORMAL",
+      children: [
+        statsMetricNode("p", request.probability),
+        statsMetricNode("mu", request.mean),
+        statsMetricNode("sd", request.sd),
+        statsMetricNode("x", x),
+      ],
+    },
+    answer: `x = ${formatNumber(x)}`,
+    summary: "inverse normal",
+    details: "Normal percentile or critical value",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("p", request.probability), statsMetricNode("mu", request.mean), statsMetricNode("sd", request.sd)],
+    }),
+    steps: [
+      {
+        title: "Read inverse-normal request",
+        expression: `P(X <= x) = ${formatNumber(request.probability)}`,
+        detail: "The solver finds the value x that leaves the requested probability to the left.",
+      },
+      {
+        title: "Find standard-normal quantile",
+        expression: `z = ${formatNumber(z)}`,
+        detail: "Binary search inverts the standard normal CDF.",
+      },
+      {
+        title: "Scale to requested normal distribution",
+        expression: `x = mean + z*sd = ${formatNumber(x)}`,
+        detail: "The standard-normal value is converted back to the original units.",
+      },
+    ],
+    artifacts: [
+      ["Left-tail probability", formatNumber(request.probability)],
+      ["z critical", formatNumber(z)],
+      ["Mean", formatNumber(request.mean)],
+      ["Standard deviation", formatNumber(request.sd)],
+      ["x value", formatNumber(x)],
     ],
   };
 }
@@ -4792,22 +5088,118 @@ function parsePoissonInput(text) {
   const lambda = readNamedNumber(text, ["lambda", "rate", "mean", "mu"], numbers[0]);
   const kFallback = numbers.length >= 2 ? numbers[1] : Number.NaN;
   const k = readNamedNumber(text, ["k", "x", "value"], kFallback);
-  const lower = text.toLowerCase();
-  let tail = "exact";
-  if (lower.includes("at most") || lower.includes("<=") || lower.includes("no more than")) {
-    tail = "at-most";
-  } else if (lower.includes("less than") || lower.includes("<")) {
-    tail = "less";
-  } else if (lower.includes("at least") || lower.includes(">=")) {
-    tail = "at-least";
-  } else if (lower.includes("greater than") || lower.includes("more than") || lower.includes(">")) {
-    tail = "greater";
-  }
 
   return {
     lambda,
     k: Number(k),
-    tail,
+    tail: parseProbabilityTail(text),
+  };
+}
+
+function parseGeometricInput(text) {
+  const numbers = parseNumbers(text);
+  const p = readNamedNumber(text, ["p", "probability", "prob"], numbers[0]);
+  const kFallback = numbers.length >= 2 ? numbers[1] : Number.NaN;
+  const k = readNamedNumber(text, ["k", "x", "value", "trial"], kFallback);
+
+  return {
+    p,
+    k: Number(k),
+    tail: parseProbabilityTail(text),
+  };
+}
+
+function parseExponentialInput(text) {
+  const numbers = parseNumbers(text);
+  const namedRate = readNamedNumber(text, ["lambda", "rate"], Number.NaN);
+  const meanValue = readNamedNumber(text, ["mean", "mu"], Number.NaN);
+  const lambda = Number.isFinite(namedRate)
+    ? namedRate
+    : Number.isFinite(meanValue)
+      ? 1 / meanValue
+      : numbers[0];
+  const xFallback = numbers.length >= 2 ? numbers[1] : Number.NaN;
+  const x = readNamedNumber(text, ["x", "value", "t", "time"], xFallback);
+
+  return {
+    lambda,
+    x,
+    tail: parseProbabilityTail(text),
+  };
+}
+
+function parseUniformInput(text) {
+  const numbers = parseNumbers(text);
+  const min = readNamedNumber(text, ["min", "minimum", "lower", "a"], numbers[0]);
+  const max = readNamedNumber(text, ["max", "maximum", "upper", "b"], numbers[1]);
+  const interval = parseBetweenInterval(text);
+  const xFallback = numbers.length >= 3 ? numbers[2] : Number.NaN;
+  const x = readNamedNumber(text, ["x", "value"], xFallback);
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    throw new Error("Uniform probability needs min and max, such as uniform min=2 max=10 x=5.");
+  }
+  if (!interval && !Number.isFinite(x)) {
+    throw new Error("Uniform probability needs x or an interval, such as uniform min=2 max=10 between 4 and 7.");
+  }
+
+  return {
+    min,
+    max,
+    x,
+    interval,
+    tail: parseProbabilityTail(text),
+  };
+}
+
+function parseInverseNormalInput(text) {
+  const numbers = parseNumbers(text);
+  let probability = readNamedNumber(text, ["p", "probability", "area", "cdf", "percentile"], numbers[0]);
+  if (probability > 1 && probability <= 100) {
+    probability /= 100;
+  }
+  const meanValue = readNamedNumber(text, ["mean", "mu"], numbers.length >= 3 ? numbers[1] : 0);
+  const sdValue = readNamedNumber(text, ["sd", "sigma", "std"], numbers.length >= 3 ? numbers[2] : 1);
+
+  if (!(probability > 0 && probability < 1)) {
+    throw new Error("Inverse normal needs a left-tail probability between 0 and 1.");
+  }
+  if (!(sdValue > 0)) {
+    throw new Error("Inverse normal needs a positive standard deviation.");
+  }
+
+  return {
+    probability,
+    mean: meanValue,
+    sd: sdValue,
+  };
+}
+
+function parseProbabilityTail(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes("at most") || lower.includes("<=") || lower.includes("no more than")) {
+    return "at-most";
+  }
+  if (lower.includes("less than") || lower.includes("<")) {
+    return "less";
+  }
+  if (lower.includes("at least") || lower.includes(">=")) {
+    return "at-least";
+  }
+  if (lower.includes("greater than") || lower.includes("more than") || lower.includes(">")) {
+    return "greater";
+  }
+  return "exact";
+}
+
+function parseBetweenInterval(text) {
+  const match = text.match(/\bbetween\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s+(?:and|to)\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
+  if (!match) {
+    return null;
+  }
+  return {
+    left: Number(match[1]),
+    right: Number(match[2]),
   };
 }
 
@@ -4929,6 +5321,10 @@ function poissonProbability(lambda, k) {
   return Math.exp(-lambda) * lambda ** k / factorial(k);
 }
 
+function geometricProbability(p, k) {
+  return (1 - p) ** (k - 1) * p;
+}
+
 function hypergeometricProbability(population, successes, draws, k) {
   return (
     combination(successes, k) *
@@ -4984,6 +5380,10 @@ function sumRange(start, end, callback) {
     total += callback(value);
   }
   return total;
+}
+
+function clampProbability(value) {
+  return Math.max(0, Math.min(1, value));
 }
 
 function zCriticalForLevel(level) {
@@ -5160,8 +5560,14 @@ function isStatisticsQuestion(lower) {
     "correlation",
     "binomial",
     "poisson",
+    "geometric",
+    "exponential",
+    "uniform",
     "hypergeometric",
     "normal",
+    "percentile",
+    "quantile",
+    "critical value",
     "z-score",
     "zscore",
     "expected value",

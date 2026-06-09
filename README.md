@@ -35,8 +35,9 @@ The frontend currently supports:
   one-proportion/two-proportion z tests, proportion confidence intervals,
   one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis,
   chi-square goodness-of-fit, binomial probability, Poisson probability, normal
-  probability, hypergeometric probability, discrete expected value/variance,
-  Bayes theorem, and z-score calculations
+  probability, inverse-normal percentiles, geometric probability, exponential
+  probability, uniform probability, hypergeometric probability, discrete expected
+  value/variance, Bayes theorem, and z-score calculations
 - Effect sizes and follow-up comparisons, including Cohen's d/dz, Hedges g,
   eta squared, omega squared, rank-biserial correlation, epsilon squared,
   Cohen's w, Bonferroni-adjusted ANOVA pairwise comparisons, and Dunn-style
@@ -118,6 +119,11 @@ The same idea works for algebra and calculus:
   p-value, eta squared, omega squared, and pairwise comparisons.
 - `hypergeometric population=50 successes=5 draws=10 k=2` models sampling
   without replacement and returns `P(X = 2) = 0.20984`.
+- `inverse normal p=0.975 mean=0 sd=1` inverts the normal CDF and returns
+  `x = 1.959963`.
+- `geometric p=0.25 k=3`, `exponential lambda=2 x=1`, and
+  `uniform min=2 max=10 between 4 and 7` evaluate additional probability
+  distribution trees.
 - `two-proportion z-test successes1=56 n1=100 successes2=44 n2=100` compares
   two sample proportions and reports `z = 1.697056, p = 0.089686`.
 - `expected value values: 0,1,2 probabilities: 0.2,0.5,0.3` treats the
@@ -181,11 +187,12 @@ The demo includes:
 - Taylor/Maclaurin approximations through Ask mode
 - Complex arithmetic and complex quadratic roots through Ask mode
 - Dataset summaries, confidence intervals, regression/correlation, binomial probability,
-  Poisson probability, hypergeometric probability, normal probability, z-scores,
-  discrete expected value, Bayes theorem, one-sample/two-sample/paired t tests,
-  one-proportion/two-proportion z tests, proportion confidence intervals, ANOVA,
-  chi-square tests, nonparametric rank tests, effect sizes, and pairwise follow-up
-  summaries in Stats mode
+  Poisson probability, geometric probability, exponential probability, uniform
+  probability, hypergeometric probability, normal probability, inverse-normal
+  percentiles, z-scores, discrete expected value, Bayes theorem,
+  one-sample/two-sample/paired t tests, one-proportion/two-proportion z tests,
+  proportion confidence intervals, ANOVA, chi-square tests, nonparametric rank
+  tests, effect sizes, and pairwise follow-up summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
   graphing, and numerical roots through Ask mode
 - Step-by-step explanation cards
