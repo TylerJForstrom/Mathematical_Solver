@@ -616,6 +616,68 @@ export function analyzeTaylor(statement, variableHint = "x") {
   };
 }
 
+export function analyzeLaplaceTransform(statement) {
+  const request = extractLaplaceQuestion(statement);
+  const expression = parseMath(request.expression);
+  if (expression.kind === "equation") {
+    throw new Error("Laplace transform mode expects a function expression, not an equation.");
+  }
+
+  const expressionVariables = mathVariables(expression).filter((name) => !isMathConstantName(name));
+  if (!request.variable && expressionVariables.length === 1) {
+    request.variable = expressionVariables[0];
+  }
+  if (!request.variable) {
+    request.variable = "t";
+  }
+  if (expressionVariables.some((name) => name !== request.variable)) {
+    throw new Error("Laplace transform mode supports one input variable at a time.");
+  }
+
+  const transform = laplaceTransformExpression(expression, request.variable, request.outputVariable);
+  const tree = {
+    kind: "mathLaplaceTransform",
+    label: "LAPLACE",
+    children: [
+      expression,
+      statsMetricNode("input", 0),
+      statsMetricNode("output", 0),
+    ],
+  };
+
+  return {
+    mode: "calculus",
+    tree,
+    answer: `L{${formatMath(expression)}} = ${transform}`,
+    summary: "Laplace transform",
+    details: `Transform from ${request.variable}-domain to ${request.outputVariable}-domain`,
+    variables: [request.variable, request.outputVariable],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Parse time-domain function",
+        expression: `f(${request.variable}) = ${formatMath(expression)}`,
+        detail: "The input is parsed into the same expression tree used by the calculus solvers.",
+      },
+      {
+        title: "Match transform table",
+        expression: "constants, powers, exponentials, sine, cosine",
+        detail: "Supported nodes are mapped to their standard Laplace transform formulas.",
+      },
+      {
+        title: "Apply linearity",
+        expression: `L{${formatMath(expression)}} = ${transform}`,
+        detail: "Sums and scalar multiples are transformed term by term.",
+      },
+    ],
+    artifacts: [
+      ["Function", `f(${request.variable}) = ${formatMath(expression)}`],
+      ["Transform variable", request.outputVariable],
+      ["Laplace transform", transform],
+    ],
+  };
+}
+
 export function analyzeComplex(statement) {
   const expressionText = cleanComplexQuestion(statement);
   const parsed = parseMath(expressionText);
@@ -1134,6 +1196,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isTaylorQuestion(lower)) {
     routed = analyzeTaylor(question);
     routedLabel = "Taylor";
+  } else if (isLaplaceQuestion(lower)) {
+    routed = analyzeLaplaceTransform(question);
+    routedLabel = "Laplace transform";
   } else if (isComplexQuestion(lower)) {
     routed = analyzeComplex(question);
     routedLabel = "Complex";
@@ -7366,6 +7431,216 @@ function formatTaylorVariablePart(order, variable, center) {
   return order === 1 ? base : `${base}^${order}`;
 }
 
+function laplaceTransformExpression(node, variable, outputVariable) {
+  const constant = constantMathValue(node, variable);
+  if (Number.isFinite(constant)) {
+    return formatLaplaceFraction(constant, outputVariable);
+  }
+
+  if (node.kind === "mathSymbol") {
+    if (node.name === variable) {
+      return formatLaplacePowerTerm(1, outputVariable);
+    }
+    throw new Error(`Unsupported Laplace symbol '${node.name}'.`);
+  }
+
+  if (node.kind === "mathUnary") {
+    return scaleLaplaceText(-1, laplaceTransformExpression(node.operand, variable, outputVariable));
+  }
+
+  if (node.kind === "mathBinary") {
+    if (node.operator === "+" || node.operator === "-") {
+      return combineLaplaceText(
+        laplaceTransformExpression(node.left, variable, outputVariable),
+        node.operator,
+        laplaceTransformExpression(node.right, variable, outputVariable),
+      );
+    }
+
+    if (node.operator === "*") {
+      const leftConstant = constantMathValue(node.left, variable);
+      if (Number.isFinite(leftConstant)) {
+        return scaleLaplaceText(leftConstant, laplaceTransformExpression(node.right, variable, outputVariable));
+      }
+      const rightConstant = constantMathValue(node.right, variable);
+      if (Number.isFinite(rightConstant)) {
+        return scaleLaplaceText(rightConstant, laplaceTransformExpression(node.left, variable, outputVariable));
+      }
+    }
+
+    if (node.operator === "/") {
+      const denominator = constantMathValue(node.right, variable);
+      if (Number.isFinite(denominator) && !nearlyEqual(denominator, 0)) {
+        return scaleLaplaceText(1 / denominator, laplaceTransformExpression(node.left, variable, outputVariable));
+      }
+    }
+
+    if (node.operator === "^" && node.left.kind === "mathSymbol" && node.left.name === variable) {
+      const power = constantMathValue(node.right, variable);
+      if (Number.isInteger(power) && power >= 0 && power <= 20) {
+        return formatLaplacePowerTerm(power, outputVariable);
+      }
+    }
+  }
+
+  if (node.kind === "mathFunction") {
+    const coefficient = coefficientOfLaplaceVariable(node.argument, variable);
+    if (Number.isFinite(coefficient)) {
+      if (node.name === "exp") {
+        return formatLaplaceExponential(coefficient, outputVariable);
+      }
+      if (node.name === "sin") {
+        return formatLaplaceSine(coefficient, outputVariable);
+      }
+      if (node.name === "cos") {
+        return formatLaplaceCosine(coefficient, outputVariable);
+      }
+    }
+  }
+
+  throw new Error("Laplace transform supports constants, powers of the input variable, exp(at), sin(at), cos(at), sums, and scalar multiples.");
+}
+
+function constantMathValue(node, variable) {
+  const variables = mathVariables(node).filter((name) => !isMathConstantName(name));
+  if (variables.length > 0 || variables.includes(variable)) {
+    return Number.NaN;
+  }
+  return evaluateMath(node);
+}
+
+function coefficientOfLaplaceVariable(node, variable) {
+  if (node.kind === "mathSymbol" && node.name === variable) {
+    return 1;
+  }
+  if (node.kind === "mathUnary") {
+    const coefficient = coefficientOfLaplaceVariable(node.operand, variable);
+    return Number.isFinite(coefficient) ? -coefficient : Number.NaN;
+  }
+  if (node.kind === "mathBinary") {
+    if (node.operator === "*") {
+      const leftConstant = constantMathValue(node.left, variable);
+      const rightCoefficient = coefficientOfLaplaceVariable(node.right, variable);
+      if (Number.isFinite(leftConstant) && Number.isFinite(rightCoefficient)) {
+        return leftConstant * rightCoefficient;
+      }
+      const rightConstant = constantMathValue(node.right, variable);
+      const leftCoefficient = coefficientOfLaplaceVariable(node.left, variable);
+      if (Number.isFinite(rightConstant) && Number.isFinite(leftCoefficient)) {
+        return rightConstant * leftCoefficient;
+      }
+    }
+    if (node.operator === "/") {
+      const denominator = constantMathValue(node.right, variable);
+      const numerator = coefficientOfLaplaceVariable(node.left, variable);
+      if (Number.isFinite(denominator) && !nearlyEqual(denominator, 0) && Number.isFinite(numerator)) {
+        return numerator / denominator;
+      }
+    }
+  }
+  return Number.NaN;
+}
+
+function formatLaplacePowerTerm(power, outputVariable) {
+  return formatLaplaceFraction(factorial(power), formatLaplacePower(outputVariable, power + 1));
+}
+
+function formatLaplaceExponential(coefficient, outputVariable) {
+  return formatLaplaceFraction(1, formatLaplaceShift(outputVariable, coefficient));
+}
+
+function formatLaplaceSine(coefficient, outputVariable) {
+  if (nearlyEqual(coefficient, 0)) {
+    return "0";
+  }
+  return formatLaplaceFraction(coefficient, formatLaplaceQuadratic(outputVariable, coefficient));
+}
+
+function formatLaplaceCosine(coefficient, outputVariable) {
+  if (nearlyEqual(coefficient, 0)) {
+    return formatLaplaceFraction(1, outputVariable);
+  }
+  return `${outputVariable}/${wrapLaplaceDenominator(formatLaplaceQuadratic(outputVariable, coefficient))}`;
+}
+
+function formatLaplaceFraction(numerator, denominator) {
+  const normalized = normalizeNumber(numerator);
+  if (nearlyEqual(normalized, 0)) {
+    return "0";
+  }
+  const denominatorText = wrapLaplaceDenominator(denominator);
+  if (nearlyEqual(normalized, 1)) {
+    return `1/${denominatorText}`;
+  }
+  if (nearlyEqual(normalized, -1)) {
+    return `-1/${denominatorText}`;
+  }
+  return `${formatNumber(normalized)}/${denominatorText}`;
+}
+
+function formatLaplacePower(outputVariable, power) {
+  return power === 1 ? outputVariable : `${outputVariable}^${power}`;
+}
+
+function formatLaplaceShift(outputVariable, coefficient) {
+  if (nearlyEqual(coefficient, 0)) {
+    return outputVariable;
+  }
+  const magnitude = Math.abs(coefficient);
+  return coefficient > 0
+    ? `${outputVariable} - ${formatNumber(magnitude)}`
+    : `${outputVariable} + ${formatNumber(magnitude)}`;
+}
+
+function formatLaplaceQuadratic(outputVariable, coefficient) {
+  return `${outputVariable}^2 + ${formatNumber(coefficient * coefficient)}`;
+}
+
+function wrapLaplaceDenominator(denominator) {
+  return /\s/.test(denominator) ? `(${denominator})` : denominator;
+}
+
+function scaleLaplaceText(coefficient, text) {
+  const normalized = normalizeNumber(coefficient);
+  if (nearlyEqual(normalized, 0) || text === "0") {
+    return "0";
+  }
+  if (nearlyEqual(normalized, 1)) {
+    return text;
+  }
+  if (text.startsWith("1/")) {
+    return `${formatNumber(normalized)}/${text.slice(2)}`;
+  }
+  if (nearlyEqual(normalized, -1)) {
+    return negateLaplaceText(text);
+  }
+  return `${formatNumber(normalized)}${wrapLaplaceTerm(text)}`;
+}
+
+function combineLaplaceText(left, operator, right) {
+  if (left === "0") {
+    return operator === "-" ? negateLaplaceText(right) : right;
+  }
+  if (right === "0") {
+    return left;
+  }
+  if (operator === "+") {
+    return right.startsWith("-") ? `${left} - ${right.slice(1)}` : `${left} + ${right}`;
+  }
+  return right.startsWith("-") ? `${left} + ${right.slice(1)}` : `${left} - ${right}`;
+}
+
+function negateLaplaceText(text) {
+  if (text.startsWith("-")) {
+    return text.slice(1);
+  }
+  return text.startsWith("1/") ? `-${text}` : `-${wrapLaplaceTerm(text)}`;
+}
+
+function wrapLaplaceTerm(text) {
+  return / [+-] /.test(text) ? `(${text})` : text;
+}
+
 function sampleFunction(expression, variable, xMin, xMax, count) {
   const points = [];
   for (let index = 0; index < count; index += 1) {
@@ -10258,6 +10533,12 @@ function isTaylorQuestion(lower) {
     lower.includes("maclaurin series");
 }
 
+function isLaplaceQuestion(lower) {
+  return lower.startsWith("laplace ") ||
+    lower.startsWith("laplace transform ") ||
+    lower.includes("laplace transform");
+}
+
 function isComplexQuestion(lower) {
   if (lower.includes("=")) {
     return false;
@@ -10732,6 +11013,45 @@ function extractTaylorQuestion(question, fallbackVariable) {
     variable,
     center,
     order,
+  };
+}
+
+function extractLaplaceQuestion(question) {
+  let text = question
+    .replace(/^(find|compute|calculate)\s+(?:the\s+)?/i, "")
+    .replace(/^laplace\s+(?:transform\s+)?(?:of\s+)?/i, "")
+    .replace(/^transform\s+laplace\s+(?:of\s+)?/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  let variable = "";
+  let outputVariable = "s";
+
+  const outputMatch = text.match(/\b(?:to|into|output)\s+([A-Za-z_]\w*)\b/i);
+  if (outputMatch) {
+    outputVariable = outputMatch[1];
+    text = text.replace(outputMatch[0], "").trim();
+  }
+
+  const variableMatch = text.match(/\b(?:with respect to|wrt|for)\s+([A-Za-z_]\w*)\b/i);
+  if (variableMatch) {
+    variable = variableMatch[1];
+    text = text.replace(variableMatch[0], "").trim();
+  }
+
+  text = text
+    .replace(/^of\s+/i, "")
+    .replace(/^f\s*\([A-Za-z_]\w*\)\s*=\s*/i, "")
+    .replace(/^y\s*=\s*/i, "")
+    .trim();
+
+  if (!text) {
+    throw new Error("Laplace transform needs a function, such as laplace transform of sin(t) + 2t.");
+  }
+
+  return {
+    expression: text,
+    variable,
+    outputVariable,
   };
 }
 
@@ -12723,6 +13043,7 @@ function isOperatorNode(node) {
     "mathFunction",
     "equation",
     "mathFourierSeries",
+    "mathLaplaceTransform",
     "matrixOperation",
   ].includes(node.kind);
 }

@@ -35,6 +35,8 @@ The frontend currently supports:
   directional derivatives at a point
 - Finite and one-sided numeric limits, including removable discontinuities
 - Taylor and Maclaurin polynomial expansions for supported elementary functions
+- Laplace transforms for constants, powers, exponentials, sine/cosine terms,
+  sums, and scalar multiples
 - Polynomial and elementary indefinite/definite integrals, including trig,
   exponential, logarithmic, square-root, and reciprocal forms
 - Polynomial critical points and local max/min classification
@@ -157,6 +159,8 @@ The same idea works for algebra and calculus:
   removable discontinuity and returns `limit = 2`.
 - `taylor sin(x) order=5` repeatedly differentiates and returns
   `x - 0.166667x^3 + 0.008333x^5`.
+- `laplace transform of sin(t) + 2t` applies transform-table rules and
+  linearity to return `1/(s^2 + 1) + 2/s^2`.
 - `integrate x^2 from 0 to 3` builds an antiderivative tree and evaluates the bounds.
 - `integrate sin(x)` uses a function node and returns `-cos(x) + C`.
 - `integrate exp(x) from 0 to 1` evaluates an elementary definite integral.

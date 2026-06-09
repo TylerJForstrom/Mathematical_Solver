@@ -12,6 +12,7 @@ import {
   analyzeGraph,
   analyzeInequality,
   analyzeIntegral,
+  analyzeLaplaceTransform,
   analyzeLimit,
   analyzeLogic,
   analyzeMatrix,
@@ -200,6 +201,16 @@ runTest("taylor mode builds Maclaurin polynomials", () => {
 
 runTest("taylor mode expands around nonzero centers", () => {
   assert.equal(analyzeTaylor("taylor ln(x) around 1 order=3").answer, "(x - 1) - 0.5(x - 1)^2 + 0.333333(x - 1)^3");
+});
+
+runTest("laplace mode applies transform table and linearity", () => {
+  const result = analyzeLaplaceTransform("laplace transform of sin(t) + 2t");
+  const shifted = analyzeLaplaceTransform("laplace transform of exp(3t) + cos(2t)");
+
+  assert.equal(result.summary, "Laplace transform");
+  assert.equal(result.answer, "L{sin(t) + 2 * t} = 1/(s^2 + 1) + 2/s^2");
+  assert.equal(artifactValue(result, "Laplace transform"), "1/(s^2 + 1) + 2/s^2");
+  assert.equal(shifted.answer, "L{exp(3 * t) + cos(2 * t)} = 1/(s - 3) + s/(s^2 + 4)");
 });
 
 runTest("complex mode evaluates arithmetic and functions", () => {
@@ -732,6 +743,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("gradient x^2 + x*y + y^2 at x=1 y=2").summary, "gradient");
   assert.equal(analyzeUniversal("directional derivative x^2 + x*y + y^2 at x=1 y=2 direction [3,4]").answer, "D_u f = 6.4");
   assert.equal(analyzeUniversal("taylor sin(x) order=5").summary, "Maclaurin polynomial");
+  assert.equal(analyzeUniversal("laplace transform of sin(t) + 2t").summary, "Laplace transform");
   assert.equal(analyzeUniversal("complex (3+4i)*(2-i)").answer, "10 + 5i");
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
   assert.equal(analyzeUniversal("linear programming maximize 3x + 2y subject to x + y <= 4; x <= 2; y <= 3; x >= 0; y >= 0").summary, "linear programming");
