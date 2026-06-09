@@ -988,6 +988,10 @@ export function analyzeStatistics(statement) {
     return analyzeBayesianProportion(statement);
   }
 
+  if (lower.includes("permutation") || lower.includes("randomization test") || lower.includes("randomisation test")) {
+    return analyzePermutationTest(statement);
+  }
+
   if (lower.includes("bootstrap")) {
     return analyzeBootstrapInterval(statement);
   }
@@ -4169,6 +4173,81 @@ function analyzeBootstrapInterval(statement) {
       ["Observed statistic", formatNumber(observed)],
       ["Lower bound", formatNumber(lower)],
       ["Upper bound", formatNumber(upper)],
+    ],
+  };
+}
+
+function analyzePermutationTest(statement) {
+  const request = parsePermutationInput(statement);
+  const observedDifference = permutationDifference(request.left, request.right, request.statistic);
+  const distribution = permutationDistribution(request);
+  const pValue = permutationPValue(distribution, observedDifference, request.alternative);
+  const decision = pValue < request.alpha ? `reject H0 at alpha=${formatNumber(request.alpha)}` : `fail to reject H0 at alpha=${formatNumber(request.alpha)}`;
+  const sorted = [...distribution].sort((left, right) => left - right);
+  const lowerNull = percentileFromSorted(sorted, 0.025);
+  const upperNull = percentileFromSorted(sorted, 0.975);
+  const statisticLabel = request.statistic === "median" ? "median" : "mean";
+  const leftStatistic = bootstrapStatistic(request.left, request.statistic);
+  const rightStatistic = bootstrapStatistic(request.right, request.statistic);
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode([...request.left, ...request.right], [
+      statsMetricNode("DIFF", observedDifference),
+      statsMetricNode("P", pValue),
+      statsMetricNode("N", request.resamples),
+    ], "PERMUTE"),
+    answer: `permutation p = ${formatNumber(pValue)}`,
+    summary: "permutation test",
+    details: `${request.alternative} randomization test for two-group ${statisticLabel} difference`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([...request.left, ...request.right])),
+    steps: [
+      {
+        title: "Read two groups",
+        expression: `n1 = ${request.left.length}, n2 = ${request.right.length}`,
+        detail: "The solver compares two independent samples without assuming a parametric distribution.",
+      },
+      {
+        title: "Compute observed difference",
+        expression: `${statisticLabel}1 - ${statisticLabel}2 = ${formatNumber(observedDifference)}`,
+        detail: "The observed group difference is the statistic being tested.",
+      },
+      {
+        title: "Shuffle labels",
+        expression: `${request.resamples} seeded permutations`,
+        detail: "Under the null hypothesis, group labels are exchangeable, so shuffled labels build a null distribution.",
+      },
+      {
+        title: "Count extreme permutations",
+        expression: `p = ${formatNumber(pValue)}`,
+        detail: "The p-value is the share of shuffled differences at least as extreme as the observed difference.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the group labels are not exchangeable under the null.",
+      },
+    ],
+    table: {
+      headers: ["Quantity", "Value"],
+      rows: [
+        [`Group 1 ${statisticLabel}`, formatNumber(leftStatistic)],
+        [`Group 2 ${statisticLabel}`, formatNumber(rightStatistic)],
+        ["Observed difference", formatNumber(observedDifference)],
+        ["Null 2.5% percentile", formatNumber(lowerNull)],
+        ["Null 97.5% percentile", formatNumber(upperNull)],
+        ["p-value", formatNumber(pValue)],
+      ],
+    },
+    artifacts: [
+      ["Statistic", `${statisticLabel} difference`],
+      ["Alternative", request.alternative],
+      ["Resamples", formatNumber(request.resamples)],
+      ["Seed", formatNumber(request.seed)],
+      ["Observed difference", formatNumber(observedDifference)],
+      ["p-value", formatNumber(pValue)],
+      ["Decision", decision],
     ],
   };
 }
@@ -8609,6 +8688,48 @@ function bootstrapDistribution(values, statistic, resamples, seed) {
   return distribution;
 }
 
+function permutationDistribution(request) {
+  const random = seededRandom(request.seed);
+  const combined = [...request.left, ...request.right];
+  const leftSize = request.left.length;
+  const distribution = [];
+  for (let index = 0; index < request.resamples; index += 1) {
+    const shuffled = shuffleCopy(combined, random);
+    distribution.push(permutationDifference(
+      shuffled.slice(0, leftSize),
+      shuffled.slice(leftSize),
+      request.statistic,
+    ));
+  }
+  return distribution;
+}
+
+function permutationDifference(left, right, statistic) {
+  return normalizeNumber(bootstrapStatistic(left, statistic) - bootstrapStatistic(right, statistic));
+}
+
+function permutationPValue(distribution, observedDifference, alternative) {
+  const extreme = distribution.filter((value) => {
+    if (alternative === "less") {
+      return value <= observedDifference + EPSILON;
+    }
+    if (alternative === "greater") {
+      return value >= observedDifference - EPSILON;
+    }
+    return Math.abs(value) >= Math.abs(observedDifference) - EPSILON;
+  }).length;
+  return normalizeNumber((extreme + 1) / (distribution.length + 1));
+}
+
+function shuffleCopy(values, random) {
+  const shuffled = [...values];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
 function bootstrapStatistic(values, statistic) {
   if (statistic === "median") {
     return median([...values].sort((left, right) => left - right));
@@ -9015,6 +9136,57 @@ function parseBootstrapInput(text) {
   }
 
   return { values, statistic, level, resamples, seed };
+}
+
+function parsePermutationInput(text) {
+  let cleaned = text;
+  let statistic = text.toLowerCase().includes("median") ? "median" : "mean";
+  let resamples = 5000;
+  let seed = 12345;
+
+  const statisticMatch = cleaned.match(/\b(?:stat|statistic)\s*=\s*(mean|median)\b/i);
+  if (statisticMatch) {
+    statistic = statisticMatch[1].toLowerCase();
+    cleaned = cleaned.replace(statisticMatch[0], "");
+  }
+
+  const resamplesMatch = cleaned.match(/\b(?:resamples|samples|iterations|reps|b)\s*=\s*(\d+)\b/i);
+  if (resamplesMatch) {
+    resamples = Number(resamplesMatch[1]);
+    cleaned = cleaned.replace(resamplesMatch[0], "");
+  }
+
+  const seedMatch = cleaned.match(/\bseed\s*=\s*(\d+)\b/i);
+  if (seedMatch) {
+    seed = Number(seedMatch[1]);
+    cleaned = cleaned.replace(seedMatch[0], "");
+  }
+
+  cleaned = cleaned
+    .replace(/\bpermutation\b/gi, "")
+    .replace(/\brandomi[sz]ation\b/gi, "")
+    .replace(/\btest\b/gi, "")
+    .replace(/\bshuffle\b/gi, "")
+    .replace(/\bmean\b/gi, "")
+    .replace(/\bmedian\b/gi, "");
+
+  const parsed = parseTwoSampleInput(cleaned);
+  if (parsed.left.length < 2 || parsed.right.length < 2) {
+    throw new Error("Permutation tests need at least two values in each group.");
+  }
+  if (!Number.isSafeInteger(resamples) || resamples < 50 || resamples > 100000) {
+    throw new Error("Permutation test resamples must be an integer from 50 to 100000.");
+  }
+  if (!Number.isSafeInteger(seed) || seed < 0) {
+    throw new Error("Permutation test seed must be a nonnegative integer.");
+  }
+
+  return {
+    ...parsed,
+    statistic,
+    resamples,
+    seed,
+  };
 }
 
 function parseConfidenceLevel(text, fallback) {
@@ -10904,6 +11076,9 @@ function isStatisticsQuestion(lower) {
     "standard deviation",
     "std",
     "bootstrap",
+    "permutation",
+    "randomization test",
+    "randomisation test",
     "regression",
     "correlation",
     "covariance",
@@ -11003,6 +11178,11 @@ function isFactorQuestion(lower) {
 }
 
 function isCombinatoricsQuestion(lower) {
+  if ((lower.includes("permutation") && lower.includes("test")) ||
+      lower.includes("randomization test") ||
+      lower.includes("randomisation test")) {
+    return false;
+  }
   return lower.includes("choose") ||
     lower.includes("combination") ||
     lower.includes("permutation") ||

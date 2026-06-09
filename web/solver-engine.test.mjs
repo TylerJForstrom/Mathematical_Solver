@@ -305,6 +305,16 @@ runTest("statistics mode computes bootstrap confidence intervals", () => {
   assert.equal(medianResult.answer, "bootstrap 90% CI for median = [1, 8]");
 });
 
+runTest("statistics mode computes permutation tests", () => {
+  const meanResult = analyzeStatistics("permutation test group1: 10, 12, 9; group2: 8, 7, 11 resamples=2000 seed=5");
+  const medianResult = analyzeStatistics("permutation median test group1: 1, 2, 3, 4; group2: 4, 5, 6, 7 resamples=2000 seed=5");
+
+  assert.equal(meanResult.summary, "permutation test");
+  assert.equal(meanResult.answer, "permutation p = 0.37931");
+  assert.equal(artifactValue(meanResult, "Observed difference"), "1.666667");
+  assert.equal(medianResult.answer, "permutation p = 0.055472");
+});
+
 runTest("statistics mode computes one-proportion confidence intervals", () => {
   const result = analyzeStatistics("proportion ci successes=42 n=100 confidence=95");
 
@@ -766,6 +776,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("newton cooling ambient=70 initial=100 k=0.2 t=10").summary, "Newton cooling");
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
   assert.equal(analyzeUniversal("bootstrap mean data 10, 12, 14, 16, 18 resamples=1000 seed=7 confidence=95").summary, "bootstrap confidence interval");
+  assert.equal(analyzeUniversal("permutation test group1: 10, 12, 9; group2: 8, 7, 11 resamples=2000 seed=5").summary, "permutation test");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");

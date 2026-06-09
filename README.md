@@ -63,11 +63,12 @@ The frontend currently supports:
 - Confidence intervals, bootstrap percentile intervals,
   one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
-  one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis,
-  chi-square goodness-of-fit, binomial probability, Poisson probability, normal
-  probability, inverse-normal percentiles, geometric probability, exponential
-  probability, uniform probability, hypergeometric probability, discrete expected
-  value/variance, Bayes theorem, and z-score calculations
+  permutation tests, one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank,
+  Kruskal-Wallis, chi-square goodness-of-fit, binomial probability, Poisson
+  probability, normal probability, inverse-normal percentiles, geometric
+  probability, exponential probability, uniform probability, hypergeometric
+  probability, discrete expected value/variance, Bayes theorem, and z-score
+  calculations
 - Markov chains: n-step state distributions and stationary distributions from
   row-stochastic transition matrices
 - Bayesian beta-binomial proportion updates with posterior means, credible
@@ -203,6 +204,8 @@ The same idea works for algebra and calculus:
   distribution trees.
 - `two-proportion z-test successes1=56 n1=100 successes2=44 n2=100` compares
   two sample proportions and reports `z = 1.697056, p = 0.089686`.
+- `permutation test group1: 10,12,9; group2: 8,7,11 resamples=2000 seed=5`
+  shuffles group labels into a reproducible nonparametric p-value.
 - `bootstrap mean data 10,12,14,16,18 resamples=1000 seed=7 confidence=95`
   builds a reproducible percentile bootstrap interval for the mean.
 - `power mean effect=0.5 n=64 alpha=0.05` estimates statistical power, while
@@ -285,9 +288,9 @@ The demo includes:
   percentiles, z-scores, discrete expected value, Bayes theorem,
   Markov chains, Bayesian beta-binomial updates,
   one-sample/two-sample/paired t tests, one-proportion/two-proportion z tests,
-  proportion confidence intervals, ANOVA, chi-square tests, nonparametric rank
-  tests, power/sample-size analysis, effect sizes, and pairwise follow-up
-  summaries in Stats mode
+  proportion confidence intervals, permutation tests, ANOVA, chi-square tests,
+  nonparametric rank tests, power/sample-size analysis, effect sizes, and
+  pairwise follow-up summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
   linear programming,
   vector geometry, geometry formulas, sequences/series, graphing, differential
