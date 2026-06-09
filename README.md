@@ -4,8 +4,8 @@ Mathematical Solver is a browser-based symbolic math, statistics, and logic
 workbench. It parses problems into expression trees or statistical models, then
 uses those structures to evaluate logic, simplify algebra, solve equations,
 compute derivatives, summarize datasets, run regression, compute probability,
-work with matrices, graph functions, approximate roots numerically, and explain
-the work step by step.
+work with matrices, graph functions, approximate roots numerically, solve
+closed-form differential equations, and explain the work step by step.
 
 The frontend currently supports:
 
@@ -37,6 +37,8 @@ The frontend currently supports:
   exponential, logarithmic, square-root, and reciprocal forms
 - Polynomial critical points and local max/min classification
 - Function graphing with sampled SVG plots
+- Differential equations: exponential growth/decay, Newton cooling, logistic
+  growth, and separable power ODEs
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression and correlation for coordinate pairs
 - Confidence intervals, one-sample/two-sample/paired t tests with Student t p-values,
@@ -130,6 +132,8 @@ The same idea works for algebra and calculus:
 - `integrate exp(x) from 0 to 1` evaluates an elementary definite integral.
 - `maximize -x^2 + 4x + 1` differentiates, solves critical points, and classifies them.
 - `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
+- `ode dy/dt = 0.3y y0=2 t=5`, `newton cooling ambient=70 initial=100 k=0.2 t=10`,
+  and `logistic r=0.4 K=100 y0=10 t=8` solve closed-form differential equations.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree.
 - `mann-whitney group1: 10,12,9; group2: 8,7,11` ranks combined samples
   and computes a nonparametric U test.
@@ -213,8 +217,8 @@ The demo includes:
   proportion confidence intervals, ANOVA, chi-square tests, nonparametric rank
   tests, effect sizes, and pairwise follow-up summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
-  vector geometry, geometry formulas, sequences/series, graphing, and numerical
-  roots through Ask mode
+  vector geometry, geometry formulas, sequences/series, graphing, differential
+  equations, and numerical roots through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
 
@@ -244,20 +248,21 @@ These are good ways to make the project more impressive mathematically:
 5. Add confidence intervals for effect sizes and exact small-sample rank-test p-values.
 6. Add row-space bases, column-space bases, and larger-matrix eigenvalue approximation.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
-8. Add multi-step natural-language explanations for word problems.
-9. Add exact symbolic roots for cubic and quartic equations when possible.
-10. Convert logic statements to negation normal form, conjunctive normal form, and
+8. Add systems of differential equations and phase-plane direction fields.
+9. Add multi-step natural-language explanations for word problems.
+10. Add exact symbolic roots for cubic and quartic equations when possible.
+11. Convert logic statements to negation normal form, conjunctive normal form, and
    disjunctive normal form.
-11. Add Boolean algebra simplification rules, such as idempotent laws,
+12. Add Boolean algebra simplification rules, such as idempotent laws,
    absorption laws, De Morgan's laws, and double-negation elimination.
-12. Build a small SAT solver using the DPLL algorithm instead of checking every
+13. Build a small SAT solver using the DPLL algorithm instead of checking every
    truth-table row.
-13. Generate formal proof steps for tautologies using natural deduction or
+14. Generate formal proof steps for tautologies using natural deduction or
    sequent calculus.
-14. Add semantic tableaux, which are also tree-based, to prove whether a
+15. Add semantic tableaux, which are also tree-based, to prove whether a
    statement is satisfiable.
-15. Add Karnaugh maps for statements with two to four variables.
-16. Export expression trees to Graphviz DOT so the parse tree can be visualized.
-17. Add binary decision diagrams to represent equivalent formulas compactly.
-18. Add probability or fuzzy truth values so statements can evaluate beyond
+16. Add Karnaugh maps for statements with two to four variables.
+17. Export expression trees to Graphviz DOT so the parse tree can be visualized.
+18. Add binary decision diagrams to represent equivalent formulas compactly.
+19. Add probability or fuzzy truth values so statements can evaluate beyond
     simple true/false logic.

@@ -901,6 +901,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isOptimizationQuestion(lower)) {
     routed = analyzeOptimization(question);
     routedLabel = "Optimization";
+  } else if (isDifferentialEquationQuestion(lower)) {
+    routed = analyzeDifferentialEquation(question);
+    routedLabel = "Differential equation";
   } else if (isNumericalQuestion(lower)) {
     routed = analyzeNumerical(question);
     routedLabel = "Numerical";
@@ -2184,6 +2187,151 @@ export function analyzeNumerical(statement) {
       ["Root", `${request.variable} ~= ${formatNumber(root)}`],
       ["f(root)", formatNumber(evaluator(root))],
     ],
+  };
+}
+
+export function analyzeDifferentialEquation(statement) {
+  const request = extractDifferentialEquation(statement);
+  const steps = [
+    {
+      title: "Identify ODE model",
+      expression: request.modelName,
+      detail: "The solver matches the differential equation to a closed-form model.",
+    },
+  ];
+
+  let value;
+  let derivativeText;
+  let solutionText;
+  let summary;
+  let details;
+  const delta = request.target - request.initialTime;
+
+  if (request.model === "logistic") {
+    value = evaluateLogisticSolution(request, request.target);
+    derivativeText = `${request.dependent}' = ${formatNumber(request.rate)}${request.dependent}(1 - ${request.dependent}/${formatNumber(request.capacity)})`;
+    solutionText = `${request.dependent}(${request.variable}) = ${formatNumber(request.capacity)}/(1 + ${formatNumber(request.logisticA)}e^(-${formatNumber(request.rate)}${formatOdeShift(request.variable, request.initialTime)}))`;
+    summary = "logistic ODE";
+    details = "Closed-form logistic growth model";
+    steps.push(
+      {
+        title: "Separate variables",
+        expression: `d${request.dependent}/(${request.dependent}(1 - ${request.dependent}/${formatNumber(request.capacity)})) = ${formatNumber(request.rate)} d${request.variable}`,
+        detail: "Logistic growth separates into a rational expression in the population.",
+      },
+      {
+        title: "Apply initial condition",
+        expression: `A = (K - ${request.dependent}_0)/${request.dependent}_0 = ${formatNumber(request.logisticA)}`,
+        detail: "The initial value determines the constant in the logistic curve.",
+      },
+    );
+  } else if (request.model === "cooling") {
+    value = evaluateCoolingSolution(request, request.target);
+    derivativeText = `${request.dependent}' = -${formatNumber(request.rate)}(${request.dependent} - ${formatNumber(request.ambient)})`;
+    solutionText = `${request.dependent}(${request.variable}) = ${formatNumber(request.ambient)} + ${formatNumber(request.initialValue - request.ambient)}e^(-${formatNumber(request.rate)}${formatOdeShift(request.variable, request.initialTime)})`;
+    summary = "Newton cooling";
+    details = "Closed-form Newton's law of cooling model";
+    steps.push(
+      {
+        title: "Measure distance from ambient",
+        expression: `${request.dependent} - ${formatNumber(request.ambient)}`,
+        detail: "Newton cooling says the temperature gap decays exponentially.",
+      },
+      {
+        title: "Apply initial condition",
+        expression: `${request.dependent}_0 - ambient = ${formatNumber(request.initialValue - request.ambient)}`,
+        detail: "The initial temperature gap sets the coefficient of the exponential.",
+      },
+    );
+  } else if (nearlyEqual(request.power, 1)) {
+    value = evaluateExponentialOdeSolution(request, request.target);
+    derivativeText = `${request.dependent}' = ${formatNumber(request.rate)}${request.dependent}`;
+    solutionText = `${request.dependent}(${request.variable}) = ${formatNumber(request.initialValue)}e^(${formatNumber(request.rate)}${formatOdeShift(request.variable, request.initialTime)})`;
+    summary = "exponential ODE";
+    details = "Closed-form exponential growth or decay";
+    steps.push(
+      {
+        title: "Separate variables",
+        expression: `d${request.dependent}/${request.dependent} = ${formatNumber(request.rate)} d${request.variable}`,
+        detail: "The rate of change is proportional to the current value.",
+      },
+      {
+        title: "Integrate both sides",
+        expression: `ln|${request.dependent}| = ${formatNumber(request.rate)}${formatOdeShift(request.variable, request.initialTime)} + C`,
+        detail: "Exponentiating produces an exponential solution curve.",
+      },
+    );
+  } else {
+    value = evaluatePowerOdeSolution(request, request.target);
+    derivativeText = `${request.dependent}' = ${formatNumber(request.rate)}${request.dependent}^${formatNumber(request.power)}`;
+    solutionText = `${request.dependent}(${request.variable}) = (${formatNumber(request.initialPower)} + ${formatNumber((1 - request.power) * request.rate)}${formatOdeShift(request.variable, request.initialTime)})^${formatNumber(1 / (1 - request.power))}`;
+    summary = "separable power ODE";
+    details = "Closed-form separable differential equation";
+    steps.push(
+      {
+        title: "Separate variables",
+        expression: `${request.dependent}^(-${formatNumber(request.power)}) d${request.dependent} = ${formatNumber(request.rate)} d${request.variable}`,
+        detail: "All dependent-variable terms move to one side.",
+      },
+      {
+        title: "Integrate power rule",
+        expression: `${request.dependent}^{${formatNumber(1 - request.power)}} = ${formatNumber(request.initialPower)} + ${formatNumber((1 - request.power) * request.rate)}${formatOdeShift(request.variable, request.initialTime)}`,
+        detail: "The power rule gives a closed form when the power is not one.",
+      },
+    );
+  }
+
+  if (!Number.isFinite(value)) {
+    throw new Error("The ODE solution is not finite at the requested input.");
+  }
+
+  steps.push(
+    {
+      title: "Write closed form",
+      expression: solutionText,
+      detail: "The closed form can now be evaluated at any input in the model domain.",
+    },
+    {
+      title: "Evaluate target",
+      expression: `${request.dependent}(${formatNumber(request.target)}) = ${formatNumber(value)}`,
+      detail: `The target is ${formatNumber(delta)} units from the initial condition.`,
+    },
+  );
+
+  const tableRows = sampleOdeSolution(request).map((row) => [
+    formatNumber(row.input),
+    formatNumber(row.value),
+  ]);
+  const tree = {
+    kind: "statsDistribution",
+    label: "ODE",
+    children: [
+      statsMetricNode("initial", request.initialValue),
+      statsMetricNode("rate", request.rate),
+      statsMetricNode("target", request.target),
+      statsMetricNode("value", value),
+    ],
+  };
+
+  return {
+    mode: "ode",
+    tree,
+    answer: `${request.dependent}(${formatNumber(request.target)}) = ${formatNumber(value)}`,
+    summary,
+    details,
+    variables: [request.variable, request.dependent],
+    metrics: treeMetrics(tree),
+    steps,
+    artifacts: [
+      ["Differential equation", derivativeText],
+      ["Initial condition", `${request.dependent}(${formatNumber(request.initialTime)}) = ${formatNumber(request.initialValue)}`],
+      ["Closed form", solutionText],
+      ["Evaluation", `${request.dependent}(${formatNumber(request.target)}) = ${formatNumber(value)}`],
+    ],
+    table: {
+      headers: [request.variable, request.dependent],
+      rows: tableRows,
+    },
   };
 }
 
@@ -5366,6 +5514,220 @@ function extractNumericalQuestion(statement) {
   };
 }
 
+function extractDifferentialEquation(statement) {
+  const text = statement
+    .replace(/^(solve\s+)?(?:ode|differential equation)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+  const lower = text.toLowerCase();
+  const initial = readOdeInitialCondition(text);
+  const variable = readOdeVariable(text);
+  const target = readOdeTarget(text, variable, initial.time);
+  const dependent = lower.includes("temperature") || lower.includes("cooling") ? "T" : "y";
+
+  if (lower.includes("newton cooling") || lower.includes("newton's cooling") || lower.includes("cooling")) {
+    const ambient = readOdeNumber(text, ["ambient", "room", "environment"], Number.NaN);
+    const initialValue = readOdeNumber(text, ["initial", "start", "temperature", "temp", "y0"], initial.value);
+    const rate = readOdeNumber(text, ["k", "rate"], Number.NaN);
+    if (!Number.isFinite(ambient) || !Number.isFinite(initialValue) || !Number.isFinite(rate) || rate < 0) {
+      throw new Error("Newton cooling needs ambient, initial, k, and a target time, such as newton cooling ambient=70 initial=100 k=0.2 t=10.");
+    }
+    return {
+      model: "cooling",
+      modelName: "Newton's law of cooling",
+      variable,
+      dependent,
+      initialTime: initial.time,
+      initialValue,
+      target,
+      rate,
+      ambient,
+    };
+  }
+
+  if (lower.includes("logistic")) {
+    const capacity = readOdeCapacity(text);
+    const rate = readOdeNumber(text, ["r", "rate", "growth"], Number.NaN);
+    const initialValue = readOdeNumber(text, ["y0", "initial", "start", "population"], initial.value);
+    if (!Number.isFinite(capacity) || !Number.isFinite(rate) || !Number.isFinite(initialValue)) {
+      throw new Error("Logistic ODE needs r, K/capacity, y0, and a target, such as logistic r=0.4 K=100 y0=10 t=8.");
+    }
+    if (capacity <= 0 || initialValue <= 0) {
+      throw new Error("Logistic ODE needs positive carrying capacity and initial value.");
+    }
+    return {
+      model: "logistic",
+      modelName: "logistic growth",
+      variable,
+      dependent,
+      initialTime: initial.time,
+      initialValue,
+      target,
+      rate,
+      capacity,
+      logisticA: (capacity - initialValue) / initialValue,
+    };
+  }
+
+  const equation = readOdeEquation(text);
+  const rate = readOdeNumber(text, ["k", "rate"], equation.rate);
+  const power = readOdeNumber(text, ["power", "p"], equation.power);
+  const initialValue = readOdeNumber(text, ["y0", "initial", "start"], initial.value);
+  if (!Number.isFinite(rate) || !Number.isFinite(power) || !Number.isFinite(initialValue)) {
+    throw new Error("ODE mode needs a rate, initial value, and target, such as ode dy/dt = 0.3y y0=2 t=5.");
+  }
+  if (nearlyEqual(initialValue, 0) && !nearlyEqual(power, 1)) {
+    throw new Error("Power ODEs need a nonzero initial value.");
+  }
+
+  return {
+    model: "power",
+    modelName: nearlyEqual(power, 1) ? "exponential growth/decay" : "separable power equation",
+    variable,
+    dependent,
+    initialTime: initial.time,
+    initialValue,
+    target,
+    rate,
+    power,
+    initialPower: initialValue ** (1 - power),
+  };
+}
+
+function readOdeEquation(text) {
+  const match = text.match(/(?:dy\s*\/\s*d[A-Za-z_]\w*|y\s*'|yprime)\s*=\s*([+-]?\s*(?:\d*\.?\d+(?:e[-+]?\d+)?)?)\s*\*?\s*y(?:\s*\^\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?))?/i);
+  if (!match) {
+    return { rate: Number.NaN, power: 1 };
+  }
+  return {
+    rate: parseOdeCoefficient(match[1]),
+    power: match[2] === undefined ? 1 : Number(match[2]),
+  };
+}
+
+function parseOdeCoefficient(text) {
+  const cleaned = text.replace(/\s+/g, "");
+  if (cleaned === "" || cleaned === "+") return 1;
+  if (cleaned === "-") return -1;
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? value : Number.NaN;
+}
+
+function readOdeInitialCondition(text) {
+  const match = text.match(/\b[Ty]\s*\(\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s*\)\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
+  if (match) {
+    return {
+      time: Number(match[1]),
+      value: Number(match[2]),
+    };
+  }
+  return {
+    time: readOdeNumber(text, ["t0", "x0"], 0),
+    value: readOdeNumber(text, ["y0", "initial", "start"], Number.NaN),
+  };
+}
+
+function readOdeVariable(text) {
+  const match = text.match(/dy\s*\/\s*d([A-Za-z_]\w*)/i);
+  if (match) {
+    return match[1];
+  }
+  if (/\bx\s*=/.test(text)) {
+    return "x";
+  }
+  return "t";
+}
+
+function readOdeTarget(text, variable, initialTime) {
+  const target = readOdeNumber(text, [variable, "time", "target", "at"], Number.NaN);
+  if (Number.isFinite(target)) {
+    return target;
+  }
+  const atMatch = text.match(/\bat\s+[A-Za-z_]\w*\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i) ??
+    text.match(/\bat\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
+  if (atMatch) {
+    return Number(atMatch[1]);
+  }
+  return initialTime + 1;
+}
+
+function readOdeCapacity(text) {
+  const capacity = readOdeNumber(text, ["capacity", "carrying", "carrying capacity"], Number.NaN);
+  if (Number.isFinite(capacity)) {
+    return capacity;
+  }
+  const match = text.match(/\bK\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/);
+  return match ? Number(match[1]) : Number.NaN;
+}
+
+function readOdeNumber(text, names, fallback) {
+  const numberPattern = "([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)";
+  for (const name of names) {
+    const escaped = name
+      .trim()
+      .split(/\s+/)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("\\s+");
+    const match = text.match(new RegExp(`\\b${escaped}\\s*=\\s*${numberPattern}`, "i"));
+    if (match) {
+      return Number(match[1]);
+    }
+  }
+  return fallback;
+}
+
+function evaluateExponentialOdeSolution(request, input) {
+  return request.initialValue * Math.exp(request.rate * (input - request.initialTime));
+}
+
+function evaluatePowerOdeSolution(request, input) {
+  const base = request.initialPower + (1 - request.power) * request.rate * (input - request.initialTime);
+  const exponent = 1 / (1 - request.power);
+  if (base < 0 && !Number.isInteger(exponent)) {
+    return Number.NaN;
+  }
+  return base ** exponent;
+}
+
+function evaluateLogisticSolution(request, input) {
+  return request.capacity / (1 + request.logisticA * Math.exp(-request.rate * (input - request.initialTime)));
+}
+
+function evaluateCoolingSolution(request, input) {
+  return request.ambient + (request.initialValue - request.ambient) * Math.exp(-request.rate * (input - request.initialTime));
+}
+
+function sampleOdeSolution(request) {
+  const evaluator = request.model === "logistic"
+    ? evaluateLogisticSolution
+    : request.model === "cooling"
+      ? evaluateCoolingSolution
+      : nearlyEqual(request.power, 1)
+        ? evaluateExponentialOdeSolution
+        : evaluatePowerOdeSolution;
+  if (nearlyEqual(request.target, request.initialTime)) {
+    return [{ input: request.target, value: evaluator(request, request.target) }];
+  }
+  const rows = [];
+  for (let index = 0; index <= 4; index += 1) {
+    const input = request.initialTime + ((request.target - request.initialTime) * index) / 4;
+    const value = evaluator(request, input);
+    if (Number.isFinite(value)) {
+      rows.push({ input, value });
+    }
+  }
+  return rows;
+}
+
+function formatOdeShift(variable, initialTime) {
+  if (nearlyEqual(initialTime, 0)) {
+    return variable;
+  }
+  return initialTime > 0
+    ? `(${variable} - ${formatNumber(initialTime)})`
+    : `(${variable} + ${formatNumber(Math.abs(initialTime))})`;
+}
+
 function numericFunctionFromExpression(parsed) {
   if (parsed.kind === "equation") {
     return (x) => evaluateMath(parsed.left, { x }) - evaluateMath(parsed.right, { x });
@@ -6920,6 +7282,17 @@ function isOptimizationQuestion(lower) {
     lower.startsWith("find the minimum of ") ||
     lower.startsWith("find max of ") ||
     lower.startsWith("find min of ");
+}
+
+function isDifferentialEquationQuestion(lower) {
+  return lower.startsWith("ode ") ||
+    lower.startsWith("solve ode ") ||
+    lower.includes("differential equation") ||
+    lower.includes("dy/d") ||
+    lower.includes("y'") ||
+    lower.includes("newton cooling") ||
+    lower.includes("newton's cooling") ||
+    (lower.includes("logistic") && (lower.includes("y0") || lower.includes("carrying") || lower.includes("capacity")));
 }
 
 function isNumericalQuestion(lower) {

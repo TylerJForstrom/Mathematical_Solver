@@ -4,6 +4,7 @@ import {
   analyzeComplex,
   analyzeCombinatorics,
   analyzeDerivative,
+  analyzeDifferentialEquation,
   analyzeEquation,
   analyzeFactoring,
   analyzeGeometry,
@@ -514,6 +515,22 @@ runTest("numerical mode runs bisection", () => {
   assert.equal(result.answer, "x ~= 2");
 });
 
+runTest("differential equation mode solves closed-form ODE models", () => {
+  const exponential = analyzeDifferentialEquation("ode dy/dt = 0.3y y0=2 t=5");
+  const logistic = analyzeDifferentialEquation("logistic r=0.4 K=100 y0=10 t=8");
+  const cooling = analyzeDifferentialEquation("newton cooling ambient=70 initial=100 k=0.2 t=10");
+  const power = analyzeDifferentialEquation("ode y'=2y^2 y0=1 t=0.25");
+
+  assert.equal(exponential.summary, "exponential ODE");
+  assert.equal(exponential.answer, "y(5) = 8.963378");
+  assert.equal(logistic.summary, "logistic ODE");
+  assert.equal(logistic.answer, "y(8) = 73.160391");
+  assert.equal(cooling.summary, "Newton cooling");
+  assert.equal(cooling.answer, "T(10) = 74.060058");
+  assert.equal(power.summary, "separable power ODE");
+  assert.equal(power.answer, "y(0.25) = 2");
+});
+
 runTest("equation mode approximates higher-degree real roots", () => {
   const result = analyzeEquation("x^3 - x - 2 = 0", "x");
 
@@ -559,6 +576,8 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
+  assert.equal(analyzeUniversal("ode dy/dt = 0.3y y0=2 t=5").summary, "exponential ODE");
+  assert.equal(analyzeUniversal("newton cooling ambient=70 initial=100 k=0.2 t=10").summary, "Newton cooling");
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
   assert.equal(analyzeUniversal("one-proportion z-test successes=56 n=100 p0=0.5").summary, "one-proportion z test");
   assert.equal(analyzeUniversal("two-proportion z-test successes1=56 n1=100 successes2=44 n2=100").summary, "two-proportion z test");
