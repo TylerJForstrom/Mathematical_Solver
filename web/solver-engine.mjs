@@ -1393,6 +1393,39 @@ export function analyzeMatrix(statement) {
         detail: "For 2x2 matrices, lambda^2 - trace(A)lambda + det(A) = 0.",
       },
     ];
+  } else if (lower.includes("qr") || lower.includes("gram-schmidt") || lower.includes("gram schmidt")) {
+    const result = qrDecomposition(matrices[0]);
+    answer = `Q = ${formatMatrix(result.q)}; R = ${formatMatrix(result.r)}`;
+    summary = "QR decomposition";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["Q", formatMatrix(result.q)],
+      ["R", formatMatrix(result.r)],
+      ["Q * R", formatMatrix(result.product)],
+    ];
+    children = [matrixNode("A", matrices[0]), matrixNode("Q", result.q), matrixNode("R", result.r)];
+    steps = [
+      {
+        title: "Read matrix columns",
+        expression: matrixShape(matrices[0]),
+        detail: "QR decomposition rewrites a matrix as A = QR.",
+      },
+      {
+        title: "Orthonormalize columns",
+        expression: formatMatrix(result.q),
+        detail: "Gram-Schmidt subtracts projections, then normalizes each remaining column.",
+      },
+      {
+        title: "Recover upper-triangular factors",
+        expression: formatMatrix(result.r),
+        detail: "R stores the projection lengths needed to reconstruct the original columns.",
+      },
+      {
+        title: "Verify reconstruction",
+        expression: formatMatrix(result.product),
+        detail: "Multiplying Q by R returns the original matrix up to rounding.",
+      },
+    ];
   } else if (lower.includes("multiply") || lower.includes("product")) {
     if (matrices.length < 2) {
       throw new Error("Matrix multiplication needs two matrices.");
@@ -5776,6 +5809,42 @@ function multiplyMatrixVector(matrix, vector) {
   return matrix.map((row) => dotProduct(row, vector));
 }
 
+function qrDecomposition(matrix) {
+  const rowCount = matrix.length;
+  const columnCount = matrix[0].length;
+  if (rowCount < columnCount) {
+    throw new Error("QR decomposition needs at least as many rows as columns.");
+  }
+
+  const columns = transposeMatrix(matrix);
+  const qColumns = [];
+  const r = Array.from({ length: columnCount }, () => Array(columnCount).fill(0));
+
+  for (let column = 0; column < columnCount; column += 1) {
+    let vector = [...columns[column]];
+    for (let prior = 0; prior < column; prior += 1) {
+      const projectionLength = dotProduct(qColumns[prior], columns[column]);
+      r[prior][column] = normalizeNumber(projectionLength);
+      vector = vector.map((value, index) => value - projectionLength * qColumns[prior][index]);
+    }
+
+    const norm = vectorMagnitude(vector);
+    if (norm <= EPSILON) {
+      throw new Error("QR decomposition needs linearly independent columns.");
+    }
+    r[column][column] = normalizeNumber(norm);
+    qColumns.push(vector.map((value) => normalizeNumber(value / norm)));
+  }
+
+  const q = transposeMatrix(qColumns).map((row) => row.map(normalizeNumber));
+  const normalizedR = r.map((row) => row.map(normalizeNumber));
+  return {
+    q,
+    r: normalizedR,
+    product: multiplyMatrices(q, normalizedR).map((row) => row.map(normalizeNumber)),
+  };
+}
+
 function fitLogisticRegression(design, yValues) {
   const parameterCount = design[0].length;
   let coefficients = Array(parameterCount).fill(0);
@@ -9454,6 +9523,10 @@ function hasImaginaryUnit(text) {
 function isMatrixQuestion(lower) {
   return lower.includes("matrix") ||
     lower.includes("determinant") ||
+    lower.startsWith("qr ") ||
+    lower.includes("qr decomposition") ||
+    lower.includes("gram-schmidt") ||
+    lower.includes("gram schmidt") ||
     lower.startsWith("det ") ||
     lower.includes(" det ") ||
     lower.startsWith("rref ") ||
