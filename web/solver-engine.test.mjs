@@ -383,6 +383,18 @@ runTest("statistics mode computes Markov chains", () => {
   assert.equal(stationary.answer, "stationary = [0.4, 0.6]");
 });
 
+runTest("statistics mode computes Bayesian beta-binomial posteriors", () => {
+  const posterior = analyzeStatistics("beta posterior successes=12 n=20 alpha=2 beta=2 confidence=95");
+  const predictive = analyzeStatistics("bayesian proportion successes=12 n=20 alpha=2 beta=2 future=10 k=6");
+  const credible = analyzeStatistics("beta-binomial successes=8 n=10 alpha=1 beta=1 credible interval=0.9");
+
+  assert.equal(posterior.summary, "Bayesian proportion posterior");
+  assert.equal(posterior.answer, "posterior Beta(14, 10), mean = 0.583333");
+  assert.equal(artifactValue(posterior, "95% credible interval"), "[0.385419, 0.768086]");
+  assert.equal(artifactValue(predictive, "P(X = 6 of 10)"), "0.209585");
+  assert.equal(artifactValue(credible, "90% credible interval"), "[0.529913, 0.92118]");
+});
+
 runTest("statistics mode computes Mann-Whitney U tests", () => {
   const result = analyzeStatistics("mann-whitney group1: 10, 12, 9; group2: 8, 7, 11");
 
@@ -638,6 +650,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("bayes prior=0.01 sensitivity=0.99 specificity=0.95").summary, "Bayes theorem");
   assert.equal(analyzeUniversal("markov [[0.7,0.3],[0.2,0.8]] start [1,0] steps=3").answer, "after 3 steps = [0.475, 0.525]");
   assert.equal(analyzeUniversal("stationary markov [[0.7,0.3],[0.2,0.8]]").summary, "Markov stationary distribution");
+  assert.equal(analyzeUniversal("beta posterior successes=12 n=20 alpha=2 beta=2 confidence=95").summary, "Bayesian proportion posterior");
   assert.equal(analyzeUniversal("mann-whitney group1: 10,12,9; group2: 8,7,11").summary, "Mann-Whitney U test");
   assert.equal(analyzeUniversal("wilcoxon signed-rank before: 10,12,9,11; after: 11,14,10,13").summary, "Wilcoxon signed-rank test");
   assert.equal(analyzeUniversal("kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "Kruskal-Wallis test");

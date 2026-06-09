@@ -52,6 +52,8 @@ The frontend currently supports:
   value/variance, Bayes theorem, and z-score calculations
 - Markov chains: n-step state distributions and stationary distributions from
   row-stochastic transition matrices
+- Bayesian beta-binomial proportion updates with posterior means, credible
+  intervals, and posterior predictive probabilities
 - Statistical power and sample-size planning for one-sample means,
   one-proportion z designs, and equal-size two-sample mean designs
 - Effect sizes and follow-up comparisons, including Cohen's d/dz, Hedges g,
@@ -167,6 +169,8 @@ The same idea works for algebra and calculus:
 - `markov [[0.7,0.3],[0.2,0.8]] start [1,0] steps=3` computes an n-step
   distribution, and `stationary markov [[0.7,0.3],[0.2,0.8]]` solves the
   long-run stationary distribution.
+- `beta posterior successes=12 n=20 alpha=2 beta=2 confidence=95` updates a
+  beta prior into a posterior distribution and reports a credible interval.
 
 ## Run It
 
@@ -229,7 +233,7 @@ The demo includes:
   Poisson probability, geometric probability, exponential probability, uniform
   probability, hypergeometric probability, normal probability, inverse-normal
   percentiles, z-scores, discrete expected value, Bayes theorem,
-  Markov chains,
+  Markov chains, Bayesian beta-binomial updates,
   one-sample/two-sample/paired t tests, one-proportion/two-proportion z tests,
   proportion confidence intervals, ANOVA, chi-square tests, nonparametric rank
   tests, power/sample-size analysis, effect sizes, and pairwise follow-up

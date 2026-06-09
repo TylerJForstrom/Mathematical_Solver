@@ -922,6 +922,10 @@ export function analyzeStatistics(statement) {
     return analyzeMarkovChain(statement);
   }
 
+  if (isBayesianProportionQuestion(lower)) {
+    return analyzeBayesianProportion(statement);
+  }
+
   if (
     lower.includes("power analysis") ||
     lower.includes("statistical power") ||
@@ -4279,6 +4283,95 @@ function analyzeBayes(statement) {
   };
 }
 
+function analyzeBayesianProportion(statement) {
+  const request = parseBayesianProportionInput(statement);
+  const posteriorAlpha = request.priorAlpha + request.successes;
+  const posteriorBeta = request.priorBeta + request.trials - request.successes;
+  const posteriorMean = posteriorAlpha / (posteriorAlpha + posteriorBeta);
+  const posteriorMode = posteriorAlpha > 1 && posteriorBeta > 1
+    ? (posteriorAlpha - 1) / (posteriorAlpha + posteriorBeta - 2)
+    : Number.NaN;
+  const lowerTail = (1 - request.level) / 2;
+  const upperTail = 1 - lowerTail;
+  const lower = inverseBetaCdf(lowerTail, posteriorAlpha, posteriorBeta);
+  const upper = inverseBetaCdf(upperTail, posteriorAlpha, posteriorBeta);
+  const percent = formatNumber(request.level * 100);
+  const predictive = request.futureTrials > 0 && Number.isInteger(request.futureSuccesses)
+    ? betaBinomialProbability(request.futureTrials, request.futureSuccesses, posteriorAlpha, posteriorBeta)
+    : Number.NaN;
+  const predictiveLabel = Number.isFinite(predictive)
+    ? `P(X = ${request.futureSuccesses} of ${request.futureTrials})`
+    : "";
+  const tree = {
+    kind: "statsDistribution",
+    label: "BETA",
+    children: [
+      statsMetricNode("prior a", request.priorAlpha),
+      statsMetricNode("prior b", request.priorBeta),
+      statsMetricNode("post a", posteriorAlpha),
+      statsMetricNode("post b", posteriorBeta),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `posterior Beta(${formatNumber(posteriorAlpha)}, ${formatNumber(posteriorBeta)}), mean = ${formatNumber(posteriorMean)}`,
+    summary: "Bayesian proportion posterior",
+    details: "Beta-binomial conjugate update",
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read prior and data",
+        expression: `Beta(${formatNumber(request.priorAlpha)}, ${formatNumber(request.priorBeta)}), successes=${formatNumber(request.successes)}, n=${formatNumber(request.trials)}`,
+        detail: "A beta prior is conjugate to binomial success-count data.",
+      },
+      {
+        title: "Update posterior parameters",
+        expression: `alpha'=${formatNumber(posteriorAlpha)}, beta'=${formatNumber(posteriorBeta)}`,
+        detail: "Successes add to alpha; failures add to beta.",
+      },
+      {
+        title: "Summarize posterior",
+        expression: `mean=${formatNumber(posteriorMean)}, ${percent}% credible interval=[${formatNumber(lower)}, ${formatNumber(upper)}]`,
+        detail: "The credible interval uses the beta posterior quantiles.",
+      },
+      ...(Number.isFinite(predictive)
+        ? [{
+            title: "Predict future successes",
+            expression: `${predictiveLabel} = ${formatNumber(predictive)}`,
+            detail: "The beta-binomial predictive distribution averages over posterior uncertainty.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Quantity", "Value"],
+      rows: [
+        ["Prior alpha", formatNumber(request.priorAlpha)],
+        ["Prior beta", formatNumber(request.priorBeta)],
+        ["Successes", formatNumber(request.successes)],
+        ["Failures", formatNumber(request.trials - request.successes)],
+        ["Posterior alpha", formatNumber(posteriorAlpha)],
+        ["Posterior beta", formatNumber(posteriorBeta)],
+        ["Posterior mean", formatNumber(posteriorMean)],
+        ["Posterior mode", Number.isFinite(posteriorMode) ? formatNumber(posteriorMode) : "undefined"],
+        [`${percent}% credible interval`, `[${formatNumber(lower)}, ${formatNumber(upper)}]`],
+        ...(Number.isFinite(predictive) ? [[predictiveLabel, formatNumber(predictive)]] : []),
+      ],
+    },
+    artifacts: [
+      ["Prior", `Beta(${formatNumber(request.priorAlpha)}, ${formatNumber(request.priorBeta)})`],
+      ["Data", `${formatNumber(request.successes)} successes, ${formatNumber(request.trials - request.successes)} failures`],
+      ["Posterior", `Beta(${formatNumber(posteriorAlpha)}, ${formatNumber(posteriorBeta)})`],
+      ["Posterior mean", formatNumber(posteriorMean)],
+      ["Posterior mode", Number.isFinite(posteriorMode) ? formatNumber(posteriorMode) : "undefined"],
+      [`${percent}% credible interval`, `[${formatNumber(lower)}, ${formatNumber(upper)}]`],
+      ...(Number.isFinite(predictive) ? [[predictiveLabel, formatNumber(predictive)]] : []),
+    ],
+  };
+}
+
 function analyzeNormalDistribution(statement) {
   const numbers = parseNumbers(statement);
   const meanValue = readNamedNumber(statement, ["mean", "mu"], numbers[0] ?? 0);
@@ -7216,6 +7309,37 @@ function regularizedBeta(x, a, b) {
   return 1 - front * betaContinuedFraction(1 - x, b, a) / b;
 }
 
+function inverseBetaCdf(probability, alpha, beta) {
+  if (!(probability > 0 && probability < 1)) {
+    throw new Error("Beta quantile probability must be between 0 and 1.");
+  }
+  let low = 0;
+  let high = 1;
+  for (let index = 0; index < 90; index += 1) {
+    const mid = (low + high) / 2;
+    if (regularizedBeta(mid, alpha, beta) < probability) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return (low + high) / 2;
+}
+
+function betaBinomialProbability(trials, successes, alpha, beta) {
+  if (!Number.isInteger(trials) || !Number.isInteger(successes) || successes < 0 || successes > trials) {
+    throw new Error("Beta-binomial probability needs integer successes with 0 <= k <= n.");
+  }
+  const logProbability = Math.log(combination(trials, successes)) +
+    logBeta(successes + alpha, trials - successes + beta) -
+    logBeta(alpha, beta);
+  return Math.exp(logProbability);
+}
+
+function logBeta(alpha, beta) {
+  return logGamma(alpha) + logGamma(beta) - logGamma(alpha + beta);
+}
+
 function betaContinuedFraction(x, a, b) {
   const maxIterations = 120;
   const tiny = 1e-30;
@@ -7538,6 +7662,72 @@ function parseBayesInput(text) {
   }
 
   return { prior, sensitivity, falsePositiveRate, specificity };
+}
+
+function parseBayesianProportionInput(text) {
+  const successes = readNamedNumber(text, ["successes", "success", "x", "count"], Number.NaN);
+  const trials = readNamedNumber(text, ["n", "trials", "total", "sample"], Number.NaN);
+  const priorAlpha = readNamedNumber(text, ["alpha", "priorAlpha", "a"], 1);
+  const priorBeta = readNamedNumber(text, ["beta", "priorBeta", "b"], 1);
+  const level = parseCredibleLevel(text, 0.95);
+  const futureTrials = readNamedNumber(text, ["future", "futureN", "m", "predict"], Number.NaN);
+  const futureSuccesses = readNamedNumber(text, ["k", "futureSuccesses", "futureX"], Number.NaN);
+
+  validateProportionCount(successes, trials, "Bayesian proportion update");
+  if (!(priorAlpha > 0) || !(priorBeta > 0)) {
+    throw new Error("Beta prior parameters alpha and beta must be positive.");
+  }
+  if (!(level > 0 && level < 1)) {
+    throw new Error("Credible interval level must be between 0 and 1.");
+  }
+  if (Number.isFinite(futureTrials) || Number.isFinite(futureSuccesses)) {
+    if (!Number.isInteger(futureTrials) || !Number.isInteger(futureSuccesses) || futureTrials < 0 || futureSuccesses < 0 || futureSuccesses > futureTrials) {
+      throw new Error("Posterior predictive inputs need integers with 0 <= k <= future.");
+    }
+  }
+
+  return {
+    successes,
+    trials,
+    priorAlpha,
+    priorBeta,
+    level,
+    futureTrials,
+    futureSuccesses,
+  };
+}
+
+function parseCredibleLevel(text, fallback) {
+  const intervalMatch = text.match(/\b(?:credible|credibility|confidence)\s+interval\s*=\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
+  if (intervalMatch) {
+    const raw = Number(intervalMatch[1]);
+    const level = raw > 1 ? raw / 100 : raw;
+    if (!(level > 0 && level < 1)) {
+      throw new Error("Credible interval level must be between 0 and 1, or between 0 and 100 percent.");
+    }
+    return level;
+  }
+
+  const named = readNamedNumber(text, ["confidence", "credible", "credibility", "level"], Number.NaN);
+  if (Number.isFinite(named)) {
+    const level = named > 1 ? named / 100 : named;
+    if (!(level > 0 && level < 1)) {
+      throw new Error("Credible interval level must be between 0 and 1, or between 0 and 100 percent.");
+    }
+    return level;
+  }
+
+  const phraseMatch = text.match(/\b([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s*%?\s*(?:credible|credibility|confidence|ci)\b/i);
+  if (phraseMatch) {
+    const raw = Number(phraseMatch[1]);
+    const level = raw > 1 ? raw / 100 : raw;
+    if (!(level > 0 && level < 1)) {
+      throw new Error("Credible interval level must be between 0 and 1, or between 0 and 100 percent.");
+    }
+    return level;
+  }
+
+  return fallback;
 }
 
 function poissonProbabilityLabel(tail, k) {
@@ -7864,6 +8054,14 @@ function isMarkovQuestion(lower) {
     lower.includes("steady state");
 }
 
+function isBayesianProportionQuestion(lower) {
+  return lower.includes("beta posterior") ||
+    lower.includes("beta-binomial") ||
+    lower.includes("beta binomial") ||
+    lower.includes("bayesian proportion") ||
+    (lower.includes("posterior") && lower.includes("success"));
+}
+
 function isMultivariableQuestion(lower) {
   return lower.includes("partial derivative") ||
     lower.startsWith("partial ") ||
@@ -8048,6 +8246,11 @@ function isStatisticsQuestion(lower) {
     "expectation",
     "probabilities",
     "outcomes",
+    "beta posterior",
+    "beta-binomial",
+    "beta binomial",
+    "bayesian proportion",
+    "credible interval",
     "bayes",
     "posterior",
     "prior",
