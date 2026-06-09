@@ -60,7 +60,8 @@ The frontend currently supports:
   2D principal component analysis with explained variance and component directions
 - K-means clustering for coordinate points with deterministic centroid
   initialization, assignments, cluster sizes, and within-cluster SSE
-- Confidence intervals, one-sample/two-sample/paired t tests with Student t p-values,
+- Confidence intervals, bootstrap percentile intervals,
+  one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
   one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis,
   chi-square goodness-of-fit, binomial probability, Poisson probability, normal
@@ -202,6 +203,8 @@ The same idea works for algebra and calculus:
   distribution trees.
 - `two-proportion z-test successes1=56 n1=100 successes2=44 n2=100` compares
   two sample proportions and reports `z = 1.697056, p = 0.089686`.
+- `bootstrap mean data 10,12,14,16,18 resamples=1000 seed=7 confidence=95`
+  builds a reproducible percentile bootstrap interval for the mean.
 - `power mean effect=0.5 n=64 alpha=0.05` estimates statistical power, while
   `sample size mean effect=0.5 power=0.8 alpha=0.05` finds a required sample size.
 - `expected value values: 0,1,2 probabilities: 0.2,0.5,0.3` treats the
@@ -271,7 +274,8 @@ The demo includes:
 - Partial derivatives, gradients, and directional derivatives through Ask mode
 - Taylor/Maclaurin approximations through Ask mode
 - Complex arithmetic and complex quadratic roots through Ask mode
-- Dataset summaries, confidence intervals, regression/correlation, polynomial regression,
+- Dataset summaries, confidence intervals, bootstrap intervals,
+  regression/correlation, polynomial regression,
   multiple regression,
   logistic regression,
   covariance/correlation matrices, 2D PCA, k-means clustering,

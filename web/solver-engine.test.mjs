@@ -295,6 +295,16 @@ runTest("statistics mode computes confidence intervals", () => {
   assert.equal(result.answer, "95% CI = [11.228192, 16.771808]");
 });
 
+runTest("statistics mode computes bootstrap confidence intervals", () => {
+  const meanResult = analyzeStatistics("bootstrap mean data 10, 12, 14, 16, 18 resamples=1000 seed=7 confidence=95");
+  const medianResult = analyzeStatistics("bootstrap median data 1, 2, 4, 8, 16 resamples=1000 seed=7 confidence=90");
+
+  assert.equal(meanResult.summary, "bootstrap confidence interval");
+  assert.equal(meanResult.answer, "bootstrap 95% CI for mean = [11.6, 16.4]");
+  assert.equal(artifactValue(meanResult, "Observed statistic"), "14");
+  assert.equal(medianResult.answer, "bootstrap 90% CI for median = [1, 8]");
+});
+
 runTest("statistics mode computes one-proportion confidence intervals", () => {
   const result = analyzeStatistics("proportion ci successes=42 n=100 confidence=95");
 
@@ -755,6 +765,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("ode dy/dt = 0.3y y0=2 t=5").summary, "exponential ODE");
   assert.equal(analyzeUniversal("newton cooling ambient=70 initial=100 k=0.2 t=10").summary, "Newton cooling");
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
+  assert.equal(analyzeUniversal("bootstrap mean data 10, 12, 14, 16, 18 resamples=1000 seed=7 confidence=95").summary, "bootstrap confidence interval");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");

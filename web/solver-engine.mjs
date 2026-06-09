@@ -988,6 +988,10 @@ export function analyzeStatistics(statement) {
     return analyzeBayesianProportion(statement);
   }
 
+  if (lower.includes("bootstrap")) {
+    return analyzeBootstrapInterval(statement);
+  }
+
   if (
     lower.includes("power analysis") ||
     lower.includes("statistical power") ||
@@ -4096,6 +4100,75 @@ function analyzeTwoProportionZTest(statement) {
       ["Cohen's h", formatNumber(cohensH)],
       ["95% CI for difference", `[${formatNumber(difference - margin)}, ${formatNumber(difference + margin)}]`],
       ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeBootstrapInterval(statement) {
+  const request = parseBootstrapInput(statement);
+  const observed = bootstrapStatistic(request.values, request.statistic);
+  const distribution = bootstrapDistribution(request.values, request.statistic, request.resamples, request.seed);
+  const sorted = [...distribution].sort((left, right) => left - right);
+  const alpha = 1 - request.level;
+  const lower = percentileFromSorted(sorted, alpha / 2);
+  const upper = percentileFromSorted(sorted, 1 - alpha / 2);
+  const bootstrapMean = mean(distribution);
+  const bootstrapMedian = median(sorted);
+  const percent = formatNumber(request.level * 100);
+  const statisticLabel = request.statistic === "median" ? "median" : "mean";
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(request.values, [
+      statsMetricNode("OBS", observed),
+      statsMetricNode("LOW", lower),
+      statsMetricNode("HIGH", upper),
+    ], "BOOTSTRAP"),
+    answer: `bootstrap ${percent}% CI for ${statisticLabel} = [${formatNumber(lower)}, ${formatNumber(upper)}]`,
+    summary: "bootstrap confidence interval",
+    details: `Percentile bootstrap for the sample ${statisticLabel}`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.values)),
+    steps: [
+      {
+        title: "Read bootstrap request",
+        expression: `${request.values.length} values, ${request.resamples} resamples`,
+        detail: "Bootstrap inference resamples the observed data with replacement.",
+      },
+      {
+        title: "Compute observed statistic",
+        expression: `${statisticLabel} = ${formatNumber(observed)}`,
+        detail: "The observed statistic is the center of the resampling problem.",
+      },
+      {
+        title: "Build resampling distribution",
+        expression: `${request.resamples} simulated ${statisticLabel}s`,
+        detail: "A seeded pseudo-random generator makes the simulation reproducible.",
+      },
+      {
+        title: "Read percentile interval",
+        expression: `[${formatNumber(lower)}, ${formatNumber(upper)}]`,
+        detail: "The interval uses the lower and upper bootstrap percentiles.",
+      },
+    ],
+    table: {
+      headers: ["Quantity", "Value"],
+      rows: [
+        ["Observed statistic", formatNumber(observed)],
+        ["Bootstrap mean", formatNumber(bootstrapMean)],
+        ["Bootstrap median", formatNumber(bootstrapMedian)],
+        ["Lower percentile", formatNumber(lower)],
+        ["Upper percentile", formatNumber(upper)],
+      ],
+    },
+    artifacts: [
+      ["Statistic", statisticLabel],
+      ["Confidence level", `${percent}%`],
+      ["Resamples", formatNumber(request.resamples)],
+      ["Seed", formatNumber(request.seed)],
+      ["Observed statistic", formatNumber(observed)],
+      ["Lower bound", formatNumber(lower)],
+      ["Upper bound", formatNumber(upper)],
     ],
   };
 }
@@ -8523,6 +8596,52 @@ function descriptiveAnswer(statement, summary) {
   return `mean = ${formatNumber(summary.mean)}, median = ${formatNumber(summary.median)}, sample sd = ${formatNumber(summary.sampleStdDev)}`;
 }
 
+function bootstrapDistribution(values, statistic, resamples, seed) {
+  const random = seededRandom(seed);
+  const distribution = [];
+  for (let index = 0; index < resamples; index += 1) {
+    const sample = [];
+    for (let draw = 0; draw < values.length; draw += 1) {
+      sample.push(values[Math.floor(random() * values.length)]);
+    }
+    distribution.push(bootstrapStatistic(sample, statistic));
+  }
+  return distribution;
+}
+
+function bootstrapStatistic(values, statistic) {
+  if (statistic === "median") {
+    return median([...values].sort((left, right) => left - right));
+  }
+  return mean(values);
+}
+
+function percentileFromSorted(sortedValues, probability) {
+  if (sortedValues.length === 0) {
+    throw new Error("Percentiles need at least one value.");
+  }
+  const clamped = Math.max(0, Math.min(1, probability));
+  const index = clamped * (sortedValues.length - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) {
+    return normalizeNumber(sortedValues[lower]);
+  }
+  const weight = index - lower;
+  return normalizeNumber(sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight);
+}
+
+function seededRandom(seed) {
+  let state = Math.trunc(seed) % 2147483647;
+  if (state <= 0) {
+    state += 2147483646;
+  }
+  return () => {
+    state = (state * 48271) % 2147483647;
+    return (state - 1) / 2147483646;
+  };
+}
+
 function parseNumbers(text) {
   return [...text.matchAll(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)].map((match) => Number(match[0]));
 }
@@ -8842,6 +8961,60 @@ function parseTwoProportionInput(text) {
     alpha,
     alternative: parseAlternative(text),
   };
+}
+
+function parseBootstrapInput(text) {
+  const lower = text.toLowerCase();
+  let dataText = text;
+  let statistic = lower.includes("median") ? "median" : "mean";
+  let resamples = 2000;
+  let seed = 12345;
+
+  const statisticMatch = dataText.match(/\b(?:stat|statistic)\s*=\s*(mean|median)\b/i);
+  if (statisticMatch) {
+    statistic = statisticMatch[1].toLowerCase();
+    dataText = dataText.replace(statisticMatch[0], "");
+  }
+
+  const resamplesMatch = dataText.match(/\b(?:resamples|samples|iterations|reps|b)\s*=\s*(\d+)\b/i);
+  if (resamplesMatch) {
+    resamples = Number(resamplesMatch[1]);
+    dataText = dataText.replace(resamplesMatch[0], "");
+  }
+
+  const seedMatch = dataText.match(/\bseed\s*=\s*(\d+)\b/i);
+  if (seedMatch) {
+    seed = Number(seedMatch[1]);
+    dataText = dataText.replace(seedMatch[0], "");
+  }
+
+  const level = parseConfidenceLevel(dataText.replace(/\bbootstrap\b/gi, ""), 0.95);
+  dataText = dataText
+    .replace(/\b(?:confidence|ci)\s*(?:level)?\s*=\s*(0?\.\d+|\d+(?:\.\d+)?)/gi, "")
+    .replace(/\b[-+]?\d*\.?\d+(?:e[-+]?\d+)?\s*%?\s*(?:bootstrap\s+)?(?:confidence|ci)\b/gi, "")
+    .replace(/\bbootstrap\b/gi, "")
+    .replace(/\bconfidence\b/gi, "")
+    .replace(/\binterval\b/gi, "")
+    .replace(/\bpercentile\b/gi, "")
+    .replace(/\bci\b/gi, "")
+    .replace(/\bfor\b/gi, "")
+    .replace(/\bof\b/gi, "")
+    .replace(/\bdata\b/gi, "")
+    .replace(/\bmean\b/gi, "")
+    .replace(/\bmedian\b/gi, "");
+
+  const values = parseNumbers(dataText);
+  if (values.length < 2) {
+    throw new Error("Bootstrap intervals need at least two data values.");
+  }
+  if (!Number.isSafeInteger(resamples) || resamples < 50 || resamples > 50000) {
+    throw new Error("Bootstrap resamples must be an integer from 50 to 50000.");
+  }
+  if (!Number.isSafeInteger(seed) || seed < 0) {
+    throw new Error("Bootstrap seed must be a nonnegative integer.");
+  }
+
+  return { values, statistic, level, resamples, seed };
 }
 
 function parseConfidenceLevel(text, fallback) {
@@ -10730,6 +10903,7 @@ function isStatisticsQuestion(lower) {
     "variance",
     "standard deviation",
     "std",
+    "bootstrap",
     "regression",
     "correlation",
     "covariance",
