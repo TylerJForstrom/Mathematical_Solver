@@ -260,6 +260,16 @@ runTest("statistics mode computes logistic regression", () => {
   assert.equal(artifactValue(result, "Predicted probability"), "0.771011");
 });
 
+runTest("statistics mode computes Poisson regression", () => {
+  const result = analyzeStatistics("poisson regression y: 1, 2, 1, 3, 4, 5; x: 0, 1, 2, 3, 4, 5; predict x=6");
+
+  assert.equal(result.summary, "Poisson regression");
+  assert.equal(result.answer, "log(lambda) = 0.041683 + 0.318303x; expected count = 7.039251");
+  assert.equal(artifactValue(result, "Coefficient x"), "0.318303");
+  assert.equal(artifactValue(result, "Deviance"), "0.838403");
+  assert.deepEqual(result.table.rows[5], ["6", "5", "5.120226", "-0.120226"]);
+});
+
 runTest("statistics mode computes AR(1) time-series forecasts", () => {
   const result = analyzeStatistics("ar(1) series: 10, 12, 13, 15, 16, 18 forecast=3");
 
@@ -822,6 +832,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
   assert.equal(analyzeUniversal("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5").summary, "logistic regression");
+  assert.equal(analyzeUniversal("poisson regression y: 1, 2, 1, 3, 4, 5; x: 0, 1, 2, 3, 4, 5; predict x=6").summary, "Poisson regression");
   assert.equal(analyzeUniversal("pca x: 1,2,3,4; y: 2,3,5,8").summary, "principal component analysis");
   assert.equal(analyzeUniversal("correlation matrix x: 1,2,3,4; y: 2,3,5,8").answer, "correlation matrix = [[1, 0.9759], [0.9759, 1]]");
   assert.equal(analyzeUniversal("k-means k=3 points (1,1), (1,2), (5,5), (6,5), (10,10), (10,11)").summary, "k-means clustering");

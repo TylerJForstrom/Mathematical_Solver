@@ -1109,6 +1109,10 @@ export function analyzeStatistics(statement) {
     return analyzeGeometric(statement);
   }
 
+  if (isPoissonRegressionQuestion(lower)) {
+    return analyzePoissonRegression(statement);
+  }
+
   if (lower.includes("poisson")) {
     return analyzePoisson(statement);
   }
@@ -1153,6 +1157,9 @@ export function analyzeStatistics(statement) {
     }
     if (isLogisticRegressionQuestion(lower)) {
       return analyzeLogisticRegression(statement);
+    }
+    if (isPoissonRegressionQuestion(lower)) {
+      return analyzePoissonRegression(statement);
     }
     if (isMultipleRegressionQuestion(lower, statement)) {
       return analyzeMultipleRegression(statement);
@@ -5002,6 +5009,98 @@ function analyzeLogisticRegression(statement) {
   };
 }
 
+function analyzePoissonRegression(statement) {
+  const request = parsePoissonRegressionInput(statement);
+  const design = request.y.map((_, row) => [
+    1,
+    ...request.predictors.map((predictor) => predictor.values[row]),
+  ]);
+  const fit = fitPoissonRegression(design, request.y);
+  const residuals = request.y.map((value, index) => normalizeNumber(value - fit.rates[index]));
+  const nullMean = mean(request.y);
+  const nullLogLikelihood = request.y.reduce(
+    (sum, value) => sum + poissonRegressionObservationLogLikelihood(value, nullMean),
+    0,
+  );
+  const mcfaddenR2 = nullLogLikelihood < 0 ? 1 - fit.logLikelihood / nullLogLikelihood : Number.NaN;
+  const predictorNames = request.predictors.map((predictor) => predictor.name);
+  const equation = formatPoissonRegressionEquation(fit.coefficients, predictorNames);
+  const hasPrediction = request.prediction.every(Number.isFinite);
+  const predictedRate = hasPrediction
+    ? poissonMeanFromLinearPredictor(dotProduct([1, ...request.prediction], fit.coefficients))
+    : Number.NaN;
+  const tree = {
+    kind: "statsRegression",
+    label: "POISSON REG",
+    children: [
+      statsDatasetNode(request.y, [], "Y"),
+      ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+      statsMetricNode("LL", fit.logLikelihood),
+      statsMetricNode("DEV", fit.deviance),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: hasPrediction
+      ? `${equation}; expected count = ${formatNumber(predictedRate)}`
+      : equation,
+    summary: "Poisson regression",
+    details: `${request.y.length} count observations, ${request.predictors.length} predictors`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read count response and predictors",
+        expression: `n = ${request.y.length}, predictors = ${predictorNames.join(", ")}`,
+        detail: "Poisson regression models nonnegative integer counts using predictor variables.",
+      },
+      {
+        title: "Build log-link model",
+        expression: "log(lambda) = b0 + b1x1 + ...",
+        detail: "The log link keeps the fitted expected counts positive.",
+      },
+      {
+        title: "Fit by Fisher scoring",
+        expression: `${fit.iterations} iterations, ${fit.converged ? "converged" : "stopped"}`,
+        detail: "Each iteration updates the coefficients using the Poisson likelihood gradient and information matrix.",
+      },
+      {
+        title: "Measure count-model fit",
+        expression: `log likelihood = ${formatNumber(fit.logLikelihood)}, deviance = ${formatNumber(fit.deviance)}`,
+        detail: "Deviance compares the fitted rates to a saturated model that exactly matches the counts.",
+      },
+      ...(hasPrediction
+        ? [{
+            title: "Predict expected count",
+            expression: `lambda = ${formatNumber(predictedRate)}`,
+            detail: "The requested predictor values are plugged into the fitted log-link model.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Obs", "Actual", "Fitted count", "Residual"],
+      rows: request.y.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(fit.rates[index]),
+        formatNumber(residuals[index]),
+      ]),
+    },
+    artifacts: [
+      ["Equation", equation],
+      ["Intercept", formatNumber(fit.coefficients[0])],
+      ...request.predictors.map((predictor, index) => [`Coefficient ${predictor.name}`, formatNumber(fit.coefficients[index + 1])]),
+      ["Log likelihood", formatNumber(fit.logLikelihood)],
+      ["Deviance", formatNumber(fit.deviance)],
+      ["McFadden R squared", Number.isFinite(mcfaddenR2) ? formatNumber(mcfaddenR2) : "undefined"],
+      ["Converged", fit.converged ? "yes" : "no"],
+      ...(hasPrediction ? [["Predicted expected count", formatNumber(predictedRate)]] : []),
+    ],
+  };
+}
+
 function analyzeMultivariateStatistics(statement) {
   const lower = statement.toLowerCase();
   const dataset = parseMultivariateStatsInput(statement);
@@ -6768,6 +6867,85 @@ function fitLogisticRegression(design, yValues) {
     iterations,
     converged,
   };
+}
+
+function fitPoissonRegression(design, counts) {
+  const parameterCount = design[0].length;
+  let coefficients = Array(parameterCount).fill(0);
+  coefficients[0] = Math.log(Math.max(mean(counts), 1e-6));
+  let converged = false;
+  let iterations = 0;
+  let rates = design.map((row) => poissonMeanFromLinearPredictor(dotProduct(row, coefficients)));
+  const ridge = 1e-8;
+
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    rates = design.map((row) => poissonMeanFromLinearPredictor(dotProduct(row, coefficients)));
+    const gradient = Array(parameterCount).fill(0);
+    const information = Array.from({ length: parameterCount }, () => Array(parameterCount).fill(0));
+
+    for (let rowIndex = 0; rowIndex < design.length; rowIndex += 1) {
+      const row = design[rowIndex];
+      const rate = rates[rowIndex];
+      const residual = counts[rowIndex] - rate;
+
+      for (let left = 0; left < parameterCount; left += 1) {
+        gradient[left] += row[left] * residual;
+        for (let right = 0; right < parameterCount; right += 1) {
+          information[left][right] += row[left] * row[right] * rate;
+        }
+      }
+    }
+
+    for (let index = 0; index < parameterCount; index += 1) {
+      information[index][index] += ridge;
+    }
+
+    const delta = solveLinearSystem(information, gradient);
+    coefficients = coefficients.map((coefficient, index) => normalizeNumber(coefficient + delta[index]));
+    iterations = iteration + 1;
+
+    if (Math.max(...delta.map(Math.abs)) < 1e-7) {
+      converged = true;
+      break;
+    }
+  }
+
+  rates = design.map((row) => normalizeNumber(poissonMeanFromLinearPredictor(dotProduct(row, coefficients))));
+  const logLikelihood = counts.reduce(
+    (sum, value, index) => sum + poissonRegressionObservationLogLikelihood(value, rates[index]),
+    0,
+  );
+  const deviance = poissonRegressionDeviance(counts, rates);
+
+  return {
+    coefficients,
+    rates,
+    logLikelihood: normalizeNumber(logLikelihood),
+    deviance: normalizeNumber(deviance),
+    iterations,
+    converged,
+  };
+}
+
+function poissonMeanFromLinearPredictor(value) {
+  return Math.exp(Math.min(50, Math.max(-50, value)));
+}
+
+function poissonRegressionObservationLogLikelihood(count, rate) {
+  const safeRate = Math.max(rate, 1e-12);
+  return count === 0
+    ? -safeRate
+    : count * Math.log(safeRate) - safeRate - logFactorial(count);
+}
+
+function poissonRegressionDeviance(counts, rates) {
+  return normalizeNumber(2 * counts.reduce((sum, value, index) => {
+    const rate = Math.max(rates[index], 1e-12);
+    if (value === 0) {
+      return sum + rate;
+    }
+    return sum + value * Math.log(value / rate) - (value - rate);
+  }, 0));
 }
 
 function logisticSigmoid(value) {
@@ -10765,6 +10943,58 @@ function parseLogisticRegressionInput(text) {
   };
 }
 
+function parsePoissonRegressionInput(text) {
+  const lists = new Map();
+  const listText = text.replace(/\bpredict\b.*$/i, "");
+  for (const match of listText.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    const label = match[1];
+    const values = parseNumberList(match[2]);
+    if (values.length > 1) {
+      lists.set(label.toLowerCase(), { name: label, values });
+    }
+  }
+
+  const responseEntry = lists.get("y") ??
+    lists.get("count") ??
+    lists.get("counts") ??
+    lists.get("response") ??
+    lists.get("outcome");
+  if (!responseEntry) {
+    throw new Error("Poisson regression needs a count response list, such as y: 1, 0, 3, 2.");
+  }
+
+  const predictors = [...lists.entries()]
+    .filter(([key]) => key !== responseEntry.name.toLowerCase())
+    .filter(([key]) => /^x\d*$/i.test(key) || /^predictor\d+$/i.test(key))
+    .sort(([left], [right]) => naturalLabelNumber(left) - naturalLabelNumber(right))
+    .map(([, value]) => value);
+
+  if (predictors.length < 1) {
+    throw new Error("Poisson regression needs at least one predictor list, such as x: 1, 2, 3.");
+  }
+  for (const predictor of predictors) {
+    if (predictor.values.length !== responseEntry.values.length) {
+      throw new Error("All Poisson-regression lists must have the same length.");
+    }
+  }
+  if (responseEntry.values.length <= predictors.length + 1) {
+    throw new Error("Poisson regression needs more observations than model coefficients.");
+  }
+  if (!responseEntry.values.every((value) => Number.isSafeInteger(value) && value >= 0)) {
+    throw new Error("Poisson regression response values must be nonnegative integer counts.");
+  }
+  if (responseEntry.values.every((value) => value === 0)) {
+    throw new Error("Poisson regression needs at least one positive count.");
+  }
+
+  const prediction = parseLogisticRegressionPrediction(text, predictors.map((predictor) => predictor.name));
+  return {
+    y: responseEntry.values,
+    predictors,
+    prediction,
+  };
+}
+
 function parseLogisticRegressionPrediction(text, predictorNames) {
   const match = text.match(/\bpredict\b(.+)$/i);
   if (!match) {
@@ -10867,6 +11097,14 @@ function evaluatePolynomialRegression(coefficients, x) {
 
 function formatLogisticRegressionEquation(coefficients, predictorNames) {
   let expression = `logit(p) = ${formatNumber(coefficients[0])}`;
+  for (let index = 0; index < predictorNames.length; index += 1) {
+    expression += ` ${formatSignedTerm(coefficients[index + 1], predictorNames[index])}`;
+  }
+  return expression;
+}
+
+function formatPoissonRegressionEquation(coefficients, predictorNames) {
+  let expression = `log(lambda) = ${formatNumber(coefficients[0])}`;
   for (let index = 0; index < predictorNames.length; index += 1) {
     expression += ` ${formatSignedTerm(coefficients[index + 1], predictorNames[index])}`;
   }
@@ -11387,6 +11625,14 @@ function factorial(value) {
   return result;
 }
 
+function logFactorial(value) {
+  let result = 0;
+  for (let index = 2; index <= value; index += 1) {
+    result += Math.log(index);
+  }
+  return result;
+}
+
 function factorialBigInt(value) {
   let result = 1n;
   for (let index = 2n; index <= BigInt(value); index += 1n) {
@@ -11533,6 +11779,13 @@ function isLogisticRegressionQuestion(lower) {
   return lower.includes("logistic regression") ||
     lower.includes("binary regression") ||
     lower.includes("logit regression");
+}
+
+function isPoissonRegressionQuestion(lower) {
+  return lower.includes("poisson regression") ||
+    lower.includes("count regression") ||
+    lower.includes("log-linear regression") ||
+    lower.includes("log linear regression");
 }
 
 function isMultivariateStatsQuestion(lower, statement = lower) {
@@ -11828,6 +12081,10 @@ function isStatisticsQuestion(lower) {
     "logistic regression",
     "binary regression",
     "logit regression",
+    "poisson regression",
+    "count regression",
+    "log-linear regression",
+    "log linear regression",
     "k-means",
     "k means",
     "kmeans",

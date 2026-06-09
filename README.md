@@ -56,6 +56,8 @@ The frontend currently supports:
   residuals, R squared, and prediction
 - Logistic regression for binary outcomes with fitted probabilities,
   classification accuracy, McFadden R squared, and probability prediction
+- Poisson regression for count outcomes with log-link coefficients, fitted
+  rates, likelihood deviance, pseudo R squared, and expected-count prediction
 - Time-series AR(1) forecasting with lag coefficients, autocorrelation,
   residual error, and multi-step predictions
 - Multivariate statistics: covariance matrices, correlation matrices, and
@@ -191,6 +193,8 @@ The same idea works for algebra and calculus:
   solves a least-squares model with multiple predictors.
 - `logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5`
   fits a binary-response model and returns a predicted probability.
+- `poisson regression y: 1,2,1,3,4,5; x: 0,1,2,3,4,5; predict x=6`
+  fits a count-response GLM and predicts an expected count.
 - `ar(1) series: 10,12,13,15,16,18 forecast=3` fits a lag-1
   autoregressive model and forecasts future values.
 - `covariance matrix x: 1,2,3,4; y: 2,3,5,8` returns a sample covariance
@@ -295,6 +299,7 @@ The demo includes:
   regression/correlation, polynomial regression,
   multiple regression,
   logistic regression,
+  Poisson regression,
   AR(1) time-series forecasting,
   covariance/correlation matrices, 2D PCA, k-means clustering,
   binomial probability,
