@@ -2153,6 +2153,10 @@ export function analyzeSequence(statement) {
 }
 
 export function analyzeOptimization(statement, variableHint = "x") {
+  if (isLinearProgrammingQuestion(statement.toLowerCase())) {
+    return analyzeLinearProgramming(statement);
+  }
+
   const request = extractOptimizationQuestion(statement, variableHint);
   const expression = parseMath(request.expression);
   if (expression.kind === "equation") {
@@ -2245,6 +2249,88 @@ export function analyzeOptimization(statement, variableHint = "x") {
         row.kind,
       ]),
     },
+  };
+}
+
+function analyzeLinearProgramming(statement) {
+  const request = parseLinearProgrammingInput(statement);
+  const vertices = feasibleLinearProgrammingVertices(request.constraints);
+  if (vertices.length === 0) {
+    throw new Error("No feasible vertices found for this linear program.");
+  }
+  if (isLinearProgramUnbounded(request.objective.coefficients, request.constraints, request.goal)) {
+    throw new Error("This linear program appears unbounded in the requested objective direction.");
+  }
+
+  const evaluated = vertices.map((point) => ({
+    point,
+    value: normalizeNumber(request.objective.constant + dotProduct(request.objective.coefficients, point)),
+  }));
+  const optimum = evaluated.reduce((best, current) => {
+    if (request.goal === "maximize") {
+      return current.value > best.value + EPSILON ? current : best;
+    }
+    return current.value < best.value - EPSILON ? current : best;
+  }, evaluated[0]);
+  const objectiveText = formatLinearExpression(request.objective.coefficients, request.variables, request.objective.constant);
+  const answer = `${request.goal === "maximize" ? "maximum" : "minimum"} = ${formatNumber(optimum.value)} at ${formatLinearProgramPoint(optimum.point, request.variables)}`;
+  const tree = {
+    kind: "statsDistribution",
+    label: "LP",
+    children: [
+      vectorNode("objective", request.objective.coefficients),
+      matrixNode("A", request.constraints.map((constraint) => constraint.coefficients)),
+      vectorNode("b", request.constraints.map((constraint) => constraint.bound)),
+      vectorNode("optimum", optimum.point),
+    ],
+  };
+
+  return {
+    mode: "optimization",
+    tree,
+    answer,
+    summary: "linear programming",
+    details: `${request.goal} a linear objective over ${request.constraints.length} constraints`,
+    variables: request.variables,
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read objective and constraints",
+        expression: `${request.goal} ${objectiveText}`,
+        detail: "A two-variable linear program optimizes a linear objective over linear inequalities.",
+      },
+      {
+        title: "Normalize inequalities",
+        expression: request.constraints.map(formatLinearConstraint).join("; "),
+        detail: "Every constraint is rewritten as ax + by <= c.",
+      },
+      {
+        title: "Enumerate feasible vertices",
+        expression: vertices.map((point) => formatLinearProgramPoint(point, request.variables)).join("; "),
+        detail: "For two variables, a bounded optimum occurs at a feasible intersection of constraint boundaries.",
+      },
+      {
+        title: "Evaluate objective at vertices",
+        expression: evaluated.map((row) => `${formatLinearProgramPoint(row.point, request.variables)} -> ${formatNumber(row.value)}`).join("; "),
+        detail: "The best vertex gives the optimal objective value.",
+      },
+    ],
+    table: {
+      headers: [...request.variables, "Objective", "Selected"],
+      rows: evaluated.map((row) => [
+        formatNumber(row.point[0]),
+        formatNumber(row.point[1]),
+        formatNumber(row.value),
+        row === optimum ? "yes" : "",
+      ]),
+    },
+    artifacts: [
+      ["Goal", request.goal],
+      ["Objective", objectiveText],
+      ["Constraints", request.constraints.map(formatLinearConstraint).join("; ")],
+      ["Feasible vertices", vertices.map((point) => formatLinearProgramPoint(point, request.variables)).join("; ")],
+      ["Optimum", answer],
+    ],
   };
 }
 
@@ -5848,6 +5934,70 @@ function meanPoint(points) {
   );
 }
 
+function feasibleLinearProgrammingVertices(constraints) {
+  const vertices = [];
+  for (let left = 0; left < constraints.length; left += 1) {
+    for (let right = left + 1; right < constraints.length; right += 1) {
+      const point = intersectLinearConstraints(constraints[left], constraints[right]);
+      if (point && isLinearProgramPointFeasible(point, constraints)) {
+        vertices.push(point.map(normalizeNumber));
+      }
+    }
+  }
+  return uniquePoints2d(vertices);
+}
+
+function intersectLinearConstraints(left, right) {
+  const [a1, b1] = left.coefficients;
+  const [a2, b2] = right.coefficients;
+  const determinantValue = a1 * b2 - a2 * b1;
+  if (nearlyEqual(determinantValue, 0)) {
+    return null;
+  }
+  return [
+    (left.bound * b2 - right.bound * b1) / determinantValue,
+    (a1 * right.bound - a2 * left.bound) / determinantValue,
+  ];
+}
+
+function isLinearProgramPointFeasible(point, constraints) {
+  return constraints.every((constraint) =>
+    dotProduct(constraint.coefficients, point) <= constraint.bound + 1e-7,
+  );
+}
+
+function uniquePoints2d(points) {
+  const unique = [];
+  for (const point of points) {
+    if (!unique.some((existing) => squaredDistance(existing, point) < 1e-10)) {
+      unique.push(point);
+    }
+  }
+  return unique.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+}
+
+function isLinearProgramUnbounded(objectiveCoefficients, constraints, goal) {
+  const directionObjective = goal === "maximize"
+    ? objectiveCoefficients
+    : objectiveCoefficients.map((value) => -value);
+  if (vectorMagnitude(directionObjective) <= EPSILON) {
+    return false;
+  }
+  const candidateDirections = [
+    directionObjective,
+    directionObjective.map((value) => -value),
+    ...constraints.flatMap((constraint) => {
+      const [a, b] = constraint.coefficients;
+      return [[b, -a], [-b, a]];
+    }),
+  ];
+  return candidateDirections.some((direction) =>
+    vectorMagnitude(direction) > EPSILON &&
+    dotProduct(directionObjective, direction) > EPSILON &&
+    constraints.every((constraint) => dotProduct(constraint.coefficients, direction) <= EPSILON),
+  );
+}
+
 function covarianceMatrixFromColumns(columns) {
   const means = columns.map(mean);
   const n = columns[0].length;
@@ -6497,6 +6647,104 @@ function extractOptimizationQuestion(statement, fallbackVariable) {
   text = text.replace(/^-\s*/, "0 - ");
 
   return { expression: text, variable, goal };
+}
+
+function parseLinearProgrammingInput(statement) {
+  const variables = ["x", "y"];
+  const cleaned = statement.replace(/[?!.]+$/, "").trim();
+  const lower = cleaned.toLowerCase();
+  const goal = lower.includes("minimize") || lower.includes("minimum") || /\bmin\b/.test(lower)
+    ? "minimize"
+    : "maximize";
+  const split = cleaned.match(/\b(subject to|constraints?)\b/i);
+  if (!split) {
+    throw new Error("Linear programming needs constraints after 'subject to'.");
+  }
+
+  let objectiveText = cleaned.slice(0, split.index).trim()
+    .replace(/^(?:linear programming|linear program|lp)\s*/i, "")
+    .replace(/^(?:maximize|max|minimize|min|minimum|maximum)\s*/i, "")
+    .replace(/^objective\s*/i, "")
+    .trim();
+  const constraintsText = cleaned.slice((split.index ?? 0) + split[0].length).trim();
+  if (objectiveText.includes("=")) {
+    objectiveText = objectiveText.slice(objectiveText.indexOf("=") + 1).trim();
+  }
+  if (!objectiveText) {
+    throw new Error("Linear programming needs an objective expression.");
+  }
+
+  const objective = parseLinearExpressionCoefficients(objectiveText, variables);
+  const constraints = constraintsText
+    .split(/[;\n]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => parseLinearProgrammingConstraint(part, variables));
+  if (constraints.length < 2) {
+    throw new Error("Linear programming needs at least two constraints.");
+  }
+
+  return {
+    goal,
+    variables,
+    objective,
+    constraints,
+  };
+}
+
+function parseLinearProgrammingConstraint(text, variables) {
+  const match = text.match(/^(.+?)(<=|>=|<|>|=)(.+)$/);
+  if (!match) {
+    throw new Error("Use linear constraints such as x + y <= 4.");
+  }
+  const left = parseLinearExpressionCoefficients(match[1].trim(), variables);
+  const right = parseLinearExpressionCoefficients(match[3].trim(), variables);
+  const coefficients = left.coefficients.map((value, index) => value - right.coefficients[index]);
+  const constant = left.constant - right.constant;
+  const operator = match[2];
+
+  if (operator === "<=" || operator === "<" || operator === "=") {
+    return {
+      coefficients: coefficients.map(normalizeNumber),
+      bound: normalizeNumber(-constant),
+      source: text,
+    };
+  }
+
+  return {
+    coefficients: coefficients.map((value) => normalizeNumber(-value)),
+    bound: normalizeNumber(constant),
+    source: text,
+  };
+}
+
+function parseLinearExpressionCoefficients(text, variables) {
+  const parsed = parseMath(text);
+  const expression = parsed.kind === "equation" ? parsed.right : parsed;
+  const polynomial = polynomialFrom(expression);
+  if (!polynomial) {
+    throw new Error("Linear programming expressions must be linear polynomials.");
+  }
+
+  const coefficients = Object.fromEntries(variables.map((variable) => [variable, 0]));
+  let constant = 0;
+  for (const [key, coefficient] of polynomial.entries()) {
+    if (!key) {
+      constant += coefficient;
+      continue;
+    }
+    const powers = powersFromKey(key);
+    const entries = Object.entries(powers);
+    if (entries.length !== 1 || entries[0][1] !== 1 || !variables.includes(entries[0][0])) {
+      throw new Error("Linear programming currently supports linear expressions in x and y.");
+    }
+    coefficients[entries[0][0]] += coefficient;
+  }
+
+  return {
+    coefficients: variables.map((variable) => normalizeNumber(coefficients[variable])),
+    constant: normalizeNumber(constant),
+  };
 }
 
 function polynomialDerivative(poly, variable) {
@@ -8488,6 +8736,39 @@ function formatLogisticRegressionEquation(coefficients, predictorNames) {
   return expression;
 }
 
+function formatLinearExpression(coefficients, variables, constant = 0) {
+  const terms = [];
+  for (let index = 0; index < variables.length; index += 1) {
+    const coefficient = normalizeNumber(coefficients[index]);
+    if (nearlyEqual(coefficient, 0)) continue;
+    const magnitude = Math.abs(coefficient);
+    const coefficientText = nearlyEqual(magnitude, 1) ? "" : formatNumber(magnitude);
+    const term = `${coefficientText}${variables[index]}`;
+    if (terms.length === 0) {
+      terms.push(coefficient < 0 ? `-${term}` : term);
+    } else {
+      terms.push(`${coefficient < 0 ? "-" : "+"} ${term}`);
+    }
+  }
+  const normalizedConstant = normalizeNumber(constant);
+  if (!nearlyEqual(normalizedConstant, 0) || terms.length === 0) {
+    if (terms.length === 0) {
+      terms.push(formatNumber(normalizedConstant));
+    } else {
+      terms.push(`${normalizedConstant < 0 ? "-" : "+"} ${formatNumber(Math.abs(normalizedConstant))}`);
+    }
+  }
+  return terms.join(" ");
+}
+
+function formatLinearConstraint(constraint) {
+  return `${formatLinearExpression(constraint.coefficients, ["x", "y"])} <= ${formatNumber(constraint.bound)}`;
+}
+
+function formatLinearProgramPoint(point, variables) {
+  return variables.map((variable, index) => `${variable}=${formatNumber(point[index])}`).join(", ");
+}
+
 function formatSignedTerm(coefficient, variable) {
   const sign = coefficient < 0 ? "-" : "+";
   return `${sign} ${formatNumber(Math.abs(coefficient))}${variable}`;
@@ -9254,7 +9535,8 @@ function isIntegralQuestion(lower) {
 }
 
 function isOptimizationQuestion(lower) {
-  return lower.startsWith("maximize ") ||
+  return isLinearProgrammingQuestion(lower) ||
+    lower.startsWith("maximize ") ||
     lower.startsWith("minimize ") ||
     lower.startsWith("optimize ") ||
     lower.startsWith("critical points of ") ||
@@ -9264,6 +9546,13 @@ function isOptimizationQuestion(lower) {
     lower.startsWith("find the minimum of ") ||
     lower.startsWith("find max of ") ||
     lower.startsWith("find min of ");
+}
+
+function isLinearProgrammingQuestion(lower) {
+  return lower.includes("linear programming") ||
+    lower.includes("linear program") ||
+    lower.startsWith("lp ") ||
+    ((lower.startsWith("maximize ") || lower.startsWith("minimize ")) && lower.includes("subject to"));
 }
 
 function isDifferentialEquationQuestion(lower) {

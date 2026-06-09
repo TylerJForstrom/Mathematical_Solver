@@ -595,6 +595,15 @@ runTest("optimization mode finds polynomial critical points", () => {
   assert.equal(result.answer, "local max at x = 2, f(x) = 5");
 });
 
+runTest("optimization mode solves linear programming problems", () => {
+  const result = analyzeOptimization("linear programming maximize 3x + 2y subject to x + y <= 4; x <= 2; y <= 3; x >= 0; y >= 0");
+
+  assert.equal(result.summary, "linear programming");
+  assert.equal(result.answer, "maximum = 10 at x=2, y=2");
+  assert.equal(artifactValue(result, "Feasible vertices"), "x=0, y=0; x=0, y=3; x=1, y=3; x=2, y=0; x=2, y=2");
+  assert.deepEqual(result.table.rows.at(-1), ["2", "2", "10", "yes"]);
+});
+
 runTest("graph mode samples functions", () => {
   const result = analyzeGraph("graph x^2 - 4 from -2 to 2");
 
@@ -677,6 +686,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("taylor sin(x) order=5").summary, "Maclaurin polynomial");
   assert.equal(analyzeUniversal("complex (3+4i)*(2-i)").answer, "10 + 5i");
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
+  assert.equal(analyzeUniversal("linear programming maximize 3x + 2y subject to x + y <= 4; x <= 2; y <= 3; x >= 0; y >= 0").summary, "linear programming");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
   assert.equal(analyzeUniversal("ode dy/dt = 0.3y y0=2 t=5").summary, "exponential ODE");

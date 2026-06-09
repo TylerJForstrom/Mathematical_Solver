@@ -38,6 +38,8 @@ The frontend currently supports:
 - Polynomial and elementary indefinite/definite integrals, including trig,
   exponential, logarithmic, square-root, and reciprocal forms
 - Polynomial critical points and local max/min classification
+- Two-variable linear programming with feasible-vertex enumeration and
+  constrained objective optimization
 - Function graphing with sampled SVG plots
 - Differential equations: exponential growth/decay, Newton cooling, logistic
   growth, and separable power ODEs
@@ -152,6 +154,8 @@ The same idea works for algebra and calculus:
 - `integrate sin(x)` uses a function node and returns `-cos(x) + C`.
 - `integrate exp(x) from 0 to 1` evaluates an elementary definite integral.
 - `maximize -x^2 + 4x + 1` differentiates, solves critical points, and classifies them.
+- `linear programming maximize 3x + 2y subject to x + y <= 4; x <= 2; y <= 3; x >= 0; y >= 0`
+  enumerates feasible vertices and returns the constrained optimum.
 - `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
 - `ode dy/dt = 0.3y y0=2 t=5`, `newton cooling ambient=70 initial=100 k=0.2 t=10`,
   and `logistic r=0.4 K=100 y0=10 t=8` solve closed-form differential equations.
@@ -264,6 +268,7 @@ The demo includes:
   tests, power/sample-size analysis, effect sizes, and pairwise follow-up
   summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
+  linear programming,
   vector geometry, geometry formulas, sequences/series, graphing, differential
   equations, and numerical roots through Ask mode
 - Step-by-step explanation cards
