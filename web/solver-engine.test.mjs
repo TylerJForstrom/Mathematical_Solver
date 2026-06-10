@@ -534,6 +534,18 @@ runTest("statistics mode computes chi-square independence tests", () => {
   assert.deepEqual(result.table.rows[0], ["R1C1", "30", "20", "5", "2.236068"]);
 });
 
+runTest("statistics mode computes Fisher exact tests", () => {
+  const result = analyzeStatistics("fisher exact [[1,9],[11,3]]");
+
+  assert.equal(result.summary, "Fisher exact test");
+  assert.equal(result.answer, "p = 0.002759, odds ratio = 0.030303");
+  assert.equal(artifactValue(result, "Observed probability"), "0.001346");
+  assert.equal(artifactValue(result, "Left-tail p-value"), "0.00138");
+  assert.equal(artifactValue(result, "Two-sided p-value"), "0.002759");
+  assert.equal(artifactValue(result, "Decision"), "reject H0 at alpha=0.05");
+  assert.deepEqual(result.table.rows[1], ["1", "0.001346", "two-sided"]);
+});
+
 runTest("statistics mode computes paired t-tests", () => {
   const result = analyzeStatistics("paired t-test before: 10, 12, 9; after: 11, 14, 10");
 
@@ -957,6 +969,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("two-proportion z-test successes1=56 n1=100 successes2=44 n2=100").summary, "two-proportion z test");
   assert.equal(analyzeUniversal("chi-square observed 10,20,30 expected 15,15,30").summary, "chi-square goodness-of-fit");
   assert.equal(analyzeUniversal("chi-square independence [[30,10],[20,40]]").summary, "chi-square independence test");
+  assert.equal(analyzeUniversal("fisher exact [[1,9],[11,3]]").summary, "Fisher exact test");
   assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
   assert.equal(analyzeUniversal("poisson lambda=3 k=2").summary, "Poisson probability");

@@ -86,8 +86,8 @@ The frontend currently supports:
   one-proportion/two-proportion z tests, proportion confidence intervals,
   permutation tests, one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank,
   Kruskal-Wallis, chi-square goodness-of-fit, chi-square independence tests
-  for contingency tables, binomial probability, Poisson probability, normal
-  probability, inverse-normal percentiles, geometric
+  for contingency tables, Fisher exact tests for 2x2 tables, binomial
+  probability, Poisson probability, normal probability, inverse-normal percentiles, geometric
   probability, exponential probability, uniform probability, hypergeometric
   probability, discrete expected value/variance, Bayes theorem, and z-score
   calculations
@@ -253,6 +253,8 @@ The same idea works for algebra and calculus:
   two sample proportions and reports `z = 1.697056, p = 0.089686`.
 - `chi-square independence [[30,10],[20,40]]` tests whether two categorical
   variables are associated and reports expected counts plus Cramer's V.
+- `fisher exact [[1,9],[11,3]]` gives an exact 2x2 table p-value and odds ratio
+  without relying on a large-sample chi-square approximation.
 - `permutation test group1: 10,12,9; group2: 8,7,11 resamples=2000 seed=5`
   shuffles group labels into a reproducible nonparametric p-value.
 - `kaplan-meier times: 5,6,6,8,10; events: 1,1,0,1,0` estimates a
@@ -355,7 +357,7 @@ The demo includes:
   Markov chains, Bayesian beta-binomial updates,
   one-sample/two-sample/paired t tests, one-proportion/two-proportion z tests,
   proportion confidence intervals, permutation tests, ANOVA, chi-square tests
-  of goodness-of-fit and independence,
+  of goodness-of-fit and independence, Fisher exact tests,
   nonparametric rank tests, Kaplan-Meier survival analysis, log-rank tests,
   Cox proportional hazards regression, power/sample-size analysis, effect sizes,
   and pairwise follow-up summaries in Stats mode

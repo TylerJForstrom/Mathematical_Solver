@@ -1048,6 +1048,10 @@ export function analyzeStatistics(statement) {
     return analyzePairedTTest(statement);
   }
 
+  if (isFisherExactQuestion(lower)) {
+    return analyzeFisherExactTest(statement);
+  }
+
   if (lower.includes("chi-square") || lower.includes("chi square") || lower.includes("chisquare")) {
     return analyzeChiSquare(statement);
   }
@@ -4083,6 +4087,148 @@ function validateContingencyTable(table) {
   if (rowTotals.some((value) => value <= 0) || columnTotals.some((value) => value <= 0)) {
     throw new Error("Every contingency table row and column must have a positive total.");
   }
+}
+
+function analyzeFisherExactTest(statement) {
+  const request = parseFisherExactInput(statement);
+  const result = computeFisherExactTest(request.table);
+  const decision = result.twoSidedP < request.alpha
+    ? `reject H0 at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject H0 at alpha=${formatNumber(request.alpha)}`;
+  const table = request.table;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      label: "FISHER",
+      children: [
+        matrixNode("OBS", table),
+        statsMetricNode("P2", result.twoSidedP),
+        statsMetricNode("OR", Number.isFinite(result.oddsRatio) ? result.oddsRatio : 0),
+      ],
+    },
+    answer: `p = ${formatNumber(result.twoSidedP)}, odds ratio = ${formatFisherOddsRatio(result.oddsRatio)}`,
+    summary: "Fisher exact test",
+    details: "Exact 2x2 contingency-table test",
+    variables: [],
+    metrics: treeMetrics(matrixNode("OBS", table)),
+    steps: [
+      {
+        title: "Read 2x2 table",
+        expression: formatMatrix(table),
+        detail: "Fisher's exact test checks association in a 2x2 contingency table without relying on large-sample approximations.",
+      },
+      {
+        title: "Fix margins",
+        expression: `row totals = ${formatVector(result.rowTotals)}, column totals = ${formatVector(result.columnTotals)}`,
+        detail: "Under the null hypothesis, row and column totals are treated as fixed.",
+      },
+      {
+        title: "Compute hypergeometric probabilities",
+        expression: `a ranges from ${formatNumber(result.minA)} to ${formatNumber(result.maxA)}`,
+        detail: "Every possible table with the same margins gets an exact hypergeometric probability.",
+      },
+      {
+        title: "Sum tail probabilities",
+        expression: `left = ${formatNumber(result.leftTail)}, right = ${formatNumber(result.rightTail)}, two-sided = ${formatNumber(result.twoSidedP)}`,
+        detail: "The two-sided p-value sums tables with probability no larger than the observed table's probability.",
+      },
+      {
+        title: "Compute effect size",
+        expression: `odds ratio = ${formatFisherOddsRatio(result.oddsRatio)}`,
+        detail: "The odds ratio summarizes the direction and strength of association in the 2x2 table.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the two categorical variables are associated.",
+      },
+    ],
+    table: {
+      headers: ["Top-left a", "Probability", "Tail Flag"],
+      rows: result.distribution.map((entry) => [
+        formatNumber(entry.a),
+        formatNumber(entry.probability),
+        entry.probability <= result.observedProbability + EPSILON ? "two-sided" : "",
+      ]),
+    },
+    artifacts: [
+      ["Observed table", formatMatrix(table)],
+      ["Row totals", formatVector(result.rowTotals)],
+      ["Column totals", formatVector(result.columnTotals)],
+      ["Observed probability", formatNumber(result.observedProbability)],
+      ["Left-tail p-value", formatNumber(result.leftTail)],
+      ["Right-tail p-value", formatNumber(result.rightTail)],
+      ["Two-sided p-value", formatNumber(result.twoSidedP)],
+      ["Odds ratio", formatFisherOddsRatio(result.oddsRatio)],
+      ["Minimum possible a", formatNumber(result.minA)],
+      ["Maximum possible a", formatNumber(result.maxA)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function computeFisherExactTest(table) {
+  validateTwoByTwoTable(table, "Fisher exact test");
+  const [[a, b], [c, d]] = table;
+  const rowTotals = [a + b, c + d];
+  const columnTotals = [a + c, b + d];
+  const total = rowTotals[0] + rowTotals[1];
+  const minA = Math.max(0, columnTotals[0] - rowTotals[1]);
+  const maxA = Math.min(rowTotals[0], columnTotals[0]);
+  const distribution = [];
+
+  for (let currentA = minA; currentA <= maxA; currentA += 1) {
+    distribution.push({
+      a: currentA,
+      probability: hypergeometricProbability(total, columnTotals[0], rowTotals[0], currentA),
+    });
+  }
+
+  const observedProbability = hypergeometricProbability(total, columnTotals[0], rowTotals[0], a);
+  const leftTail = distribution
+    .filter((entry) => entry.a <= a)
+    .reduce((sum, entry) => sum + entry.probability, 0);
+  const rightTail = distribution
+    .filter((entry) => entry.a >= a)
+    .reduce((sum, entry) => sum + entry.probability, 0);
+  const twoSidedP = distribution
+    .filter((entry) => entry.probability <= observedProbability + EPSILON)
+    .reduce((sum, entry) => sum + entry.probability, 0);
+  const oddsRatio = b * c === 0
+    ? (a * d === 0 ? Number.NaN : Number.POSITIVE_INFINITY)
+    : (a * d) / (b * c);
+
+  return {
+    rowTotals,
+    columnTotals,
+    total,
+    minA,
+    maxA,
+    distribution,
+    observedProbability: normalizeNumber(observedProbability),
+    leftTail: normalizeNumber(leftTail),
+    rightTail: normalizeNumber(rightTail),
+    twoSidedP: normalizeNumber(Math.min(1, twoSidedP)),
+    oddsRatio: Number.isFinite(oddsRatio) ? normalizeNumber(oddsRatio) : oddsRatio,
+  };
+}
+
+function validateTwoByTwoTable(table, context) {
+  if (!Array.isArray(table) || table.length !== 2 || table.some((row) => !Array.isArray(row) || row.length !== 2)) {
+    throw new Error(`${context} needs a 2x2 table, such as [[1,9],[11,3]].`);
+  }
+  if (table.some((row) => row.some((value) => !Number.isSafeInteger(value) || value < 0))) {
+    throw new Error(`${context} counts must be nonnegative integers.`);
+  }
+  validateContingencyTable(table);
+}
+
+function formatFisherOddsRatio(value) {
+  if (Number.isNaN(value)) return "undefined";
+  if (!Number.isFinite(value)) return "infinity";
+  return formatNumber(value);
 }
 
 function analyzeProportionConfidenceInterval(statement) {
@@ -11354,6 +11500,16 @@ function parseChiSquareInput(text) {
   throw new Error("Use chi-square observed 10, 20, 30 expected 15, 15, 30 or chi-square independence [[30,10],[20,40]].");
 }
 
+function parseFisherExactInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const table = extractMatrices(cleaned)[0];
+  if (!table) {
+    throw new Error("Use fisher exact [[1,9],[11,3]].");
+  }
+  validateTwoByTwoTable(table, "Fisher exact test");
+  return { alpha, table };
+}
+
 function parseHypergeometricInput(text) {
   const numbers = parseNumbers(text);
   const population = readNamedNumber(text, ["population", "total", "size"], numbers[0]);
@@ -13746,6 +13902,12 @@ function isQdaQuestion(lower) {
     lower.includes("quadratic discriminant");
 }
 
+function isFisherExactQuestion(lower) {
+  return lower.includes("fisher exact") ||
+    lower.includes("fisher's exact") ||
+    lower.includes("fisher test");
+}
+
 function isDecisionTreeQuestion(lower) {
   return lower.includes("decision tree") ||
     lower.includes("classification tree") ||
@@ -14020,6 +14182,7 @@ function isStatisticsQuestion(lower) {
     isRocQuestion(lower) ||
     isRandomForestQuestion(lower) ||
     isDecisionTreeQuestion(lower) ||
+    isFisherExactQuestion(lower) ||
     isQdaQuestion(lower) ||
     isLdaQuestion(lower)
   ) {
@@ -14126,6 +14289,9 @@ function isStatisticsQuestion(lower) {
     "p0",
     "z-test",
     "z test",
+    "fisher exact",
+    "fisher's exact",
+    "fisher test",
     "probability",
     "statistics",
     "dataset",
