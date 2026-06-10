@@ -1182,6 +1182,10 @@ export function analyzeStatistics(statement) {
     return analyzeKMeansClustering(statement);
   }
 
+  if (isPearsonQuestion(lower)) {
+    return analyzePearsonCorrelation(statement);
+  }
+
   if (isKendallQuestion(lower)) {
     return analyzeKendallCorrelation(statement);
   }
@@ -5224,6 +5228,109 @@ function analyzeSpearmanCorrelation(statement) {
       ["Sum d^2", formatNumber(sumSquaredDifferences)],
       ["X tie correction", formatNumber(xTieCorrection)],
       ["Y tie correction", formatNumber(yTieCorrection)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzePearsonCorrelation(statement) {
+  const request = parsePearsonInput(statement);
+  const xSummary = descriptiveSummary(request.x);
+  const ySummary = descriptiveSummary(request.y);
+  const covarianceNumerator = request.x.reduce((sum, value, index) =>
+    sum + (value - xSummary.mean) * (request.y[index] - ySummary.mean),
+  0);
+  const sampleCovariance = covarianceNumerator / (request.x.length - 1);
+  const r = pearsonCorrelation(request.x, request.y);
+  const rSquared = r ** 2;
+  const tStatistic = pearsonTStatistic(r, request.x.length);
+  const pValue = pValueForPearson(r, request.x.length, request.alternative);
+  const interval = fisherCorrelationInterval(r, request.x.length, request.level);
+  const decision = pValue < request.alpha
+    ? `reject H0 at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject H0 at alpha=${formatNumber(request.alpha)}`;
+  const percent = formatNumber(request.level * 100);
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      label: "PEARSON",
+      children: [
+        statsDatasetNode(request.x, [], "X"),
+        statsDatasetNode(request.y, [], "Y"),
+        statsMetricNode("r", r),
+        statsMetricNode("P", pValue),
+        statsMetricNode("R2", rSquared),
+      ],
+    },
+    answer: `r = ${formatNumber(r)}, p = ${formatNumber(pValue)}`,
+    summary: "Pearson correlation test",
+    details: `${request.x.length} paired observations`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([...request.x, ...request.y])),
+    steps: [
+      {
+        title: "Read paired data",
+        expression: `${request.x.length} pairs`,
+        detail: "Pearson correlation measures linear association between two quantitative variables.",
+      },
+      {
+        title: "Compute covariance and standard deviations",
+        expression: `cov = ${formatNumber(sampleCovariance)}, sx = ${formatNumber(xSummary.sampleStdDev)}, sy = ${formatNumber(ySummary.sampleStdDev)}`,
+        detail: "Correlation standardizes covariance by the two sample standard deviations.",
+      },
+      {
+        title: "Compute Pearson r",
+        expression: `r = ${formatNumber(r)}, R^2 = ${formatNumber(rSquared)}`,
+        detail: "R squared is the fraction of one variable's variation explained by the linear association with the other.",
+      },
+      {
+        title: "Test zero correlation",
+        expression: `t = ${formatStatisticValue(tStatistic)}, df = ${request.x.length - 2}, p = ${formatNumber(pValue)}`,
+        detail: "The t test checks the null hypothesis that the population correlation is zero.",
+      },
+      {
+        title: "Build Fisher-z interval",
+        expression: `${percent}% CI = [${formatNumber(interval.lower)}, ${formatNumber(interval.upper)}]`,
+        detail: "Fisher's z transform gives an approximate confidence interval for the population correlation.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest a nonzero linear association.",
+      },
+    ],
+    table: {
+      headers: ["Obs", "x", "y", "x - xbar", "y - ybar", "Product"],
+      rows: request.x.map((value, index) => {
+        const xDeviation = value - xSummary.mean;
+        const yDeviation = request.y[index] - ySummary.mean;
+        return [
+          String(index + 1),
+          formatNumber(value),
+          formatNumber(request.y[index]),
+          formatNumber(xDeviation),
+          formatNumber(yDeviation),
+          formatNumber(xDeviation * yDeviation),
+        ];
+      }),
+    },
+    artifacts: [
+      ["Pearson r", formatNumber(r)],
+      ["R squared", formatNumber(rSquared)],
+      ["Sample covariance", formatNumber(sampleCovariance)],
+      ["Mean x", formatNumber(xSummary.mean)],
+      ["Mean y", formatNumber(ySummary.mean)],
+      ["Sample SD x", formatNumber(xSummary.sampleStdDev)],
+      ["Sample SD y", formatNumber(ySummary.sampleStdDev)],
+      ["t statistic", formatStatisticValue(tStatistic)],
+      ["Degrees of freedom", formatNumber(request.x.length - 2)],
+      ["p-value", formatNumber(pValue)],
+      ["Alternative", request.alternative],
+      ["Fisher z", formatNumber(interval.fisherZ)],
+      ["Fisher SE", formatNumber(interval.standardError)],
+      [`${percent}% Fisher z CI`, `[${formatNumber(interval.lower)}, ${formatNumber(interval.upper)}]`],
       ["Decision", decision],
     ],
   };
@@ -12026,6 +12133,70 @@ function parseNormalityTestInput(text) {
   return { alpha, values };
 }
 
+function parsePearsonInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const alternative = parseAlternative(text);
+  const level = parseConfidenceLevel(text, 0.95);
+  const parsedLists = parseXYLists(cleaned);
+  if (parsedLists) {
+    return validatePearsonInput({
+      alpha,
+      alternative,
+      level,
+      x: parsedLists.x,
+      y: parsedLists.y,
+    });
+  }
+
+  const pairs = parsePairs(cleaned);
+  if (pairs.length > 0) {
+    return validatePearsonInput({
+      alpha,
+      alternative,
+      level,
+      x: pairs.map((pair) => pair.x),
+      y: pairs.map((pair) => pair.y),
+    });
+  }
+
+  const chunks = cleaned
+    .replace(/\bpearson'?s?\b/gi, "")
+    .replace(/\blinear\b/gi, "")
+    .replace(/\bcorrelation\b/gi, "")
+    .replace(/\bassociation\b/gi, "")
+    .replace(/\btest\b/gi, "")
+    .replace(/\bdata\b/gi, "")
+    .replace(/\bfor\b/gi, "")
+    .split(";")
+    .map((chunk) => parseNumbers(chunk))
+    .filter((values) => values.length > 0);
+
+  if (chunks.length >= 2) {
+    return validatePearsonInput({
+      alpha,
+      alternative,
+      level,
+      x: chunks[0],
+      y: chunks[1],
+    });
+  }
+
+  throw new Error("Use pearson correlation x: 1,2,3,4; y: 2,4,5,7 or coordinate pairs like (1,2), (2,4), (3,5), (4,7).");
+}
+
+function validatePearsonInput(request) {
+  if (request.x.length !== request.y.length) {
+    throw new Error("Pearson correlation needs x and y lists with the same length.");
+  }
+  if (request.x.length < 4) {
+    throw new Error("Pearson correlation needs at least four paired observations for a Fisher-z confidence interval.");
+  }
+  if (request.x.every((value) => nearlyEqual(value, request.x[0])) || request.y.every((value) => nearlyEqual(value, request.y[0]))) {
+    throw new Error("Pearson correlation needs variation in both x and y.");
+  }
+  return request;
+}
+
 function parseSpearmanInput(text) {
   const { alpha, cleaned } = extractAlpha(text);
   const alternative = parseAlternative(text);
@@ -12986,6 +13157,42 @@ function pValueForSpearman(rho, count, alternative) {
     return 0;
   }
   return pValueForT(statistic, count - 2, alternative);
+}
+
+function pValueForPearson(r, count, alternative) {
+  const statistic = pearsonTStatistic(r, count);
+  if (!Number.isFinite(statistic)) {
+    if (alternative === "less") {
+      return r < 0 ? 0 : 1;
+    }
+    if (alternative === "greater") {
+      return r > 0 ? 0 : 1;
+    }
+    return 0;
+  }
+  return pValueForT(statistic, count - 2, alternative);
+}
+
+function pearsonTStatistic(r, count) {
+  const denominator = 1 - r ** 2;
+  if (denominator <= EPSILON) {
+    return r >= 0 ? Infinity : -Infinity;
+  }
+  return r * Math.sqrt((count - 2) / denominator);
+}
+
+function fisherCorrelationInterval(r, count, level) {
+  const clipped = Math.max(-0.999999999, Math.min(0.999999999, r));
+  const fisherZ = 0.5 * Math.log((1 + clipped) / (1 - clipped));
+  const standardError = 1 / Math.sqrt(count - 3);
+  const critical = zCriticalForLevel(level);
+  return {
+    lower: normalizeNumber(Math.tanh(fisherZ - critical * standardError)),
+    upper: normalizeNumber(Math.tanh(fisherZ + critical * standardError)),
+    fisherZ: normalizeNumber(fisherZ),
+    standardError: normalizeNumber(standardError),
+    critical,
+  };
 }
 
 function spearmanTStatistic(rho, count) {
@@ -14944,6 +15151,13 @@ function isRegressionDiagnosticsQuestion(lower) {
     lower.includes("breusch pagan");
 }
 
+function isPearsonQuestion(lower) {
+  return lower.includes("pearson") ||
+    lower.includes("correlation test") ||
+    lower.includes("test correlation") ||
+    lower.includes("linear association");
+}
+
 function isSpearmanQuestion(lower) {
   return lower.includes("spearman") ||
     lower.includes("rank correlation") ||
@@ -15297,6 +15511,7 @@ function isStatisticsQuestion(lower) {
     isNormalityQuestion(lower) ||
     isEqualVarianceQuestion(lower) ||
     isRegressionDiagnosticsQuestion(lower) ||
+    isPearsonQuestion(lower) ||
     isSpearmanQuestion(lower) ||
     isKendallQuestion(lower) ||
     isQdaQuestion(lower) ||
@@ -15356,6 +15571,9 @@ function isStatisticsQuestion(lower) {
     "regression diagnostics",
     "residual diagnostics",
     "model diagnostics",
+    "pearson",
+    "correlation test",
+    "linear association",
     "spearman",
     "kendall",
     "kendall tau",

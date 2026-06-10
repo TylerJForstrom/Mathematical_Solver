@@ -53,6 +53,8 @@ The frontend currently supports:
 - Linear regression/correlation for coordinate pairs, plus multiple linear
   regression with several predictor lists, residuals, coefficient standard
   errors, t tests, p-values, confidence intervals, R squared, and prediction
+- Pearson correlation tests with covariance terms, t p-values, R squared, and
+  Fisher-z confidence intervals for linear association
 - Spearman rank correlation with rank tables, t approximation, p-values, and
   monotonic-association decisions
 - Kendall tau-b rank correlation with concordant/discordant pair counts,
@@ -214,6 +216,8 @@ The same idea works for algebra and calculus:
   ODE with fourth-order Runge-Kutta.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree
   with coefficient standard errors, t tests, p-values, and confidence intervals.
+- `pearson correlation x: 1,2,3,4,5,6; y: 2,4,5,4,5,7` tests linear
+  association with Pearson `r`, a t p-value, R squared, and a Fisher-z interval.
 - `spearman correlation x: 1,2,3,4,5,6; y: 1,3,2,5,4,6` ranks both
   variables and tests monotonic association.
 - `kendall correlation x: 1,2,2,3,4,5; y: 1,2,3,3,5,4` counts concordant,
@@ -355,6 +359,7 @@ The demo includes:
 - Complex arithmetic and complex quadratic roots through Ask mode
 - Dataset summaries, confidence intervals, bootstrap intervals,
   regression/correlation, polynomial regression,
+  Pearson correlation,
   Spearman rank correlation, Kendall tau-b correlation,
   multiple regression,
   coefficient inference for linear models,

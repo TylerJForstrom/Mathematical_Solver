@@ -249,6 +249,18 @@ runTest("statistics mode computes linear regression", () => {
   assert.deepEqual(result.table.rows[1], ["2", "3", "3.333333", "-0.333333"]);
 });
 
+runTest("statistics mode computes Pearson correlation tests", () => {
+  const result = analyzeStatistics("pearson correlation x: 1, 2, 3, 4, 5, 6; y: 2, 4, 5, 4, 5, 7");
+
+  assert.equal(result.summary, "Pearson correlation test");
+  assert.equal(result.answer, "r = 0.87831, p = 0.021312");
+  assert.equal(artifactValue(result, "R squared"), "0.771429");
+  assert.equal(artifactValue(result, "t statistic"), "3.674235");
+  assert.equal(artifactValue(result, "95% Fisher z CI"), "[0.232414, 0.986612]");
+  assert.equal(artifactValue(result, "Decision"), "reject H0 at alpha=0.05");
+  assert.deepEqual(result.table.rows[3], ["4", "4", "4", "0.5", "-0.5", "-0.25"]);
+});
+
 runTest("statistics mode computes Spearman rank correlations", () => {
   const result = analyzeStatistics("spearman correlation x: 1, 2, 3, 4, 5, 6; y: 1, 3, 2, 5, 4, 6");
 
@@ -1017,6 +1029,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
+  assert.equal(analyzeUniversal("pearson correlation x: 1,2,3,4,5,6; y: 2,4,5,4,5,7").summary, "Pearson correlation test");
   assert.equal(analyzeUniversal("spearman correlation x: 1,2,3,4,5,6; y: 1,3,2,5,4,6").summary, "Spearman rank correlation");
   assert.equal(analyzeUniversal("kendall correlation x: 1,2,2,3,4,5; y: 1,2,3,3,5,4").summary, "Kendall tau-b correlation");
   assert.equal(analyzeUniversal("regression diagnostics y: 2, 3, 5, 8, 13, 21; x: 1, 2, 3, 4, 5, 6").summary, "regression diagnostics");
