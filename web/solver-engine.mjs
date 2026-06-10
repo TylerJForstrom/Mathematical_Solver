@@ -1182,6 +1182,10 @@ export function analyzeStatistics(statement) {
     return analyzeKMeansClustering(statement);
   }
 
+  if (isKendallQuestion(lower)) {
+    return analyzeKendallCorrelation(statement);
+  }
+
   if (isSpearmanQuestion(lower)) {
     return analyzeSpearmanCorrelation(statement);
   }
@@ -5222,6 +5226,144 @@ function analyzeSpearmanCorrelation(statement) {
       ["Y tie correction", formatNumber(yTieCorrection)],
       ["Decision", decision],
     ],
+  };
+}
+
+function analyzeKendallCorrelation(statement) {
+  const request = parseKendallInput(statement);
+  const result = kendallTauB(request.x, request.y);
+  const zStatistic = kendallZStatistic(result.score, request.x.length);
+  const pValue = pValueForNormal(zStatistic, request.alternative);
+  const decision = pValue < request.alpha
+    ? `reject H0 at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject H0 at alpha=${formatNumber(request.alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      label: "KENDALL",
+      children: [
+        statsDatasetNode(request.x, [], "X"),
+        statsDatasetNode(request.y, [], "Y"),
+        statsMetricNode("tau", result.tau),
+        statsMetricNode("S", result.score),
+        statsMetricNode("P", pValue),
+      ],
+    },
+    answer: `tau-b = ${formatNumber(result.tau)}, p = ${formatNumber(pValue)}`,
+    summary: "Kendall tau-b correlation",
+    details: `${request.x.length} paired observations`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([...request.x, ...request.y])),
+    steps: [
+      {
+        title: "Read paired data",
+        expression: `${request.x.length} pairs`,
+        detail: "Kendall tau-b measures ordinal association by comparing all pairs of observations.",
+      },
+      {
+        title: "Classify observation pairs",
+        expression: `concordant=${result.concordant}, discordant=${result.discordant}, ties=${result.tiedBoth + result.tiedX + result.tiedY}`,
+        detail: "A pair is concordant when both variables move in the same direction and discordant when they move in opposite directions.",
+      },
+      {
+        title: "Compute tau-b",
+        expression: `tau-b = ${formatNumber(result.tau)}`,
+        detail: "Tau-b adjusts the denominator for ties in x or y, so tied ordinal data are handled more fairly.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `z = ${formatNumber(zStatistic)}, p = ${formatNumber(pValue)}`,
+        detail: "The p-value uses a large-sample normal approximation for the Kendall score.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "The null hypothesis is no ordinal association between the paired variables.",
+      },
+    ],
+    table: {
+      headers: ["Pair", "x relation", "y relation", "Class"],
+      rows: result.pairRows,
+    },
+    artifacts: [
+      ["Kendall tau-b", formatNumber(result.tau)],
+      ["Kendall S", formatNumber(result.score)],
+      ["Concordant pairs", formatNumber(result.concordant)],
+      ["Discordant pairs", formatNumber(result.discordant)],
+      ["Ties only in x", formatNumber(result.tiedX)],
+      ["Ties only in y", formatNumber(result.tiedY)],
+      ["Ties in both", formatNumber(result.tiedBoth)],
+      ["Total pairs", formatNumber(result.totalPairs)],
+      ["z approximation", formatNumber(zStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Alternative", request.alternative],
+      ["Decision", decision],
+      ["Approximation note", "Large-sample normal approximation; exact small-sample p-values are not used."],
+    ],
+  };
+}
+
+function kendallTauB(xValues, yValues) {
+  let concordant = 0;
+  let discordant = 0;
+  let tiedX = 0;
+  let tiedY = 0;
+  let tiedBoth = 0;
+  const pairRows = [];
+
+  for (let left = 0; left < xValues.length - 1; left += 1) {
+    for (let right = left + 1; right < xValues.length; right += 1) {
+      const xComparison = compareNumbers(xValues[right], xValues[left]);
+      const yComparison = compareNumbers(yValues[right], yValues[left]);
+      let pairClass;
+
+      if (xComparison === 0 && yComparison === 0) {
+        tiedBoth += 1;
+        pairClass = "tied both";
+      } else if (xComparison === 0) {
+        tiedX += 1;
+        pairClass = "tied x";
+      } else if (yComparison === 0) {
+        tiedY += 1;
+        pairClass = "tied y";
+      } else if (xComparison === yComparison) {
+        concordant += 1;
+        pairClass = "concordant";
+      } else {
+        discordant += 1;
+        pairClass = "discordant";
+      }
+
+      if (pairRows.length < 80) {
+        pairRows.push([
+          `${left + 1}-${right + 1}`,
+          relationText(xComparison),
+          relationText(yComparison),
+          pairClass,
+        ]);
+      }
+    }
+  }
+
+  const comparableX = concordant + discordant + tiedY;
+  const comparableY = concordant + discordant + tiedX;
+  const denominator = Math.sqrt(comparableX * comparableY);
+  if (!(denominator > EPSILON)) {
+    throw new Error("Kendall tau-b needs at least one pair with variation in both variables.");
+  }
+  const score = concordant - discordant;
+  return {
+    concordant,
+    discordant,
+    tiedX,
+    tiedY,
+    tiedBoth,
+    totalPairs: xValues.length * (xValues.length - 1) / 2,
+    score,
+    tau: normalizeNumber(score / denominator),
+    pairRows,
   };
 }
 
@@ -11941,6 +12083,65 @@ function validateSpearmanInput(request) {
   return request;
 }
 
+function parseKendallInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const alternative = parseAlternative(text);
+  const parsedLists = parseXYLists(cleaned);
+  if (parsedLists) {
+    return validateKendallInput({
+      alpha,
+      alternative,
+      x: parsedLists.x,
+      y: parsedLists.y,
+    });
+  }
+
+  const pairs = parsePairs(cleaned);
+  if (pairs.length > 0) {
+    return validateKendallInput({
+      alpha,
+      alternative,
+      x: pairs.map((pair) => pair.x),
+      y: pairs.map((pair) => pair.y),
+    });
+  }
+
+  const chunks = cleaned
+    .replace(/\bkendall'?s?\b/gi, "")
+    .replace(/\btau(?:-|\s*)b\b/gi, "")
+    .replace(/\btau\b/gi, "")
+    .replace(/\brank(?:ed)?\b/gi, "")
+    .replace(/\bcorrelation\b/gi, "")
+    .replace(/\bassociation\b/gi, "")
+    .replace(/\btest\b/gi, "")
+    .replace(/\bdata\b/gi, "")
+    .replace(/\bfor\b/gi, "")
+    .split(";")
+    .map((chunk) => parseNumbers(chunk))
+    .filter((values) => values.length > 0);
+
+  if (chunks.length >= 2) {
+    return validateKendallInput({
+      alpha,
+      alternative,
+      x: chunks[0],
+      y: chunks[1],
+    });
+  }
+
+  throw new Error("Use kendall correlation x: 1,2,3; y: 2,4,5 or coordinate pairs like (1,2), (2,4), (3,5).");
+}
+
+function validateKendallInput(request) {
+  if (request.x.length !== request.y.length) {
+    throw new Error("Kendall correlation needs x and y lists with the same length.");
+  }
+  if (request.x.length < 3) {
+    throw new Error("Kendall correlation needs at least three paired observations.");
+  }
+  return request;
+}
+
 function rankValues(values) {
   const ranked = values.map((value, index) => ({ value, index }))
     .sort((left, right) => left.value - right.value);
@@ -12793,6 +12994,11 @@ function spearmanTStatistic(rho, count) {
     return rho >= 0 ? Infinity : -Infinity;
   }
   return rho * Math.sqrt((count - 2) / denominator);
+}
+
+function kendallZStatistic(score, count) {
+  const variance = count * (count - 1) * (2 * count + 5) / 18;
+  return score / Math.sqrt(variance);
 }
 
 function parsePowerAnalysisInput(text) {
@@ -14368,6 +14574,17 @@ function pearsonCorrelation(left, right) {
   return sxy / Math.sqrt(sxx * syy);
 }
 
+function compareNumbers(left, right) {
+  if (nearlyEqual(left, right)) return 0;
+  return left > right ? 1 : -1;
+}
+
+function relationText(comparison) {
+  if (comparison > 0) return "increases";
+  if (comparison < 0) return "decreases";
+  return "ties";
+}
+
 function median(sortedValues) {
   const middle = Math.floor(sortedValues.length / 2);
   if (sortedValues.length % 2 === 1) {
@@ -14734,6 +14951,13 @@ function isSpearmanQuestion(lower) {
     lower.includes("monotonic association");
 }
 
+function isKendallQuestion(lower) {
+  return lower.includes("kendall") ||
+    lower.includes("tau-b") ||
+    lower.includes("tau b") ||
+    lower.includes("kendall tau");
+}
+
 function isLogisticRegressionQuestion(lower) {
   return lower.includes("logistic regression") ||
     lower.includes("binary regression") ||
@@ -15074,6 +15298,7 @@ function isStatisticsQuestion(lower) {
     isEqualVarianceQuestion(lower) ||
     isRegressionDiagnosticsQuestion(lower) ||
     isSpearmanQuestion(lower) ||
+    isKendallQuestion(lower) ||
     isQdaQuestion(lower) ||
     isLdaQuestion(lower)
   ) {
@@ -15132,6 +15357,9 @@ function isStatisticsQuestion(lower) {
     "residual diagnostics",
     "model diagnostics",
     "spearman",
+    "kendall",
+    "kendall tau",
+    "tau-b",
     "rank correlation",
     "monotonic association",
     "cook's distance",

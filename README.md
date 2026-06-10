@@ -55,6 +55,8 @@ The frontend currently supports:
   errors, t tests, p-values, confidence intervals, R squared, and prediction
 - Spearman rank correlation with rank tables, t approximation, p-values, and
   monotonic-association decisions
+- Kendall tau-b rank correlation with concordant/discordant pair counts,
+  tie handling, normal-approximation p-values, and ordinal-association decisions
 - Regression diagnostics with standardized residuals, leverage, Cook's
   distance, Durbin-Watson, Breusch-Pagan, and residual Jarque-Bera checks
 - Ridge regression for regularized linear modeling with an unpenalized intercept,
@@ -214,6 +216,8 @@ The same idea works for algebra and calculus:
   with coefficient standard errors, t tests, p-values, and confidence intervals.
 - `spearman correlation x: 1,2,3,4,5,6; y: 1,3,2,5,4,6` ranks both
   variables and tests monotonic association.
+- `kendall correlation x: 1,2,2,3,4,5; y: 1,2,3,3,5,4` counts concordant,
+  discordant, and tied pairs for a tau-b ordinal-association test.
 - `quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5`
   fits a nonlinear polynomial curve and predicts `26`.
 - `multiple regression y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
@@ -351,7 +355,7 @@ The demo includes:
 - Complex arithmetic and complex quadratic roots through Ask mode
 - Dataset summaries, confidence intervals, bootstrap intervals,
   regression/correlation, polynomial regression,
-  Spearman rank correlation,
+  Spearman rank correlation, Kendall tau-b correlation,
   multiple regression,
   coefficient inference for linear models,
   regression diagnostics,

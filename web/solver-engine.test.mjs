@@ -260,6 +260,18 @@ runTest("statistics mode computes Spearman rank correlations", () => {
   assert.deepEqual(result.table.rows[2], ["3", "3", "2", "3", "2", "1", "1"]);
 });
 
+runTest("statistics mode computes Kendall tau-b correlations", () => {
+  const result = analyzeStatistics("kendall correlation x: 1, 2, 2, 3, 4, 5; y: 1, 2, 3, 3, 5, 4");
+
+  assert.equal(result.summary, "Kendall tau-b correlation");
+  assert.equal(result.answer, "tau-b = 0.785714, p = 0.038777");
+  assert.equal(artifactValue(result, "Concordant pairs"), "12");
+  assert.equal(artifactValue(result, "Discordant pairs"), "1");
+  assert.equal(artifactValue(result, "Ties only in x"), "1");
+  assert.equal(artifactValue(result, "Ties only in y"), "1");
+  assert.deepEqual(result.table.rows[5], ["2-3", "ties", "increases", "tied x"]);
+});
+
 runTest("statistics mode computes polynomial regression", () => {
   const result = analyzeStatistics("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5");
 
@@ -1006,6 +1018,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
   assert.equal(analyzeUniversal("spearman correlation x: 1,2,3,4,5,6; y: 1,3,2,5,4,6").summary, "Spearman rank correlation");
+  assert.equal(analyzeUniversal("kendall correlation x: 1,2,2,3,4,5; y: 1,2,3,3,5,4").summary, "Kendall tau-b correlation");
   assert.equal(analyzeUniversal("regression diagnostics y: 2, 3, 5, 8, 13, 21; x: 1, 2, 3, 4, 5, 6").summary, "regression diagnostics");
   assert.equal(analyzeUniversal("ridge regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "ridge regression");
   assert.equal(analyzeUniversal("lasso regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "LASSO regression");
