@@ -1093,6 +1093,10 @@ export function analyzeStatistics(statement) {
     return analyzeZScore(statement);
   }
 
+  if (isNormalityQuestion(lower)) {
+    return analyzeNormalityTest(statement);
+  }
+
   if (lower.includes("normal")) {
     if (
       lower.includes("inverse") ||
@@ -4840,6 +4844,86 @@ function analyzeDescriptiveStatistics(statement) {
       ["Population SD", formatNumber(summary.populationStdDev)],
       ["Sample variance", formatNumber(summary.sampleVariance)],
       ["Sample SD", formatNumber(summary.sampleStdDev)],
+    ],
+  };
+}
+
+function analyzeNormalityTest(statement) {
+  const request = parseNormalityTestInput(statement);
+  const result = jarqueBeraNormalityTest(request.values);
+  const decision = result.pValue < request.alpha
+    ? `reject normality at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject normality at alpha=${formatNumber(request.alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(request.values, [
+      statsMetricNode("SKEW", result.skewness),
+      statsMetricNode("KURT", result.excessKurtosis),
+      statsMetricNode("JB", result.statistic),
+      statsMetricNode("P", result.pValue),
+    ], "NORMALITY"),
+    answer: `JB = ${formatNumber(result.statistic)}, p = ${formatNumber(result.pValue)}`,
+    summary: "Jarque-Bera normality test",
+    details: "Skewness and kurtosis diagnostic",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.values)),
+    steps: [
+      {
+        title: "Parse sample",
+        expression: request.values.map(formatNumber).join(", "),
+        detail: `The normality test uses ${request.values.length} observations.`,
+      },
+      {
+        title: "Compute central moments",
+        expression: `m2=${formatNumber(result.secondMoment)}, m3=${formatNumber(result.thirdMoment)}, m4=${formatNumber(result.fourthMoment)}`,
+        detail: "The moments measure variance, asymmetry, and tail weight around the sample mean.",
+      },
+      {
+        title: "Measure shape",
+        expression: `skewness=${formatNumber(result.skewness)}, excess kurtosis=${formatNumber(result.excessKurtosis)}`,
+        detail: "A normal distribution has skewness 0 and excess kurtosis 0.",
+      },
+      {
+        title: "Compute Jarque-Bera statistic",
+        expression: `JB = n/6 * (S^2 + K^2/4) = ${formatNumber(result.statistic)}`,
+        detail: "The statistic grows when the sample is strongly skewed or has non-normal tail weight.",
+      },
+      {
+        title: "Compare to reference distribution",
+        expression: `p = ${formatNumber(result.pValue)}`,
+        detail: "The p-value uses the chi-square reference distribution with 2 degrees of freedom.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values indicate the sample shape is unlikely under normality.",
+      },
+    ],
+    table: {
+      headers: ["Statistic", "Value"],
+      rows: [
+        ["n", formatNumber(result.count)],
+        ["Mean", formatNumber(result.mean)],
+        ["Second central moment", formatNumber(result.secondMoment)],
+        ["Third central moment", formatNumber(result.thirdMoment)],
+        ["Fourth central moment", formatNumber(result.fourthMoment)],
+        ["Skewness", formatNumber(result.skewness)],
+        ["Excess kurtosis", formatNumber(result.excessKurtosis)],
+        ["Jarque-Bera", formatNumber(result.statistic)],
+        ["p-value", formatNumber(result.pValue)],
+      ],
+    },
+    artifacts: [
+      ["Count", formatNumber(result.count)],
+      ["Mean", formatNumber(result.mean)],
+      ["Skewness", formatNumber(result.skewness)],
+      ["Excess kurtosis", formatNumber(result.excessKurtosis)],
+      ["Jarque-Bera statistic", formatNumber(result.statistic)],
+      ["Degrees of freedom", "2"],
+      ["p-value", formatNumber(result.pValue)],
+      ["Decision", decision],
+      ["Approximation note", "Asymptotic chi-square p-value; use larger samples for stronger evidence."],
     ],
   };
 }
@@ -10927,6 +11011,36 @@ function descriptiveSummary(values) {
   };
 }
 
+function jarqueBeraNormalityTest(values) {
+  if (values.length < 3) {
+    throw new Error("Jarque-Bera normality testing needs at least 3 observations.");
+  }
+  const count = values.length;
+  const valueMean = mean(values);
+  const centered = values.map((value) => value - valueMean);
+  const secondMoment = centered.reduce((sum, value) => sum + value ** 2, 0) / count;
+  if (!(secondMoment > EPSILON)) {
+    throw new Error("Normality testing needs nonzero sample variation.");
+  }
+  const thirdMoment = centered.reduce((sum, value) => sum + value ** 3, 0) / count;
+  const fourthMoment = centered.reduce((sum, value) => sum + value ** 4, 0) / count;
+  const skewness = thirdMoment / (secondMoment ** 1.5);
+  const excessKurtosis = fourthMoment / (secondMoment ** 2) - 3;
+  const statistic = count / 6 * (skewness ** 2 + (excessKurtosis ** 2) / 4);
+  const pValue = Math.exp(-statistic / 2);
+  return {
+    count,
+    mean: normalizeNumber(valueMean),
+    secondMoment: normalizeNumber(secondMoment),
+    thirdMoment: normalizeNumber(thirdMoment),
+    fourthMoment: normalizeNumber(fourthMoment),
+    skewness: normalizeNumber(skewness),
+    excessKurtosis: normalizeNumber(excessKurtosis),
+    statistic: normalizeNumber(statistic),
+    pValue: normalizeNumber(clampProbability(pValue)),
+  };
+}
+
 function descriptiveAnswer(statement, summary) {
   const lower = statement.toLowerCase();
   if (lower.includes("median")) return `median = ${formatNumber(summary.median)}`;
@@ -11243,6 +11357,26 @@ function seededRandom(seed) {
 
 function parseNumbers(text) {
   return [...text.matchAll(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi)].map((match) => Number(match[0]));
+}
+
+function parseNormalityTestInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const dataText = cleaned
+    .replace(/\bjarque(?:-|\s*)bera\b/gi, "")
+    .replace(/\bjb\b/gi, "")
+    .replace(/\bnormality\b/gi, "")
+    .replace(/\bnormally distributed\b/gi, "")
+    .replace(/\bnormal distribution\b/gi, "")
+    .replace(/\btest\b/gi, "")
+    .replace(/\bdata\b/gi, "")
+    .replace(/\bsample\b/gi, "")
+    .replace(/\bvalues?\b/gi, "")
+    .replace(/\bfor\b/gi, "");
+  const values = parseNumbers(dataText);
+  if (values.length < 3) {
+    throw new Error("Use normality test data 10, 12, 13, 15, 30.");
+  }
+  return { alpha, values };
 }
 
 function rankValues(values) {
@@ -13908,6 +14042,14 @@ function isFisherExactQuestion(lower) {
     lower.includes("fisher test");
 }
 
+function isNormalityQuestion(lower) {
+  return lower.includes("normality") ||
+    lower.includes("jarque") ||
+    /\bjb\s+test\b/.test(lower) ||
+    lower.includes("normally distributed") ||
+    lower.includes("test for normal");
+}
+
 function isDecisionTreeQuestion(lower) {
   return lower.includes("decision tree") ||
     lower.includes("classification tree") ||
@@ -14183,6 +14325,7 @@ function isStatisticsQuestion(lower) {
     isRandomForestQuestion(lower) ||
     isDecisionTreeQuestion(lower) ||
     isFisherExactQuestion(lower) ||
+    isNormalityQuestion(lower) ||
     isQdaQuestion(lower) ||
     isLdaQuestion(lower)
   ) {
@@ -14257,6 +14400,10 @@ function isStatisticsQuestion(lower) {
     "critical value",
     "z-score",
     "zscore",
+    "jarque-bera",
+    "jarque bera",
+    "normality",
+    "normally distributed",
     "expected value",
     "expectation",
     "probabilities",

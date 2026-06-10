@@ -227,6 +227,17 @@ runTest("statistics mode computes descriptive summaries", () => {
   assert.equal(result.answer, "mean = 4.8");
 });
 
+runTest("statistics mode computes Jarque-Bera normality tests", () => {
+  const result = analyzeStatistics("normality test data 10, 12, 13, 15, 30, 31, 32, 33 alpha=0.05");
+
+  assert.equal(result.summary, "Jarque-Bera normality test");
+  assert.equal(result.answer, "JB = 1.210241, p = 0.546009");
+  assert.equal(artifactValue(result, "Skewness"), "-0.032036");
+  assert.equal(artifactValue(result, "Excess kurtosis"), "-1.904368");
+  assert.equal(artifactValue(result, "Decision"), "fail to reject normality at alpha=0.05");
+  assert.deepEqual(result.table.rows.at(-1), ["p-value", "0.546009"]);
+});
+
 runTest("statistics mode computes linear regression", () => {
   const result = analyzeStatistics("regression for (1,2), (2,3), (3,5)");
 
@@ -945,6 +956,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("newton cooling ambient=70 initial=100 k=0.2 t=10").summary, "Newton cooling");
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
   assert.equal(analyzeUniversal("bootstrap mean data 10, 12, 14, 16, 18 resamples=1000 seed=7 confidence=95").summary, "bootstrap confidence interval");
+  assert.equal(analyzeUniversal("normality test data 10, 12, 13, 15, 30, 31, 32, 33").summary, "Jarque-Bera normality test");
   assert.equal(analyzeUniversal("permutation test group1: 10, 12, 9; group2: 8, 7, 11 resamples=2000 seed=5").summary, "permutation test");
   assert.equal(analyzeUniversal("kaplan-meier times: 5, 6, 6, 8, 10; events: 1, 1, 0, 1, 0").summary, "Kaplan-Meier survival");
   assert.equal(analyzeUniversal("log-rank group1 times: 5, 6, 6, 8, 10 events: 1, 1, 0, 1, 0; group2 times: 4, 6, 7, 9, 12 events: 1, 0, 1, 1, 0").summary, "log-rank test");
