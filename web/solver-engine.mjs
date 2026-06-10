@@ -1023,6 +1023,10 @@ export function analyzeStatistics(statement) {
     return analyzePowerAnalysis(statement);
   }
 
+  if (isEqualVarianceQuestion(lower)) {
+    return analyzeEqualVarianceTest(statement);
+  }
+
   if (lower.includes("kruskal") || lower.includes("wallis")) {
     return analyzeKruskalWallis(statement);
   }
@@ -3324,6 +3328,205 @@ function analyzeTwoSampleTTest(statement) {
       ["p-value", formatNumber(pValue)],
       ["Cohen's d", formatNumber(cohenD)],
       ["Hedges g", formatNumber(hedgesG)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeEqualVarianceTest(statement) {
+  const request = parseEqualVarianceInput(statement);
+  if (
+    request.kind === "f" ||
+    (request.groups.length === 2 && !request.forceLevene)
+  ) {
+    return analyzeVarianceRatioTest(request);
+  }
+  return analyzeLeveneVarianceTest(request);
+}
+
+function analyzeVarianceRatioTest(request) {
+  const [left, right] = request.groups;
+  const leftSummary = descriptiveSummary(left);
+  const rightSummary = descriptiveSummary(right);
+  if (!(leftSummary.sampleVariance > 0) || !(rightSummary.sampleVariance > 0)) {
+    throw new Error("Variance tests need nonzero variation in both groups.");
+  }
+
+  const fStatistic = leftSummary.sampleVariance / rightSummary.sampleVariance;
+  const dfNumerator = leftSummary.count - 1;
+  const dfDenominator = rightSummary.count - 1;
+  const cdf = fCdf(fStatistic, dfNumerator, dfDenominator);
+  const pValue = request.alternative === "greater"
+    ? 1 - cdf
+    : request.alternative === "less"
+      ? cdf
+      : clampProbability(2 * Math.min(cdf, 1 - cdf));
+  const varianceRatio = leftSummary.sampleVariance / rightSummary.sampleVariance;
+  const decision = pValue < request.alpha
+    ? `reject equal variances at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject equal variances at alpha=${formatNumber(request.alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode([...left, ...right], [
+      statsMetricNode("VAR1", leftSummary.sampleVariance),
+      statsMetricNode("VAR2", rightSummary.sampleVariance),
+      statsMetricNode("F", fStatistic),
+      statsMetricNode("P", pValue),
+    ], "F VAR"),
+    answer: `F = ${formatNumber(fStatistic)}, p = ${formatNumber(pValue)}`,
+    summary: "two-sample variance F test",
+    details: "Equal-variance diagnostic for two independent samples",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([...left, ...right])),
+    steps: [
+      {
+        title: "Read two samples",
+        expression: `n1 = ${leftSummary.count}, n2 = ${rightSummary.count}`,
+        detail: "The test compares two independent sample variances.",
+      },
+      {
+        title: "Compute sample variances",
+        expression: `s1^2 = ${formatNumber(leftSummary.sampleVariance)}, s2^2 = ${formatNumber(rightSummary.sampleVariance)}`,
+        detail: "Sample variance uses denominator n - 1 for each group.",
+      },
+      {
+        title: "Form variance ratio",
+        expression: `F = s1^2 / s2^2 = ${formatNumber(fStatistic)}`,
+        detail: "Under equal variances, the ratio follows an F distribution with group-specific degrees of freedom.",
+      },
+      {
+        title: "Compute p-value",
+        expression: `df = ${dfNumerator}, ${dfDenominator}; p = ${formatNumber(pValue)}`,
+        detail: request.alternative === "two-sided"
+          ? "The two-sided p-value doubles the smaller F-distribution tail."
+          : "The one-sided p-value uses the requested F-distribution tail.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the groups have different variances.",
+      },
+    ],
+    table: {
+      headers: ["Group", "n", "Mean", "Sample variance", "Sample SD"],
+      rows: [
+        ["1", formatNumber(leftSummary.count), formatNumber(leftSummary.mean), formatNumber(leftSummary.sampleVariance), formatNumber(leftSummary.sampleStdDev)],
+        ["2", formatNumber(rightSummary.count), formatNumber(rightSummary.mean), formatNumber(rightSummary.sampleVariance), formatNumber(rightSummary.sampleStdDev)],
+      ],
+    },
+    artifacts: [
+      ["Group 1 variance", formatNumber(leftSummary.sampleVariance)],
+      ["Group 2 variance", formatNumber(rightSummary.sampleVariance)],
+      ["Variance ratio s1^2/s2^2", formatNumber(varianceRatio)],
+      ["Degrees of freedom", `${dfNumerator}, ${dfDenominator}`],
+      ["Alternative", request.alternative],
+      ["F statistic", formatNumber(fStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeLeveneVarianceTest(request) {
+  const groups = request.groups;
+  if (groups.length < 2 || groups.some((group) => group.length < 2)) {
+    throw new Error("Levene tests need at least two groups with at least two values each.");
+  }
+
+  const centers = groups.map((group) => median([...group].sort((left, right) => left - right)));
+  const deviations = groups.map((group, groupIndex) =>
+    group.map((value) => Math.abs(value - centers[groupIndex])),
+  );
+  const allDeviations = deviations.flat();
+  const deviationMeans = deviations.map(mean);
+  const grandMean = mean(allDeviations);
+  const ssBetween = deviations.reduce((sum, group, index) =>
+    sum + group.length * (deviationMeans[index] - grandMean) ** 2,
+  0);
+  const ssWithin = deviations.reduce((sum, group, index) =>
+    sum + group.reduce((inner, value) => inner + (value - deviationMeans[index]) ** 2, 0),
+  0);
+  const dfBetween = groups.length - 1;
+  const dfWithin = allDeviations.length - groups.length;
+  if (!(dfWithin > 0) || !(ssWithin > EPSILON)) {
+    throw new Error("Levene tests need within-group variation in absolute deviations.");
+  }
+  const msBetween = ssBetween / dfBetween;
+  const msWithin = ssWithin / dfWithin;
+  const fStatistic = msBetween / msWithin;
+  const pValue = fRightTail(fStatistic, dfBetween, dfWithin);
+  const decision = pValue < request.alpha
+    ? `reject equal variances at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject equal variances at alpha=${formatNumber(request.alpha)}`;
+  const groupSummaries = groups.map(descriptiveSummary);
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(groups.flat(), [
+      statsMetricNode("F", fStatistic),
+      statsMetricNode("DF1", dfBetween),
+      statsMetricNode("DF2", dfWithin),
+      statsMetricNode("P", pValue),
+    ], "LEVENE"),
+    answer: `F = ${formatNumber(fStatistic)}, p = ${formatNumber(pValue)}`,
+    summary: "Levene equal-variance test",
+    details: `${groups.length} groups with median-centered absolute deviations`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(groups.flat())),
+    steps: [
+      {
+        title: "Read groups",
+        expression: groups.map((group, index) => `group ${index + 1}: n=${group.length}`).join("; "),
+        detail: "Levene's test checks whether multiple groups have comparable variances.",
+      },
+      {
+        title: "Center each group",
+        expression: centers.map((center, index) => `group ${index + 1} median = ${formatNumber(center)}`).join("; "),
+        detail: "This Brown-Forsythe version uses group medians for a robust equal-variance diagnostic.",
+      },
+      {
+        title: "Compute absolute deviations",
+        expression: deviationMeans.map((value, index) => `mean |x - center| group ${index + 1} = ${formatNumber(value)}`).join("; "),
+        detail: "If variances are similar, the group deviation means should be close.",
+      },
+      {
+        title: "Run ANOVA on deviations",
+        expression: `F = ${formatNumber(fStatistic)} with df ${dfBetween}, ${dfWithin}`,
+        detail: "The F statistic compares between-group deviation differences to within-group deviation noise.",
+      },
+      {
+        title: "Compute p-value",
+        expression: `p = ${formatNumber(pValue)}`,
+        detail: "The p-value uses the F distribution for the transformed absolute deviations.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest at least one group variance differs.",
+      },
+    ],
+    table: {
+      headers: ["Group", "n", "Median center", "Sample variance", "Mean abs deviation"],
+      rows: groups.map((group, index) => [
+        String(index + 1),
+        formatNumber(group.length),
+        formatNumber(centers[index]),
+        formatNumber(groupSummaries[index].sampleVariance),
+        formatNumber(deviationMeans[index]),
+      ]),
+    },
+    artifacts: [
+      ["Groups", formatNumber(groups.length)],
+      ["Center method", "median"],
+      ["Group centers", formatVector(centers)],
+      ["Group sample variances", formatVector(groupSummaries.map((summary) => summary.sampleVariance))],
+      ["Mean absolute deviations", formatVector(deviationMeans)],
+      ["SS between deviations", formatNumber(ssBetween)],
+      ["SS within deviations", formatNumber(ssWithin)],
+      ["Degrees of freedom", `${dfBetween}, ${dfWithin}`],
+      ["F statistic", formatNumber(fStatistic)],
+      ["p-value", formatNumber(pValue)],
       ["Decision", decision],
     ],
   };
@@ -11578,6 +11781,52 @@ function parseAnovaInput(text) {
   return { alpha, groups };
 }
 
+function parseEqualVarianceInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const lower = cleaned.toLowerCase();
+  const forceLevene = lower.includes("levene") ||
+    lower.includes("brown-forsythe") ||
+    lower.includes("brown forsythe") ||
+    lower.includes("homogeneity");
+  const kind = /\bf(?:-|\s*)test\b/.test(lower) ||
+    lower.includes("variance ratio") ||
+    lower.includes("ratio of variances")
+    ? "f"
+    : "levene";
+  const groups = cleaned
+    .replace(/\blevene'?s?\b/gi, "")
+    .replace(/\bbrown(?:-|\s*)forsythe\b/gi, "")
+    .replace(/\bf(?:-|\s*)test\b/gi, "")
+    .replace(/\bvariance(?:s)?\b/gi, "")
+    .replace(/\bvariance ratio\b/gi, "")
+    .replace(/\bratio of variances\b/gi, "")
+    .replace(/\bequal\b/gi, "")
+    .replace(/\bsame\b/gi, "")
+    .replace(/\bhomogeneity(?:\s+of)?\b/gi, "")
+    .replace(/\btest\b/gi, "")
+    .split(";")
+    .map((chunk) => chunk.trim().replace(/^[A-Za-z][A-Za-z0-9 _-]*\s*[:=]\s*/, ""))
+    .map((chunk) => parseNumbers(chunk))
+    .filter((values) => values.length > 0);
+
+  if (groups.length < 2) {
+    throw new Error("Use variance test group1: 10, 12, 9; group2: 8, 7, 11.");
+  }
+  if (groups.some((group) => group.length < 2)) {
+    throw new Error("Equal-variance tests need at least two values in every group.");
+  }
+  if (kind === "f" && groups.length !== 2) {
+    throw new Error("F variance tests need exactly two groups; use Levene for three or more groups.");
+  }
+  return {
+    alpha,
+    alternative: parseAlternative(text),
+    groups,
+    kind,
+    forceLevene,
+  };
+}
+
 function parseKruskalInput(text) {
   const { alpha, cleaned } = extractAlpha(text);
   const groups = cleaned
@@ -12468,6 +12717,10 @@ function fRightTail(statistic, dfNumerator, dfDenominator) {
   }
   const x = (dfNumerator * statistic) / (dfNumerator * statistic + dfDenominator);
   return Math.max(0, Math.min(1, 1 - regularizedBeta(x, dfNumerator / 2, dfDenominator / 2)));
+}
+
+function fCdf(statistic, dfNumerator, dfDenominator) {
+  return clampProbability(1 - fRightTail(statistic, dfNumerator, dfDenominator));
 }
 
 function regularizedBeta(x, a, b) {
@@ -14050,6 +14303,23 @@ function isNormalityQuestion(lower) {
     lower.includes("test for normal");
 }
 
+function isEqualVarianceQuestion(lower) {
+  return lower.includes("levene") ||
+    lower.includes("brown-forsythe") ||
+    lower.includes("brown forsythe") ||
+    lower.includes("homogeneity of variance") ||
+    lower.includes("equal variance") ||
+    lower.includes("equal variances") ||
+    lower.includes("same variance") ||
+    lower.includes("same variances") ||
+    lower.includes("variance ratio") ||
+    lower.includes("ratio of variances") ||
+    lower.includes("variance test") ||
+    lower.includes("test variances") ||
+    lower.includes("test variance") ||
+    /\bf(?:-|\s*)test\s+variance/.test(lower);
+}
+
 function isDecisionTreeQuestion(lower) {
   return lower.includes("decision tree") ||
     lower.includes("classification tree") ||
@@ -14326,6 +14596,7 @@ function isStatisticsQuestion(lower) {
     isDecisionTreeQuestion(lower) ||
     isFisherExactQuestion(lower) ||
     isNormalityQuestion(lower) ||
+    isEqualVarianceQuestion(lower) ||
     isQdaQuestion(lower) ||
     isLdaQuestion(lower)
   ) {
@@ -14404,6 +14675,12 @@ function isStatisticsQuestion(lower) {
     "jarque bera",
     "normality",
     "normally distributed",
+    "levene",
+    "brown-forsythe",
+    "homogeneity of variance",
+    "equal variance",
+    "equal variances",
+    "variance test",
     "expected value",
     "expectation",
     "probabilities",

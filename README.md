@@ -83,6 +83,7 @@ The frontend currently supports:
   initialization, assignments, cluster sizes, and within-cluster SSE
 - Confidence intervals, bootstrap percentile intervals,
   Jarque-Bera normality tests,
+  two-sample variance F tests and Levene equal-variance tests,
   one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
   permutation tests, one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank,
@@ -268,6 +269,9 @@ The same idea works for algebra and calculus:
   builds a reproducible percentile bootstrap interval for the mean.
 - `normality test data 10,12,13,15,30,31,32,33` runs a Jarque-Bera
   diagnostic from skewness and excess kurtosis.
+- `variance test group1: 10,12,9,11; group2: 8,7,11,9` compares two sample
+  variances with an F test, while `levene group1: ...; group2: ...; group3: ...`
+  checks equal variances across several groups.
 - `power mean effect=0.5 n=64 alpha=0.05` estimates statistical power, while
   `sample size mean effect=0.5 power=0.8 alpha=0.05` finds a required sample size.
 - `expected value values: 0,1,2 probabilities: 0.2,0.5,0.3` treats the
@@ -358,7 +362,8 @@ The demo includes:
   probability, hypergeometric probability, normal probability, inverse-normal
   percentiles, z-scores, discrete expected value, Bayes theorem,
   Markov chains, Bayesian beta-binomial updates,
-  Jarque-Bera normality tests, one-sample/two-sample/paired t tests,
+  Jarque-Bera normality tests, equal-variance tests,
+  one-sample/two-sample/paired t tests,
   one-proportion/two-proportion z tests,
   proportion confidence intervals, permutation tests, ANOVA, chi-square tests
   of goodness-of-fit and independence, Fisher exact tests,

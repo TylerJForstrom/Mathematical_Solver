@@ -526,6 +526,23 @@ runTest("statistics mode computes two-sample tests", () => {
   assert.equal(artifactValue(result, "Hedges g"), "0.730297");
 });
 
+runTest("statistics mode computes equal-variance tests", () => {
+  const fTest = analyzeStatistics("f-test variance group1: 10, 12, 9, 11; group2: 8, 7, 11, 9");
+  const levene = analyzeStatistics("levene group1: 8,9,10; group2: 12,14,16; group3: 9,11,15");
+
+  assert.equal(fTest.summary, "two-sample variance F test");
+  assert.equal(fTest.answer, "F = 0.571429, p = 0.657107");
+  assert.equal(artifactValue(fTest, "Group 1 variance"), "1.666667");
+  assert.equal(artifactValue(fTest, "Decision"), "fail to reject equal variances at alpha=0.05");
+  assert.deepEqual(fTest.table.rows[1], ["2", "4", "8.75", "2.916667", "1.707825"]);
+
+  assert.equal(levene.summary, "Levene equal-variance test");
+  assert.equal(levene.answer, "F = 0.705882, p = 0.530504");
+  assert.equal(artifactValue(levene, "Group sample variances"), "[1, 4, 9.333333]");
+  assert.equal(artifactValue(levene, "Mean absolute deviations"), "[0.666667, 1.333333, 2]");
+  assert.deepEqual(levene.table.rows[2], ["3", "3", "11", "9.333333", "2"]);
+});
+
 runTest("statistics mode computes chi-square goodness-of-fit", () => {
   const result = analyzeStatistics("chi-square observed 10, 20, 30 expected 15, 15, 30");
 
@@ -979,6 +996,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("k-means k=3 points (1,1), (1,2), (5,5), (6,5), (10,10), (10,11)").summary, "k-means clustering");
   assert.equal(analyzeUniversal("one-proportion z-test successes=56 n=100 p0=0.5").summary, "one-proportion z test");
   assert.equal(analyzeUniversal("two-proportion z-test successes1=56 n1=100 successes2=44 n2=100").summary, "two-proportion z test");
+  assert.equal(analyzeUniversal("variance test group1: 10,12,9,11; group2: 8,7,11,9").summary, "two-sample variance F test");
   assert.equal(analyzeUniversal("chi-square observed 10,20,30 expected 15,15,30").summary, "chi-square goodness-of-fit");
   assert.equal(analyzeUniversal("chi-square independence [[30,10],[20,40]]").summary, "chi-square independence test");
   assert.equal(analyzeUniversal("fisher exact [[1,9],[11,3]]").summary, "Fisher exact test");
