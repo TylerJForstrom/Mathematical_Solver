@@ -1141,6 +1141,10 @@ export function analyzeStatistics(statement) {
     return analyzeDecisionTreeClassifier(statement);
   }
 
+  if (isQdaQuestion(lower)) {
+    return analyzeQuadraticDiscriminantAnalysis(statement);
+  }
+
   if (isLdaQuestion(lower)) {
     return analyzeLinearDiscriminantAnalysis(statement);
   }
@@ -5471,6 +5475,105 @@ function analyzeLinearDiscriminantAnalysis(statement) {
   };
 }
 
+function analyzeQuadraticDiscriminantAnalysis(statement) {
+  const request = parseQdaInput(statement);
+  const model = fitQuadraticDiscriminantAnalysis(request.classes, request.predictors, request.regularization);
+  const predictorNames = request.predictors.map((predictor) => predictor.name);
+  const fitted = request.classes.map((_, row) =>
+    predictQuadraticDiscriminant(model, request.predictors.map((predictor) => predictor.values[row])),
+  );
+  const accuracy = fitted.filter((item, index) => item.classValue === request.classes[index]).length / request.classes.length;
+  const hasPrediction = request.prediction.every(Number.isFinite);
+  const prediction = hasPrediction ? predictQuadraticDiscriminant(model, request.prediction) : null;
+  const classLabels = model.classes.map((classInfo) => formatNumber(classInfo.value)).join(", ");
+  const tree = {
+    kind: "statsRegression",
+    label: "QDA",
+    children: [
+      statsDatasetNode(request.classes, [], "CLASS"),
+      ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+      ...model.classes.slice(0, 2).map((classInfo) => matrixNode(`COV ${formatNumber(classInfo.value)}`, classInfo.regularizedCovariance)),
+      statsMetricNode("ACC", accuracy),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: prediction
+      ? `predicted class = ${formatNumber(prediction.classValue)} (posterior = ${formatNumber(prediction.probability)})`
+      : `classes = ${classLabels}`,
+    summary: "quadratic discriminant analysis",
+    details: `${request.classes.length} observations, ${model.classes.length} classes, ${request.predictors.length} features`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read classes and numeric features",
+        expression: `classes = ${classLabels}, features = ${predictorNames.join(", ")}`,
+        detail: "QDA models each class with its own mean vector and covariance matrix.",
+      },
+      {
+        title: "Estimate class covariances",
+        expression: `regularization = ${formatNumber(request.regularization)}`,
+        detail: "Each class covariance is regularized on the diagonal so small demo datasets remain invertible.",
+      },
+      {
+        title: "Build quadratic scores",
+        expression: "score_k(x) = log(pi_k) - 0.5log|Sigma_k| - 0.5(x-mu_k)^T Sigma_k^-1(x-mu_k)",
+        detail: "Because the covariance matrix changes by class, the score can form curved decision boundaries.",
+      },
+      {
+        title: "Evaluate training predictions",
+        expression: `accuracy = ${formatNumber(accuracy)}`,
+        detail: "Training rows are assigned to the class with the largest quadratic discriminant score.",
+      },
+      ...(prediction
+        ? [{
+            title: "Predict class posterior",
+            expression: prediction.posteriors
+              .map((posterior) => `P(${formatNumber(posterior.classValue)}|x)=${formatNumber(posterior.probability)}`)
+              .join(", "),
+            detail: "The quadratic discriminant scores are normalized into posterior-like probabilities.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Obs", "Actual", "Predicted", "Posterior", "Score Gap"],
+      rows: request.classes.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(fitted[index].classValue),
+        formatNumber(fitted[index].probability),
+        formatNumber(fitted[index].scoreGap),
+      ]),
+    },
+    artifacts: [
+      ["Classes", classLabels],
+      ["Training accuracy", formatNumber(accuracy)],
+      ["Regularization", formatNumber(request.regularization)],
+      ...model.classes.flatMap((classInfo) => [
+        [`Prior class ${formatNumber(classInfo.value)}`, formatNumber(classInfo.prior)],
+        [`Mean class ${formatNumber(classInfo.value)}`, formatVector(classInfo.mean)],
+        [`Covariance class ${formatNumber(classInfo.value)}`, formatMatrix(classInfo.covariance)],
+        [`Regularized covariance class ${formatNumber(classInfo.value)}`, formatMatrix(classInfo.regularizedCovariance)],
+        [`Log determinant class ${formatNumber(classInfo.value)}`, formatNumber(classInfo.logDeterminant)],
+      ]),
+      ...(prediction
+        ? [
+            ["Predicted class", formatNumber(prediction.classValue)],
+            ["Posterior probability", formatNumber(prediction.probability)],
+            ["Score gap", formatNumber(prediction.scoreGap)],
+            ...prediction.posteriors.map((posterior) => [
+              `Posterior class ${formatNumber(posterior.classValue)}`,
+              formatNumber(posterior.probability),
+            ]),
+          ]
+        : []),
+    ],
+  };
+}
+
 function analyzeRocAnalysis(statement) {
   const request = parseRocInput(statement);
   const result = computeRocAnalysis(request.labels, request.scores, request.threshold);
@@ -7909,6 +8012,90 @@ function predictLinearDiscriminant(model, values) {
     classValue: score.classValue,
     probability: normalizeNumber(weights[index] / totalWeight),
     score: normalizeNumber(score.score),
+  }));
+  const ranked = [...posteriors].sort((left, right) =>
+    right.score - left.score || left.classValue - right.classValue,
+  );
+  const best = ranked[0];
+  const second = ranked[1];
+
+  return {
+    classValue: best.classValue,
+    probability: best.probability,
+    scoreGap: normalizeNumber(second ? best.score - second.score : 0),
+    posteriors,
+  };
+}
+
+function fitQuadraticDiscriminantAnalysis(classes, predictors, regularization) {
+  const rows = classes.map((_, row) => predictors.map((predictor) => predictor.values[row]));
+  const classValues = [...new Set(classes)].sort((left, right) => left - right);
+  const featureCount = predictors.length;
+  const classInfo = classValues.map((classValue) => {
+    const rowIndexes = classes
+      .map((value, index) => (value === classValue ? index : -1))
+      .filter((index) => index >= 0);
+    if (rowIndexes.length < 2) {
+      throw new Error("QDA needs at least two observations in each class.");
+    }
+
+    const meanVector = Array.from({ length: featureCount }, (_, feature) =>
+      mean(rowIndexes.map((row) => rows[row][feature])),
+    );
+    const covarianceNumerator = Array.from({ length: featureCount }, () => Array(featureCount).fill(0));
+    for (const row of rowIndexes) {
+      const centered = rows[row].map((value, feature) => value - meanVector[feature]);
+      for (let left = 0; left < featureCount; left += 1) {
+        for (let right = 0; right < featureCount; right += 1) {
+          covarianceNumerator[left][right] += centered[left] * centered[right];
+        }
+      }
+    }
+
+    const covariance = covarianceNumerator.map((row) =>
+      row.map((value) => normalizeNumber(value / (rowIndexes.length - 1))),
+    );
+    const regularizedCovariance = addDiagonalRegularization(covariance, regularization);
+    const determinantValue = determinant(regularizedCovariance);
+    if (!(determinantValue > EPSILON)) {
+      throw new Error("QDA covariance matrix is singular; increase regularization.");
+    }
+
+    return {
+      value: classValue,
+      count: rowIndexes.length,
+      prior: rowIndexes.length / classes.length,
+      mean: meanVector.map(normalizeNumber),
+      covariance,
+      regularizedCovariance,
+      logDeterminant: normalizeNumber(Math.log(determinantValue)),
+    };
+  });
+
+  return {
+    classes: classInfo,
+  };
+}
+
+function predictQuadraticDiscriminant(model, values) {
+  const scores = model.classes.map((classInfo) => {
+    const centered = values.map((value, index) => value - classInfo.mean[index]);
+    const solved = solveLinearSystem(classInfo.regularizedCovariance, centered);
+    const mahalanobis = dotProduct(centered, solved);
+    return {
+      classValue: classInfo.value,
+      score: Math.log(classInfo.prior) - 0.5 * classInfo.logDeterminant - 0.5 * mahalanobis,
+      distance: normalizeNumber(mahalanobis),
+    };
+  });
+  const maxScore = Math.max(...scores.map((score) => score.score));
+  const weights = scores.map((score) => Math.exp(score.score - maxScore));
+  const totalWeight = weights.reduce((sum, value) => sum + value, 0);
+  const posteriors = scores.map((score, index) => ({
+    classValue: score.classValue,
+    probability: normalizeNumber(weights[index] / totalWeight),
+    score: normalizeNumber(score.score),
+    distance: score.distance,
   }));
   const ranked = [...posteriors].sort((left, right) =>
     right.score - left.score || left.classValue - right.classValue,
@@ -12362,6 +12549,19 @@ function parseLdaInput(text) {
   };
 }
 
+function parseQdaInput(text) {
+  const base = parseLdaInput(text);
+  const classCounts = new Map();
+  for (const value of base.classes) {
+    classCounts.set(value, (classCounts.get(value) ?? 0) + 1);
+  }
+  if ([...classCounts.values()].some((count) => count < 2)) {
+    throw new Error("QDA needs at least two observations in each class.");
+  }
+
+  return base;
+}
+
 function parseRocInput(text) {
   const lists = new Map();
   for (const match of text.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
@@ -13408,6 +13608,11 @@ function isLdaQuestion(lower) {
     lower.includes("discriminant analysis");
 }
 
+function isQdaQuestion(lower) {
+  return /\bqda\b/.test(lower) ||
+    lower.includes("quadratic discriminant");
+}
+
 function isDecisionTreeQuestion(lower) {
   return lower.includes("decision tree") ||
     lower.includes("classification tree") ||
@@ -13678,7 +13883,13 @@ function isSystemQuestion(lower) {
 }
 
 function isStatisticsQuestion(lower) {
-  if (isRocQuestion(lower) || isRandomForestQuestion(lower) || isDecisionTreeQuestion(lower) || isLdaQuestion(lower)) {
+  if (
+    isRocQuestion(lower) ||
+    isRandomForestQuestion(lower) ||
+    isDecisionTreeQuestion(lower) ||
+    isQdaQuestion(lower) ||
+    isLdaQuestion(lower)
+  ) {
     return true;
   }
 
@@ -13764,6 +13975,7 @@ function isStatisticsQuestion(lower) {
     "bayes classifier",
     "linear discriminant",
     "discriminant analysis",
+    "quadratic discriminant",
     "decision tree",
     "classification tree",
     "tree classifier",
