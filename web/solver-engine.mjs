@@ -1182,6 +1182,10 @@ export function analyzeStatistics(statement) {
     return analyzeKMeansClustering(statement);
   }
 
+  if (isRegressionDiagnosticsQuestion(lower)) {
+    return analyzeRegressionDiagnostics(statement);
+  }
+
   if (
     lower.includes("regression") ||
     isLassoRegressionQuestion(lower) ||
@@ -5544,6 +5548,214 @@ function analyzeMultipleRegression(statement) {
       ...regressionInferenceArtifacts(inference),
       ...(hasPrediction ? [["Prediction", formatNumber(prediction)]] : []),
     ],
+  };
+}
+
+function analyzeRegressionDiagnostics(statement) {
+  const request = parseRegressionDiagnosticsInput(statement);
+  const result = fitOlsDiagnostics(request.y, request.predictors);
+  const predictorNames = request.predictors.map((predictor) => predictor.name);
+  const largestCook = Math.max(...result.cooksDistances);
+  const largestLeverage = Math.max(...result.leverages);
+  const maxAbsStandardizedResidual = Math.max(...result.standardizedResiduals.map(Math.abs));
+  const cookThreshold = 4 / result.observationCount;
+  const leverageThreshold = 2 * result.parameterCount / result.observationCount;
+  const influentialCount = result.cooksDistances.filter((value) => value > cookThreshold).length;
+  const highLeverageCount = result.leverages.filter((value) => value > leverageThreshold).length;
+  const bpDecision = result.breuschPagan.pValue < 0.05
+    ? "heteroscedasticity flagged"
+    : "no strong heteroscedasticity signal";
+  const jbDecision = result.jarqueBera.pValue < 0.05
+    ? "residual non-normality flagged"
+    : "no strong residual non-normality signal";
+  const autocorrelationNote = Number.isFinite(result.durbinWatson)
+    ? result.durbinWatson < 1.5
+      ? "positive autocorrelation signal"
+      : result.durbinWatson > 2.5
+        ? "negative autocorrelation signal"
+        : "no strong autocorrelation signal"
+    : "undefined autocorrelation diagnostic";
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      label: "REG DIAG",
+      children: [
+        statsDatasetNode(request.y, [], "Y"),
+        ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+        statsMetricNode("R2", result.rSquared),
+        statsMetricNode("DW", result.durbinWatson),
+        statsMetricNode("BP", result.breuschPagan.statistic),
+        statsMetricNode("COOK", largestCook),
+      ],
+    },
+    answer: `R^2 = ${formatNumber(result.rSquared)}, DW = ${formatNumber(result.durbinWatson)}, BP p = ${formatNumber(result.breuschPagan.pValue)}`,
+    summary: "regression diagnostics",
+    details: `${result.observationCount} observations, ${predictorNames.length} predictors`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.y)),
+    steps: [
+      {
+        title: "Fit least-squares model",
+        expression: result.equation,
+        detail: "Diagnostics start from the same ordinary least-squares fit used by regression mode.",
+      },
+      {
+        title: "Analyze residual scale",
+        expression: `SSE = ${formatNumber(result.sse)}, RSE = ${formatNumber(result.residualStandardError)}`,
+        detail: "Residual standard error measures typical vertical prediction error after accounting for model size.",
+      },
+      {
+        title: "Check residual autocorrelation",
+        expression: `Durbin-Watson = ${formatNumber(result.durbinWatson)}`,
+        detail: "Values near 2 suggest little first-order residual autocorrelation.",
+      },
+      {
+        title: "Check heteroscedasticity",
+        expression: `Breusch-Pagan LM = ${formatNumber(result.breuschPagan.statistic)}, p = ${formatNumber(result.breuschPagan.pValue)}`,
+        detail: "The Breusch-Pagan diagnostic regresses squared residuals on the predictors.",
+      },
+      {
+        title: "Check residual normality",
+        expression: `JB = ${formatNumber(result.jarqueBera.statistic)}, p = ${formatNumber(result.jarqueBera.pValue)}`,
+        detail: "The residual Jarque-Bera diagnostic summarizes skewness and tail weight.",
+      },
+      {
+        title: "Find influential observations",
+        expression: `max Cook's D = ${formatNumber(largestCook)}, max leverage = ${formatNumber(largestLeverage)}`,
+        detail: "Cook's distance and leverage identify observations that can strongly affect the fitted model.",
+      },
+    ],
+    table: {
+      headers: ["Obs", "Actual", "Fitted", "Residual", "Std residual", "Leverage", "Cook's D"],
+      rows: request.y.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(result.fitted[index]),
+        formatNumber(result.residuals[index]),
+        formatNumber(result.standardizedResiduals[index]),
+        formatNumber(result.leverages[index]),
+        formatNumber(result.cooksDistances[index]),
+      ]),
+    },
+    artifacts: [
+      ["Equation", result.equation],
+      ["SSE", formatNumber(result.sse)],
+      ["R squared", formatNumber(result.rSquared)],
+      ["Adjusted R squared", formatNumber(result.adjustedRSquared)],
+      ["Residual standard error", formatNumber(result.residualStandardError)],
+      ["Degrees of freedom", formatNumber(result.degreesFreedom)],
+      ["Durbin-Watson", formatNumber(result.durbinWatson)],
+      ["Autocorrelation note", autocorrelationNote],
+      ["Breusch-Pagan statistic", formatNumber(result.breuschPagan.statistic)],
+      ["Breusch-Pagan p-value", formatNumber(result.breuschPagan.pValue)],
+      ["Breusch-Pagan note", bpDecision],
+      ["Residual JB statistic", formatNumber(result.jarqueBera.statistic)],
+      ["Residual JB p-value", formatNumber(result.jarqueBera.pValue)],
+      ["Residual normality note", jbDecision],
+      ["Max standardized residual", formatNumber(maxAbsStandardizedResidual)],
+      ["Max leverage", formatNumber(largestLeverage)],
+      ["High leverage count", formatNumber(highLeverageCount)],
+      ["Max Cook's D", formatNumber(largestCook)],
+      ["Influential count", formatNumber(influentialCount)],
+      ["Cook's D threshold", formatNumber(cookThreshold)],
+      ["Leverage threshold", formatNumber(leverageThreshold)],
+    ],
+  };
+}
+
+function fitOlsDiagnostics(yValues, predictors) {
+  const predictorNames = predictors.map((predictor) => predictor.name);
+  const design = yValues.map((_, row) => [
+    1,
+    ...predictors.map((predictor) => predictor.values[row]),
+  ]);
+  const transposed = transposeMatrix(design);
+  const normalMatrix = multiplyMatrices(transposed, design);
+  const normalMatrixInverse = invertMatrix(normalMatrix);
+  const normalVector = multiplyMatrixVector(transposed, yValues);
+  const coefficients = solveLinearSystem(normalMatrix, normalVector);
+  const fitted = design.map((row) => dotProduct(row, coefficients));
+  const residuals = yValues.map((value, index) => value - fitted[index]);
+  const observationCount = yValues.length;
+  const parameterCount = predictors.length + 1;
+  const degreesFreedom = observationCount - parameterCount;
+  if (!(degreesFreedom > 0)) {
+    throw new Error("Regression diagnostics need more observations than model parameters.");
+  }
+  const sse = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  if (!(sse > EPSILON)) {
+    throw new Error("Regression diagnostics need nonzero residual variation.");
+  }
+  const mse = sse / degreesFreedom;
+  const residualStandardError = Math.sqrt(mse);
+  const meanY = mean(yValues);
+  const tss = yValues.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
+  const rSquared = nearlyEqual(tss, 0) ? 1 : 1 - sse / tss;
+  const adjustedRSquared = 1 - (1 - rSquared) * (observationCount - 1) / degreesFreedom;
+  const leverages = design.map((row) => dotProduct(row, multiplyMatrixVector(normalMatrixInverse, row)));
+  const standardizedResiduals = residuals.map((residual, index) =>
+    residual / (residualStandardError * Math.sqrt(Math.max(EPSILON, 1 - leverages[index]))),
+  );
+  const cooksDistances = residuals.map((residual, index) =>
+    ((residual ** 2) / (parameterCount * mse)) *
+    (leverages[index] / Math.max(EPSILON, (1 - leverages[index]) ** 2)),
+  );
+  const durbinWatsonNumerator = residuals.slice(1).reduce((sum, residual, index) =>
+    sum + (residual - residuals[index]) ** 2,
+  0);
+  const durbinWatson = durbinWatsonNumerator / sse;
+  const jarqueBera = jarqueBeraNormalityTest(residuals);
+  const breuschPagan = breuschPaganDiagnostic(residuals, predictors, normalMatrix, transposed);
+
+  return {
+    observationCount,
+    parameterCount,
+    degreesFreedom,
+    coefficients: coefficients.map(normalizeNumber),
+    fitted: fitted.map(normalizeNumber),
+    residuals: residuals.map(normalizeNumber),
+    sse: normalizeNumber(sse),
+    rSquared: normalizeNumber(rSquared),
+    adjustedRSquared: normalizeNumber(adjustedRSquared),
+    residualStandardError: normalizeNumber(residualStandardError),
+    leverages: leverages.map(normalizeNumber),
+    standardizedResiduals: standardizedResiduals.map(normalizeNumber),
+    cooksDistances: cooksDistances.map(normalizeNumber),
+    durbinWatson: normalizeNumber(durbinWatson),
+    jarqueBera,
+    breuschPagan,
+    equation: formatMultipleRegressionEquation(coefficients, predictorNames),
+  };
+}
+
+function breuschPaganDiagnostic(residuals, predictors, normalMatrix, transposedDesign) {
+  const squaredResiduals = residuals.map((value) => value ** 2);
+  const meanSquaredResidual = mean(squaredResiduals);
+  const tss = squaredResiduals.reduce((sum, value) => sum + (value - meanSquaredResidual) ** 2, 0);
+  if (!(tss > EPSILON)) {
+    return {
+      statistic: Number.NaN,
+      pValue: Number.NaN,
+      rSquared: Number.NaN,
+    };
+  }
+  const auxVector = multiplyMatrixVector(transposedDesign, squaredResiduals);
+  const auxCoefficients = solveLinearSystem(normalMatrix, auxVector);
+  const fitted = residuals.map((_, row) =>
+    auxCoefficients[0] + predictors.reduce((sum, predictor, index) =>
+      sum + auxCoefficients[index + 1] * predictor.values[row],
+    0),
+  );
+  const sse = squaredResiduals.reduce((sum, value, index) => sum + (value - fitted[index]) ** 2, 0);
+  const rSquared = Math.max(0, Math.min(1, 1 - sse / tss));
+  const statistic = residuals.length * rSquared;
+  const pValue = chiSquareRightTailApprox(statistic, predictors.length);
+  return {
+    statistic: normalizeNumber(statistic),
+    pValue: normalizeNumber(pValue),
+    rSquared: normalizeNumber(rSquared),
   };
 }
 
@@ -13432,6 +13644,64 @@ function parseMultipleRegressionInput(text) {
   };
 }
 
+function parseRegressionDiagnosticsInput(text) {
+  const listText = text
+    .replace(/\bpredict\b.*$/i, "")
+    .replace(/\bregression\b/gi, "")
+    .replace(/\bdiagnostics?\b/gi, "")
+    .replace(/\bresiduals?\b/gi, "")
+    .replace(/\binfluence\b/gi, "")
+    .replace(/\bmodel\b/gi, "");
+  const lists = new Map();
+  for (const match of listText.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    const label = match[1];
+    const values = parseNumberList(match[2]);
+    if (values.length > 1) {
+      lists.set(label.toLowerCase(), { name: label, values });
+    }
+  }
+
+  const responseEntry = lists.get("y") ?? lists.get("response") ?? lists.get("outcome");
+  if (responseEntry) {
+    const predictors = [...lists.entries()]
+      .filter(([key]) => key === "x" || /^x\d+$/i.test(key) || /^predictor\d+$/i.test(key))
+      .sort(([left], [right]) => naturalLabelNumber(left) - naturalLabelNumber(right))
+      .map(([, value]) => value);
+    if (predictors.length > 0) {
+      for (const predictor of predictors) {
+        if (predictor.values.length !== responseEntry.values.length) {
+          throw new Error("All regression diagnostic lists must have the same length.");
+        }
+      }
+      if (responseEntry.values.length <= predictors.length + 1) {
+        throw new Error("Regression diagnostics need more observations than model parameters.");
+      }
+      return {
+        y: responseEntry.values,
+        predictors,
+      };
+    }
+  }
+
+  const parsedLists = parseXYLists(text);
+  if (parsedLists) {
+    return {
+      y: parsedLists.y,
+      predictors: [{ name: "x", values: parsedLists.x }],
+    };
+  }
+
+  const pairs = parsePairs(text);
+  if (pairs.length >= 3) {
+    return {
+      y: pairs.map((pair) => pair.y),
+      predictors: [{ name: "x", values: pairs.map((pair) => pair.x) }],
+    };
+  }
+
+  throw new Error("Use regression diagnostics y: 2,3,5,8; x: 1,2,3,4 or coordinate pairs like (1,2), (2,3), (3,5).");
+}
+
 function parseRidgeRegressionInput(text) {
   const lambda = readNamedNumber(text, ["lambda", "penalty", "alpha"], 1);
   if (!(lambda >= 0)) {
@@ -14259,6 +14529,20 @@ function isPolynomialRegressionQuestion(lower) {
     lower.includes("curve fitting");
 }
 
+function isRegressionDiagnosticsQuestion(lower) {
+  return lower.includes("regression diagnostics") ||
+    lower.includes("regression diagnostic") ||
+    lower.includes("residual diagnostics") ||
+    lower.includes("residual diagnostic") ||
+    lower.includes("model diagnostics") ||
+    lower.includes("cook's distance") ||
+    lower.includes("cooks distance") ||
+    lower.includes("durbin-watson") ||
+    lower.includes("durbin watson") ||
+    lower.includes("breusch-pagan") ||
+    lower.includes("breusch pagan");
+}
+
 function isLogisticRegressionQuestion(lower) {
   return lower.includes("logistic regression") ||
     lower.includes("binary regression") ||
@@ -14597,6 +14881,7 @@ function isStatisticsQuestion(lower) {
     isFisherExactQuestion(lower) ||
     isNormalityQuestion(lower) ||
     isEqualVarianceQuestion(lower) ||
+    isRegressionDiagnosticsQuestion(lower) ||
     isQdaQuestion(lower) ||
     isLdaQuestion(lower)
   ) {
@@ -14651,6 +14936,15 @@ function isStatisticsQuestion(lower) {
     "logistic regression",
     "binary regression",
     "logit regression",
+    "regression diagnostics",
+    "residual diagnostics",
+    "model diagnostics",
+    "cook's distance",
+    "cooks distance",
+    "durbin-watson",
+    "durbin watson",
+    "breusch-pagan",
+    "breusch pagan",
     "poisson regression",
     "count regression",
     "log-linear regression",

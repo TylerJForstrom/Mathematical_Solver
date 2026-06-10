@@ -269,6 +269,18 @@ runTest("statistics mode computes multiple linear regression", () => {
   assert.equal(artifactValue(result, "x2 95% CI"), "[-0.575663, 1.575663]");
 });
 
+runTest("statistics mode computes regression diagnostics", () => {
+  const result = analyzeStatistics("regression diagnostics y: 2, 3, 5, 8, 13, 21; x: 1, 2, 3, 4, 5, 6");
+
+  assert.equal(result.summary, "regression diagnostics");
+  assert.equal(result.answer, "R^2 = 0.895627, DW = 1.132931, BP p = 0.34479");
+  assert.equal(artifactValue(result, "Durbin-Watson"), "1.132931");
+  assert.equal(artifactValue(result, "Breusch-Pagan p-value"), "0.34479");
+  assert.equal(artifactValue(result, "Residual JB p-value"), "0.706194");
+  assert.equal(artifactValue(result, "Influential count"), "2");
+  assert.deepEqual(result.table.rows[5], ["6", "21", "17.809524", "3.190476", "1.77053", "0.52381", "1.724127"]);
+});
+
 runTest("statistics mode computes ridge regression", () => {
   const result = analyzeStatistics("ridge regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
 
@@ -982,6 +994,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
+  assert.equal(analyzeUniversal("regression diagnostics y: 2, 3, 5, 8, 13, 21; x: 1, 2, 3, 4, 5, 6").summary, "regression diagnostics");
   assert.equal(analyzeUniversal("ridge regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "ridge regression");
   assert.equal(analyzeUniversal("lasso regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "LASSO regression");
   assert.equal(analyzeUniversal("logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5").summary, "logistic regression");

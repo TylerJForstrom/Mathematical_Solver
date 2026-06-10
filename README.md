@@ -53,6 +53,8 @@ The frontend currently supports:
 - Linear regression/correlation for coordinate pairs, plus multiple linear
   regression with several predictor lists, residuals, coefficient standard
   errors, t tests, p-values, confidence intervals, R squared, and prediction
+- Regression diagnostics with standardized residuals, leverage, Cook's
+  distance, Durbin-Watson, Breusch-Pagan, and residual Jarque-Bera checks
 - Ridge regression for regularized linear modeling with an unpenalized intercept,
   shrinkage penalty, objective value, fitted values, residuals, and prediction
 - LASSO regression for sparse feature selection with standardized coordinate
@@ -212,6 +214,8 @@ The same idea works for algebra and calculus:
   fits a nonlinear polynomial curve and predicts `26`.
 - `multiple regression y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a least-squares model with multiple predictors.
+- `regression diagnostics y: 2,3,5,8,13,21; x: 1,2,3,4,5,6` checks
+  residual shape, autocorrelation, heteroscedasticity, leverage, and influence.
 - `ridge regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a regularized model that shrinks predictor coefficients.
 - `lasso regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
@@ -345,6 +349,7 @@ The demo includes:
   regression/correlation, polynomial regression,
   multiple regression,
   coefficient inference for linear models,
+  regression diagnostics,
   ridge regression,
   LASSO regression,
   logistic regression,
