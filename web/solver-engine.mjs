@@ -3802,7 +3802,12 @@ function analyzeKruskalWallis(statement) {
 }
 
 function analyzeChiSquare(statement) {
-  const { observed, expected, alpha } = parseChiSquareInput(statement);
+  const request = parseChiSquareInput(statement);
+  if (request.table) {
+    return analyzeChiSquareIndependence(request);
+  }
+
+  const { observed, expected, alpha } = request;
   if (observed.length !== expected.length || observed.length < 2) {
     throw new Error("Chi-square tests need matching observed and expected lists.");
   }
@@ -3877,6 +3882,110 @@ function analyzeChiSquare(statement) {
       ["Degrees of freedom", formatNumber(degreesFreedom)],
       ["p-value", formatNumber(pValue)],
       ["Cohen's w", formatNumber(cohensW)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeChiSquareIndependence({ table: observed, alpha }) {
+  validateContingencyTable(observed);
+  const rowTotals = observed.map((row) => row.reduce((sum, value) => sum + value, 0));
+  const columnTotals = observed[0].map((_, column) =>
+    observed.reduce((sum, row) => sum + row[column], 0),
+  );
+  const total = rowTotals.reduce((sum, value) => sum + value, 0);
+  const expected = observed.map((row, rowIndex) =>
+    row.map((_, columnIndex) => rowTotals[rowIndex] * columnTotals[columnIndex] / total),
+  );
+  const contributions = observed.map((row, rowIndex) =>
+    row.map((value, columnIndex) => (value - expected[rowIndex][columnIndex]) ** 2 / expected[rowIndex][columnIndex]),
+  );
+  const residuals = observed.map((row, rowIndex) =>
+    row.map((value, columnIndex) => (value - expected[rowIndex][columnIndex]) / Math.sqrt(expected[rowIndex][columnIndex])),
+  );
+  const statistic = contributions.flat().reduce((sum, value) => sum + value, 0);
+  const degreesFreedom = (observed.length - 1) * (observed[0].length - 1);
+  const pValue = chiSquareRightTailApprox(statistic, degreesFreedom);
+  const cramerV = Math.sqrt(statistic / (total * Math.min(observed.length - 1, observed[0].length - 1)));
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const minExpected = Math.min(...expected.flat());
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      label: "CHI2 INDEP",
+      children: [
+        matrixNode("OBS", observed),
+        matrixNode("EXP", expected),
+        statsMetricNode("X2", statistic),
+        statsMetricNode("DF", degreesFreedom),
+        statsMetricNode("P", pValue),
+        statsMetricNode("V", cramerV),
+      ],
+    },
+    answer: `chi-square = ${formatNumber(statistic)}, p = ${formatNumber(pValue)}`,
+    summary: "chi-square independence test",
+    details: `${observed.length}x${observed[0].length} contingency table`,
+    variables: [],
+    metrics: treeMetrics(matrixNode("OBS", observed)),
+    steps: [
+      {
+        title: "Read contingency table",
+        expression: `${observed.length} rows, ${observed[0].length} columns, total = ${formatNumber(total)}`,
+        detail: "The independence test checks whether row categories and column categories are associated.",
+      },
+      {
+        title: "Compute expected counts",
+        expression: "expected = row total * column total / grand total",
+        detail: "Expected counts show what each cell would contain if the two categorical variables were independent.",
+      },
+      {
+        title: "Sum chi-square statistic",
+        expression: `X^2 = ${formatNumber(statistic)}, df = ${formatNumber(degreesFreedom)}`,
+        detail: "Each cell contributes (observed - expected)^2 / expected.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `p = ${formatNumber(pValue)}`,
+        detail: "The statistic is compared to a chi-square reference curve with (rows - 1)(columns - 1) degrees of freedom.",
+      },
+      {
+        title: "Compute association strength",
+        expression: `Cramer's V = ${formatNumber(cramerV)}`,
+        detail: "Cramer's V standardizes the association strength between 0 and 1.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the row and column variables are not independent.",
+      },
+    ],
+    table: {
+      headers: ["Cell", "Observed", "Expected", "Contribution", "Std Residual"],
+      rows: observed.flatMap((row, rowIndex) =>
+        row.map((value, columnIndex) => [
+          `R${rowIndex + 1}C${columnIndex + 1}`,
+          formatNumber(value),
+          formatNumber(expected[rowIndex][columnIndex]),
+          formatNumber(contributions[rowIndex][columnIndex]),
+          formatNumber(residuals[rowIndex][columnIndex]),
+        ]),
+      ),
+    },
+    artifacts: [
+      ["Observed table", formatMatrix(observed)],
+      ["Expected table", formatMatrix(expected)],
+      ["Contribution table", formatMatrix(contributions)],
+      ["Standardized residuals", formatMatrix(residuals)],
+      ["Row totals", formatVector(rowTotals)],
+      ["Column totals", formatVector(columnTotals)],
+      ["Grand total", formatNumber(total)],
+      ["Chi-square", formatNumber(statistic)],
+      ["Degrees of freedom", formatNumber(degreesFreedom)],
+      ["p-value", formatNumber(pValue)],
+      ["Cramer's V", formatNumber(cramerV)],
+      ["Minimum expected count", formatNumber(minExpected)],
       ["Decision", decision],
     ],
   };
@@ -3958,6 +4067,22 @@ function analyzeHypergeometric(statement) {
       ["Standard deviation", formatNumber(Math.sqrt(variance))],
     ],
   };
+}
+
+function validateContingencyTable(table) {
+  if (!Array.isArray(table) || table.length < 2 || table[0].length < 2) {
+    throw new Error("Chi-square independence tests need a contingency table with at least 2 rows and 2 columns.");
+  }
+  if (table.some((row) => row.some((value) => value < 0 || !Number.isFinite(value)))) {
+    throw new Error("Contingency table counts must be nonnegative finite numbers.");
+  }
+  const rowTotals = table.map((row) => row.reduce((sum, value) => sum + value, 0));
+  const columnTotals = table[0].map((_, column) =>
+    table.reduce((sum, row) => sum + row[column], 0),
+  );
+  if (rowTotals.some((value) => value <= 0) || columnTotals.some((value) => value <= 0)) {
+    throw new Error("Every contingency table row and column must have a positive total.");
+  }
 }
 
 function analyzeProportionConfidenceInterval(statement) {
@@ -11193,6 +11318,14 @@ function parseKruskalInput(text) {
 
 function parseChiSquareInput(text) {
   const { alpha, cleaned } = extractAlpha(text);
+  const tables = extractMatrices(cleaned);
+  if (tables.length > 0) {
+    return {
+      alpha,
+      table: tables[0],
+    };
+  }
+
   const observedMatch = cleaned.match(/\b(?:observed|obs)\s*[:=]?\s*([^;]+?)(?=\b(?:expected|exp)\b|$)/i);
   const expectedMatch = cleaned.match(/\b(?:expected|exp)\s*[:=]?\s*([^;]+)/i);
   if (observedMatch && expectedMatch) {
@@ -11218,7 +11351,7 @@ function parseChiSquareInput(text) {
     };
   }
 
-  throw new Error("Use chi-square observed 10, 20, 30 expected 15, 15, 30.");
+  throw new Error("Use chi-square observed 10, 20, 30 expected 15, 15, 30 or chi-square independence [[30,10],[20,40]].");
 }
 
 function parseHypergeometricInput(text) {
