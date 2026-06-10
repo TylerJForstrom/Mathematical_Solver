@@ -53,6 +53,8 @@ The frontend currently supports:
 - Linear regression/correlation for coordinate pairs, plus multiple linear
   regression with several predictor lists, residuals, coefficient standard
   errors, t tests, p-values, confidence intervals, R squared, and prediction
+- Spearman rank correlation with rank tables, t approximation, p-values, and
+  monotonic-association decisions
 - Regression diagnostics with standardized residuals, leverage, Cook's
   distance, Durbin-Watson, Breusch-Pagan, and residual Jarque-Bera checks
 - Ridge regression for regularized linear modeling with an unpenalized intercept,
@@ -210,6 +212,8 @@ The same idea works for algebra and calculus:
   ODE with fourth-order Runge-Kutta.
 - `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree
   with coefficient standard errors, t tests, p-values, and confidence intervals.
+- `spearman correlation x: 1,2,3,4,5,6; y: 1,3,2,5,4,6` ranks both
+  variables and tests monotonic association.
 - `quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5`
   fits a nonlinear polynomial curve and predicts `26`.
 - `multiple regression y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
@@ -347,6 +351,7 @@ The demo includes:
 - Complex arithmetic and complex quadratic roots through Ask mode
 - Dataset summaries, confidence intervals, bootstrap intervals,
   regression/correlation, polynomial regression,
+  Spearman rank correlation,
   multiple regression,
   coefficient inference for linear models,
   regression diagnostics,

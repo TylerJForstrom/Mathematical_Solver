@@ -1182,6 +1182,10 @@ export function analyzeStatistics(statement) {
     return analyzeKMeansClustering(statement);
   }
 
+  if (isSpearmanQuestion(lower)) {
+    return analyzeSpearmanCorrelation(statement);
+  }
+
   if (isRegressionDiagnosticsQuestion(lower)) {
     return analyzeRegressionDiagnostics(statement);
   }
@@ -5131,6 +5135,92 @@ function analyzeNormalityTest(statement) {
       ["p-value", formatNumber(result.pValue)],
       ["Decision", decision],
       ["Approximation note", "Asymptotic chi-square p-value; use larger samples for stronger evidence."],
+    ],
+  };
+}
+
+function analyzeSpearmanCorrelation(statement) {
+  const request = parseSpearmanInput(statement);
+  const xRanks = rankValues(request.x).ranks;
+  const yRanks = rankValues(request.y).ranks;
+  const rho = pearsonCorrelation(xRanks, yRanks);
+  const tStatistic = spearmanTStatistic(rho, request.x.length);
+  const pValue = pValueForSpearman(rho, request.x.length, request.alternative);
+  const decision = pValue < request.alpha
+    ? `reject H0 at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject H0 at alpha=${formatNumber(request.alpha)}`;
+  const differences = xRanks.map((rank, index) => rank - yRanks[index]);
+  const squaredDifferences = differences.map((value) => value ** 2);
+  const sumSquaredDifferences = squaredDifferences.reduce((sum, value) => sum + value, 0);
+  const xTieCorrection = rankValues(request.x).tieCorrection;
+  const yTieCorrection = rankValues(request.y).tieCorrection;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      label: "SPEARMAN",
+      children: [
+        statsDatasetNode(request.x, [], "X"),
+        statsDatasetNode(request.y, [], "Y"),
+        statsMetricNode("rho", rho),
+        statsMetricNode("P", pValue),
+      ],
+    },
+    answer: `rho = ${formatNumber(rho)}, p = ${formatNumber(pValue)}`,
+    summary: "Spearman rank correlation",
+    details: `${request.x.length} paired observations`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([...request.x, ...request.y])),
+    steps: [
+      {
+        title: "Read paired data",
+        expression: `${request.x.length} pairs`,
+        detail: "Spearman correlation measures monotonic association by comparing ranks instead of raw values.",
+      },
+      {
+        title: "Rank both variables",
+        expression: `x ranks = ${formatVector(xRanks)}, y ranks = ${formatVector(yRanks)}`,
+        detail: "Tied values receive average ranks.",
+      },
+      {
+        title: "Correlate ranks",
+        expression: `rho = ${formatNumber(rho)}`,
+        detail: "Pearson correlation is computed on the two rank lists.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `t = ${formatStatisticValue(tStatistic)}, df = ${request.x.length - 2}, p = ${formatNumber(pValue)}`,
+        detail: "For moderate samples, Spearman rho is commonly tested with a t approximation.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "The null hypothesis is no monotonic association between the paired variables.",
+      },
+    ],
+    table: {
+      headers: ["Obs", "x", "y", "rank x", "rank y", "d", "d^2"],
+      rows: request.x.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(request.y[index]),
+        formatNumber(xRanks[index]),
+        formatNumber(yRanks[index]),
+        formatNumber(differences[index]),
+        formatNumber(squaredDifferences[index]),
+      ]),
+    },
+    artifacts: [
+      ["Spearman rho", formatNumber(rho)],
+      ["t approximation", formatStatisticValue(tStatistic)],
+      ["Degrees of freedom", formatNumber(request.x.length - 2)],
+      ["p-value", formatNumber(pValue)],
+      ["Alternative", request.alternative],
+      ["Sum d^2", formatNumber(sumSquaredDifferences)],
+      ["X tie correction", formatNumber(xTieCorrection)],
+      ["Y tie correction", formatNumber(yTieCorrection)],
+      ["Decision", decision],
     ],
   };
 }
@@ -11794,6 +11884,63 @@ function parseNormalityTestInput(text) {
   return { alpha, values };
 }
 
+function parseSpearmanInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const alternative = parseAlternative(text);
+  const parsedLists = parseXYLists(cleaned);
+  if (parsedLists) {
+    return validateSpearmanInput({
+      alpha,
+      alternative,
+      x: parsedLists.x,
+      y: parsedLists.y,
+    });
+  }
+
+  const pairs = parsePairs(cleaned);
+  if (pairs.length > 0) {
+    return validateSpearmanInput({
+      alpha,
+      alternative,
+      x: pairs.map((pair) => pair.x),
+      y: pairs.map((pair) => pair.y),
+    });
+  }
+
+  const chunks = cleaned
+    .replace(/\bspearman'?s?\b/gi, "")
+    .replace(/\brank(?:ed)?\b/gi, "")
+    .replace(/\bcorrelation\b/gi, "")
+    .replace(/\bassociation\b/gi, "")
+    .replace(/\btest\b/gi, "")
+    .replace(/\bdata\b/gi, "")
+    .replace(/\bfor\b/gi, "")
+    .split(";")
+    .map((chunk) => parseNumbers(chunk))
+    .filter((values) => values.length > 0);
+
+  if (chunks.length >= 2) {
+    return validateSpearmanInput({
+      alpha,
+      alternative,
+      x: chunks[0],
+      y: chunks[1],
+    });
+  }
+
+  throw new Error("Use spearman correlation x: 1,2,3; y: 2,4,5 or coordinate pairs like (1,2), (2,4), (3,5).");
+}
+
+function validateSpearmanInput(request) {
+  if (request.x.length !== request.y.length) {
+    throw new Error("Spearman correlation needs x and y lists with the same length.");
+  }
+  if (request.x.length < 3) {
+    throw new Error("Spearman correlation needs at least three paired observations.");
+  }
+  return request;
+}
+
 function rankValues(values) {
   const ranked = values.map((value, index) => ({ value, index }))
     .sort((left, right) => left.value - right.value);
@@ -12624,6 +12771,28 @@ function pValueForNormal(statistic, alternative) {
     return 1 - cdf;
   }
   return Math.min(1, 2 * Math.min(cdf, 1 - cdf));
+}
+
+function pValueForSpearman(rho, count, alternative) {
+  const statistic = spearmanTStatistic(rho, count);
+  if (!Number.isFinite(statistic)) {
+    if (alternative === "less") {
+      return rho < 0 ? 0 : 1;
+    }
+    if (alternative === "greater") {
+      return rho > 0 ? 0 : 1;
+    }
+    return 0;
+  }
+  return pValueForT(statistic, count - 2, alternative);
+}
+
+function spearmanTStatistic(rho, count) {
+  const denominator = 1 - rho ** 2;
+  if (denominator <= EPSILON) {
+    return rho >= 0 ? Infinity : -Infinity;
+  }
+  return rho * Math.sqrt((count - 2) / denominator);
 }
 
 function parsePowerAnalysisInput(text) {
@@ -14184,6 +14353,21 @@ function mean(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function pearsonCorrelation(left, right) {
+  if (left.length !== right.length || left.length < 2) {
+    throw new Error("Correlation needs equal-length lists with at least two values.");
+  }
+  const leftMean = mean(left);
+  const rightMean = mean(right);
+  const sxx = left.reduce((sum, value) => sum + (value - leftMean) ** 2, 0);
+  const syy = right.reduce((sum, value) => sum + (value - rightMean) ** 2, 0);
+  if (!(sxx > EPSILON) || !(syy > EPSILON)) {
+    throw new Error("Correlation needs nonzero variation in both variables.");
+  }
+  const sxy = left.reduce((sum, value, index) => sum + (value - leftMean) * (right[index] - rightMean), 0);
+  return sxy / Math.sqrt(sxx * syy);
+}
+
 function median(sortedValues) {
   const middle = Math.floor(sortedValues.length / 2);
   if (sortedValues.length % 2 === 1) {
@@ -14543,6 +14727,13 @@ function isRegressionDiagnosticsQuestion(lower) {
     lower.includes("breusch pagan");
 }
 
+function isSpearmanQuestion(lower) {
+  return lower.includes("spearman") ||
+    lower.includes("rank correlation") ||
+    lower.includes("ranked correlation") ||
+    lower.includes("monotonic association");
+}
+
 function isLogisticRegressionQuestion(lower) {
   return lower.includes("logistic regression") ||
     lower.includes("binary regression") ||
@@ -14882,6 +15073,7 @@ function isStatisticsQuestion(lower) {
     isNormalityQuestion(lower) ||
     isEqualVarianceQuestion(lower) ||
     isRegressionDiagnosticsQuestion(lower) ||
+    isSpearmanQuestion(lower) ||
     isQdaQuestion(lower) ||
     isLdaQuestion(lower)
   ) {
@@ -14939,6 +15131,9 @@ function isStatisticsQuestion(lower) {
     "regression diagnostics",
     "residual diagnostics",
     "model diagnostics",
+    "spearman",
+    "rank correlation",
+    "monotonic association",
     "cook's distance",
     "cooks distance",
     "durbin-watson",
@@ -17353,6 +17548,12 @@ function formatNumber(value) {
     return String(normalized);
   }
   return String(Number(normalized.toFixed(6))).replace(/\.0+$/, "");
+}
+
+function formatStatisticValue(value) {
+  if (value === Infinity) return "infinity";
+  if (value === -Infinity) return "-infinity";
+  return formatNumber(value);
 }
 
 function normalizeNumber(value) {
