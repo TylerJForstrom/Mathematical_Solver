@@ -816,6 +816,17 @@ runTest("statistics mode computes Bayesian A/B tests", () => {
   assert.deepEqual(result.table.rows[1], ["B", "150", "1000", "Beta(151, 851)", "0.150699", "[0.129231, 0.173487]"]);
 });
 
+runTest("statistics mode computes Bayesian linear regression posteriors", () => {
+  const result = analyzeStatistics("bayesian linear regression y: 4, 7, 9, 12, 15; x: 1, 2, 3, 4, 5; priorMean=0 priorSd=10 sigma=1 predict x=6");
+
+  assert.equal(result.summary, "Bayesian linear regression");
+  assert.equal(result.answer, "posterior prediction = 17.500954, 95% predictive interval = [14.664576, 20.337331]");
+  assert.equal(artifactValue(result, "Posterior equation"), "y = 1.293871 + 2.70118x");
+  assert.equal(artifactValue(result, "Posterior coefficients"), "[1.293871, 2.70118]");
+  assert.equal(artifactValue(result, "95% mean response interval"), "[15.45069, 19.551217]");
+  assert.deepEqual(result.table.rows[1], ["x", "2.70118", "0.314661", "[2.084456, 3.317905]"]);
+});
+
 runTest("statistics mode computes Bayesian normal mean posteriors", () => {
   const result = analyzeStatistics("bayesian normal mean data: 10, 12, 14, 15; priorMean=11 priorSd=3 sigma=2 threshold=13");
 
@@ -1277,6 +1288,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("expected value values: 0, 1, 2 probabilities: 0.2, 0.5, 0.3").summary, "discrete expected value");
   assert.equal(analyzeUniversal("bayes prior=0.01 sensitivity=0.99 specificity=0.95").summary, "Bayes theorem");
   assert.equal(analyzeUniversal("bayesian ab test A: 120/1000; B: 150/1000; alpha=1 beta=1").summary, "Bayesian A/B test");
+  assert.equal(analyzeUniversal("bayesian linear regression y: 4, 7, 9, 12, 15; x: 1, 2, 3, 4, 5; priorMean=0 priorSd=10 sigma=1 predict x=6").summary, "Bayesian linear regression");
   assert.equal(analyzeUniversal("bayesian normal mean data: 10, 12, 14, 15; priorMean=11 priorSd=3 sigma=2 threshold=13").summary, "Bayesian normal mean");
   assert.equal(analyzeUniversal("markov [[0.7,0.3],[0.2,0.8]] start [1,0] steps=3").answer, "after 3 steps = [0.475, 0.525]");
   assert.equal(analyzeUniversal("stationary markov [[0.7,0.3],[0.2,0.8]]").summary, "Markov stationary distribution");

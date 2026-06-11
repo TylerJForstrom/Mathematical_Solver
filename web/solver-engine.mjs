@@ -176,6 +176,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
     },
     {
+      title: "Bayesian linear regression",
+      when: () => wantsStats && /\b(bayesian linear regression|bayesian regression|posterior coefficients|posterior prediction)\b/.test(lower),
+      reason: "I detected a Bayesian regression question.",
+      needs: [
+        "A response list y",
+        "One or more predictor lists x, x1, x2, ...",
+        "Known sigma and optional priorMean/priorSd values",
+      ],
+      examples: [
+        ["Bayes regression", "statistics", "bayesian linear regression y: 4, 7, 9, 12, 15; x: 1, 2, 3, 4, 5; priorMean=0 priorSd=10 sigma=1 predict x=6"],
+      ],
+    },
+    {
       title: "Probability distribution",
       when: () => wantsStats && /\b(binomial|normal|poisson|geometric|hypergeometric|probability|cdf|percentile)\b/.test(lower),
       reason: "I detected a probability distribution question.",
@@ -1184,6 +1197,10 @@ export function analyzeStatistics(statement) {
 
   if (isBayesianAbQuestion(lower)) {
     return analyzeBayesianAbTest(statement);
+  }
+
+  if (isBayesianLinearRegressionQuestion(lower)) {
+    return analyzeBayesianLinearRegression(statement);
   }
 
   if (isBayesianProportionQuestion(lower)) {
@@ -9348,6 +9365,138 @@ function analyzeBayesianNormalMean(statement) {
   };
 }
 
+function analyzeBayesianLinearRegression(statement) {
+  const request = parseBayesianLinearRegressionInput(statement);
+  const design = request.y.map((_, row) => [
+    1,
+    ...request.predictors.map((predictor) => predictor.values[row]),
+  ]);
+  const transposed = transposeMatrix(design);
+  const normalMatrix = multiplyMatrices(transposed, design);
+  const normalVector = multiplyMatrixVector(transposed, request.y);
+  const parameterCount = normalVector.length;
+  const observationVariance = request.sigma ** 2;
+  const priorVariance = request.priorSd ** 2;
+  const dataPrecision = scaleMatrix(normalMatrix, 1 / observationVariance);
+  const priorPrecision = scaleMatrix(identityMatrix(parameterCount), 1 / priorVariance);
+  const posteriorPrecision = addMatrices(dataPrecision, priorPrecision);
+  const posteriorCovariance = invertMatrix(posteriorPrecision);
+  const posteriorRightHandSide = normalVector.map((value) =>
+    value / observationVariance + request.priorMean / priorVariance,
+  );
+  const posteriorMean = multiplyMatrixVector(posteriorCovariance, posteriorRightHandSide);
+  const predictorNames = request.predictors.map((predictor) => predictor.name);
+  const coefficientNames = ["Intercept", ...predictorNames];
+  const posteriorSds = posteriorCovariance.map((row, index) => Math.sqrt(Math.max(0, row[index])));
+  const critical = zCriticalForLevel(request.level);
+  const percent = formatNumber(request.level * 100);
+  const equation = formatMultipleRegressionEquation(posteriorMean, predictorNames);
+  const coefficientRows = coefficientNames.map((name, index) => {
+    const lower = posteriorMean[index] - critical * posteriorSds[index];
+    const upper = posteriorMean[index] + critical * posteriorSds[index];
+    return [
+      name,
+      formatNumber(posteriorMean[index]),
+      formatNumber(posteriorSds[index]),
+      `[${formatNumber(lower)}, ${formatNumber(upper)}]`,
+    ];
+  });
+  const hasPrediction = request.prediction.every(Number.isFinite);
+  const predictionRow = hasPrediction ? [1, ...request.prediction] : [];
+  const prediction = hasPrediction
+    ? dotProduct(predictionRow, posteriorMean)
+    : Number.NaN;
+  const meanVariance = hasPrediction
+    ? Math.max(0, dotProduct(predictionRow, multiplyMatrixVector(posteriorCovariance, predictionRow)))
+    : Number.NaN;
+  const meanSe = Math.sqrt(meanVariance);
+  const predictiveSe = Math.sqrt(meanVariance + observationVariance);
+  const meanLower = prediction - critical * meanSe;
+  const meanUpper = prediction + critical * meanSe;
+  const predictiveLower = prediction - critical * predictiveSe;
+  const predictiveUpper = prediction + critical * predictiveSe;
+  const tree = {
+    kind: "statsRegression",
+    label: "BAYES-REG",
+    children: [
+      statsDatasetNode(request.y, [], "Y"),
+      ...request.predictors.map((predictor) => statsDatasetNode(predictor.values, [], predictor.name)),
+      statsMetricNode("sigma", request.sigma),
+      ...coefficientNames.map((name, index) => statsMetricNode(name, posteriorMean[index])),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: hasPrediction
+      ? `posterior prediction = ${formatNumber(prediction)}, ${percent}% predictive interval = [${formatNumber(predictiveLower)}, ${formatNumber(predictiveUpper)}]`
+      : `posterior equation: ${equation}`,
+    summary: "Bayesian linear regression",
+    details: `${request.y.length} observations, ${request.predictors.length} predictors, known sigma = ${formatNumber(request.sigma)}`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read Bayesian regression inputs",
+        expression: `n = ${formatNumber(request.y.length)}, predictors = ${predictorNames.join(", ")}, sigma = ${formatNumber(request.sigma)}`,
+        detail: "The model uses a normal likelihood with known observation standard deviation.",
+      },
+      {
+        title: "Build design matrix",
+        expression: `X has ${formatNumber(design.length)} rows and ${formatNumber(parameterCount)} columns`,
+        detail: "The first column is the intercept; the remaining columns are predictor values.",
+      },
+      {
+        title: "Combine prior and data precision",
+        expression: `prior N(${formatNumber(request.priorMean)}, ${formatNumber(request.priorSd)}^2) independently for each coefficient`,
+        detail: "Normal priors and a normal likelihood produce a multivariate normal posterior for the coefficients.",
+      },
+      {
+        title: "Compute posterior coefficients",
+        expression: equation,
+        detail: "The posterior mean balances the least-squares signal against prior shrinkage.",
+      },
+      ...(hasPrediction
+        ? [{
+            title: "Predict requested input",
+            expression: `x = ${formatVector(request.prediction)}, yhat = ${formatNumber(prediction)}`,
+            detail: "The mean-response interval uses coefficient uncertainty; the predictive interval also includes observation noise.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Coefficient", "Posterior mean", "Posterior SD", `${percent}% credible interval`],
+      rows: coefficientRows,
+    },
+    artifacts: [
+      ["Posterior equation", equation],
+      ["Known sigma", formatNumber(request.sigma)],
+      ["Prior mean", formatNumber(request.priorMean)],
+      ["Prior SD", formatNumber(request.priorSd)],
+      ["Posterior coefficients", formatVector(posteriorMean)],
+      ["Posterior covariance", formatMatrix(posteriorCovariance)],
+      ...coefficientNames.flatMap((name, index) => [
+        [`Coefficient ${name}`, formatNumber(posteriorMean[index])],
+        [`Posterior SD ${name}`, formatNumber(posteriorSds[index])],
+      ]),
+      ...(hasPrediction
+        ? [
+            ["Prediction input", formatVector(request.prediction)],
+            ["Posterior prediction", formatNumber(prediction)],
+            ["Mean response SE", formatNumber(meanSe)],
+            [`${percent}% mean response interval`, `[${formatNumber(meanLower)}, ${formatNumber(meanUpper)}]`],
+            ["Predictive SE", formatNumber(predictiveSe)],
+            [`${percent}% predictive interval`, `[${formatNumber(predictiveLower)}, ${formatNumber(predictiveUpper)}]`],
+          ]
+        : []),
+    ],
+    ...(request.predictors.length === 1
+      ? { graph: buildScatterFitGraph(request.predictors[0].values, request.y, posteriorMean[1], posteriorMean[0], "Posterior mean fit") }
+      : {}),
+  };
+}
+
 function analyzeBayesianAbTest(statement) {
   const request = parseBayesianAbInput(statement);
   const armA = bayesianAbPosterior(request.left, request.priorAlpha, request.priorBeta, request.level);
@@ -17416,6 +17565,100 @@ function validateBayesianAbArm(arm) {
   }
 }
 
+function parseBayesianLinearRegressionInput(text) {
+  const lists = new Map();
+  const listText = text.replace(/\bpredict(?:ion)?\b.*$/i, "");
+  for (const match of listText.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    const label = match[1];
+    const values = parseNumberList(match[2]);
+    if (values.length > 1) {
+      lists.set(label.toLowerCase(), { name: label, values });
+    }
+  }
+
+  const responseEntry = lists.get("y") ??
+    lists.get("response") ??
+    lists.get("outcome");
+  if (!responseEntry) {
+    throw new Error("Bayesian linear regression needs a response list, such as y: 4, 7, 9.");
+  }
+
+  const predictors = [...lists.entries()]
+    .filter(([key]) => key !== responseEntry.name.toLowerCase())
+    .filter(([key]) => key === "x" || /^x\d+$/i.test(key) || /^predictor\d+$/i.test(key))
+    .sort(([left], [right]) => {
+      const leftRank = left === "x" ? 1 : naturalLabelNumber(left);
+      const rightRank = right === "x" ? 1 : naturalLabelNumber(right);
+      return leftRank - rightRank || left.localeCompare(right);
+    })
+    .map(([, value]) => value);
+
+  if (predictors.length < 1) {
+    throw new Error("Bayesian linear regression needs at least one predictor list, such as x: 1, 2, 3.");
+  }
+  if (responseEntry.values.length < 2) {
+    throw new Error("Bayesian linear regression needs at least two observations.");
+  }
+  for (const predictor of predictors) {
+    if (predictor.values.length !== responseEntry.values.length) {
+      throw new Error("All Bayesian regression lists must have the same length.");
+    }
+  }
+
+  const priorMean = readNamedNumber(text, ["priorMean", "priormean", "prior mean", "beta0", "mean0"], 0);
+  const priorSdInput = readNamedNumber(text, ["priorSd", "priorsd", "priorSD", "prior sd", "tau", "tau0"], Number.NaN);
+  const priorVariance = readNamedNumber(text, ["priorVariance", "priorvariance", "priorVar", "priorvar", "tau2"], Number.NaN);
+  const sigmaInput = readNamedNumber(text, ["sigma", "knownSigma", "knownsigma", "obsSd", "obssd"], Number.NaN);
+  const sigmaSquared = readNamedNumber(text, ["sigma2", "variance", "knownVariance", "knownvariance"], Number.NaN);
+  const priorSd = Number.isFinite(priorSdInput)
+    ? priorSdInput
+    : Number.isFinite(priorVariance)
+      ? Math.sqrt(priorVariance)
+      : 10;
+  const sigma = Number.isFinite(sigmaInput)
+    ? sigmaInput
+    : Number.isFinite(sigmaSquared)
+      ? Math.sqrt(sigmaSquared)
+      : Number.NaN;
+  const level = parseCredibleLevel(text, 0.95);
+
+  if (!Number.isFinite(priorMean)) {
+    throw new Error("Bayesian linear regression priorMean must be finite.");
+  }
+  if (!(priorSd > 0)) {
+    throw new Error("Bayesian linear regression needs a positive priorSd or priorVariance.");
+  }
+  if (!(sigma > 0)) {
+    throw new Error("Bayesian linear regression needs a positive known sigma or variance.");
+  }
+
+  return {
+    y: responseEntry.values,
+    predictors,
+    priorMean,
+    priorSd,
+    sigma,
+    level,
+    prediction: parseBayesianLinearRegressionPrediction(text, predictors.map((predictor) => predictor.name)),
+  };
+}
+
+function parseBayesianLinearRegressionPrediction(text, predictorNames) {
+  const match = text.match(/\bpredict(?:ion)?\b(.+)$/i);
+  if (!match) {
+    return predictorNames.map(() => Number.NaN);
+  }
+  const namedPrediction = predictorNames.map((name) => readNamedNumber(match[1], [name], Number.NaN));
+  if (namedPrediction.every(Number.isFinite)) {
+    return namedPrediction;
+  }
+  const numbers = parseNumbers(match[1]);
+  if (numbers.length === predictorNames.length) {
+    return numbers;
+  }
+  return namedPrediction;
+}
+
 function parseBayesianNormalInput(text) {
   const dataMatch = text.match(/\b(?:data|sample|values|observations?)\s*[:=]\s*([^;]+)/i);
   const values = dataMatch
@@ -17899,6 +18142,14 @@ function isBayesianAbQuestion(lower) {
     lower.includes("conversion lift");
 }
 
+function isBayesianLinearRegressionQuestion(lower) {
+  return lower.includes("bayesian linear regression") ||
+    lower.includes("bayesian regression") ||
+    lower.includes("bayesian least squares") ||
+    (lower.includes("posterior coefficients") && lower.includes("regression")) ||
+    (lower.includes("posterior prediction") && lower.includes("regression"));
+}
+
 function isBayesianNormalQuestion(lower) {
   return lower.includes("bayesian normal") ||
     lower.includes("normal-normal") ||
@@ -18379,6 +18630,7 @@ function isStatisticsQuestion(lower) {
     isKendallQuestion(lower) ||
     isMultipleTestingQuestion(lower) ||
     isBayesianAbQuestion(lower) ||
+    isBayesianLinearRegressionQuestion(lower) ||
     isQdaQuestion(lower) ||
     isLdaQuestion(lower)
   ) {
@@ -18512,6 +18764,10 @@ function isStatisticsQuestion(lower) {
     "ab test",
     "a/b test",
     "conversion lift",
+    "bayesian regression",
+    "bayesian linear regression",
+    "posterior coefficients",
+    "posterior prediction",
     "bayesian normal",
     "bayesian mean",
     "normal-normal",

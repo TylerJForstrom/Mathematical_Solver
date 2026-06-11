@@ -71,6 +71,9 @@ The frontend currently supports:
   shrinkage penalty, objective value, fitted values, residuals, and prediction
 - LASSO regression for sparse feature selection with standardized coordinate
   descent, active-predictor counts, L1 penalty, objective value, and prediction
+- Bayesian linear regression with normal priors, known-sigma likelihoods,
+  posterior coefficient intervals, mean-response intervals, and posterior
+  predictive intervals
 - Polynomial regression for nonlinear curve fitting with degree selection,
   residuals, R squared, and prediction
 - Logistic regression for binary outcomes with fitted probabilities,
@@ -124,6 +127,8 @@ The frontend currently supports:
 - Bayesian normal-mean inference with normal-normal conjugate updates,
   posterior credible intervals, posterior-predictive intervals, and posterior
   tail probabilities
+- Bayesian linear regression with posterior coefficient covariance, shrinkage
+  from independent normal priors, and posterior predictive intervals
 - Bayesian A/B conversion-rate testing with beta-binomial posteriors,
   posterior win probabilities, expected lift, and approximate lift intervals
 - Bayesian beta-binomial proportion updates with posterior means, credible
@@ -265,6 +270,8 @@ The same idea works for algebra and calculus:
   solves a regularized model that shrinks predictor coefficients.
 - `lasso regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a sparse model that can set weak predictor coefficients to zero.
+- `bayesian linear regression y: 4,7,9,12,15; x: 1,2,3,4,5; priorMean=0 priorSd=10 sigma=1 predict x=6`
+  updates normal coefficient priors and returns posterior prediction intervals.
 - `logistic regression y: 0,0,1,0,1,1; x: 1,2,3,4,5,6; predict x=4.5`
   fits a binary-response model and returns a predicted probability.
 - `naive bayes class: 0,0,0,1,1,1; x1: 1,2,1.5,5,6,5.5; x2: 1,1.2,0.8,5,5.5,4.8`
@@ -407,6 +414,7 @@ The demo includes:
   regression diagnostics,
   ridge regression,
   LASSO regression,
+  Bayesian linear regression,
   logistic regression,
   Gaussian Naive Bayes classification,
   linear discriminant analysis,
