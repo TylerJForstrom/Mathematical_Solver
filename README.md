@@ -98,7 +98,8 @@ The frontend currently supports:
   one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
   permutation tests, one-way ANOVA, Mann-Whitney U with exact small-sample
-  p-values when there are no ties, Wilcoxon signed-rank,
+  p-values when there are no ties, Wilcoxon signed-rank with exact
+  small-sample p-values when absolute differences are untied,
   Kruskal-Wallis, chi-square goodness-of-fit, chi-square independence tests
   for contingency tables, Fisher exact tests for 2x2 tables, binomial
   probability, Poisson probability, normal probability, inverse-normal percentiles, geometric
@@ -394,8 +395,8 @@ The demo includes:
   one-proportion/two-proportion z tests,
   proportion confidence intervals, permutation tests, ANOVA, chi-square tests
   of goodness-of-fit and independence, Fisher exact tests,
-  nonparametric rank tests including exact small-sample Mann-Whitney p-values,
-  Kaplan-Meier survival analysis, log-rank tests,
+  nonparametric rank tests including exact small-sample Mann-Whitney and
+  Wilcoxon signed-rank p-values, Kaplan-Meier survival analysis, log-rank tests,
   Cox proportional hazards regression, power/sample-size analysis, effect sizes,
   and pairwise follow-up summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
@@ -429,7 +430,7 @@ These are good ways to make the project more impressive mathematically:
 2. Add exact radical output for quadratic equations with irrational roots.
 3. Add trigonometric simplification identities.
 4. Add substitution, integration by parts, and partial-fraction decomposition.
-5. Add confidence intervals for effect sizes and exact small-sample rank-test p-values.
+5. Add confidence intervals for effect sizes and more exact rank-test variants.
 6. Add row-space bases, column-space bases, and larger-matrix eigenvalue approximation.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add systems of differential equations and phase-plane direction fields.

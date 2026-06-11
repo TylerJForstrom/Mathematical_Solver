@@ -771,10 +771,21 @@ runTest("statistics mode falls back to Mann-Whitney normal approximation with ti
 });
 
 runTest("statistics mode computes Wilcoxon signed-rank tests", () => {
+  const result = analyzeStatistics("wilcoxon signed-rank before: 10, 12, 9, 11; after: 11, 15, 11, 15");
+
+  assert.equal(result.summary, "Wilcoxon signed-rank test");
+  assert.equal(result.answer, "W = 0, p = 0.125");
+  assert.equal(artifactValue(result, "p-value method"), "exact enumeration");
+  assert.equal(artifactValue(result, "Exact sign assignments"), "16");
+  assert.equal(artifactValue(result, "Matched rank-biserial r"), "1");
+});
+
+runTest("statistics mode falls back to Wilcoxon normal approximation with tied ranks", () => {
   const result = analyzeStatistics("wilcoxon signed-rank before: 10, 12, 9, 11; after: 11, 14, 10, 13");
 
   assert.equal(result.summary, "Wilcoxon signed-rank test");
   assert.equal(result.answer, "W = 0, p = 0.063318");
+  assert.equal(artifactValue(result, "p-value method"), "normal approximation");
   assert.equal(artifactValue(result, "Matched rank-biserial r"), "1");
 });
 

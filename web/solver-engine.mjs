@@ -64,7 +64,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
       examples: [
         ["Paired t-test", "statistics", "paired t-test before: 10, 12, 9, 11; after: 11, 14, 10, 13"],
-        ["Wilcoxon", "statistics", "wilcoxon signed-rank before: 10, 12, 9, 11; after: 11, 14, 10, 13"],
+        ["Wilcoxon", "statistics", "wilcoxon signed-rank before: 10, 12, 9, 11; after: 11, 15, 11, 15"],
       ],
     },
     {
@@ -4008,7 +4008,10 @@ function analyzeWilcoxonSignedRank(statement) {
   }
 
   const z = (wPlus - meanW) / Math.sqrt(varianceW);
-  const pValue = pValueForNormal(z, alternative);
+  const normalPValue = pValueForNormal(z, alternative);
+  const exactResult = exactWilcoxonSignedRankResult(wPlus, n, ranked.tieCorrection, alternative);
+  const pValue = exactResult ? exactResult.pValue : normalPValue;
+  const pValueMethod = exactResult ? "exact enumeration" : "normal approximation";
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
   const rankBiserial = (wPlus - wMinus) / (wPlus + wMinus);
   const normalR = z / Math.sqrt(n);
@@ -4035,7 +4038,9 @@ function analyzeWilcoxonSignedRank(statement) {
     ], "WILCOXON"),
     answer: `W = ${formatNumber(statistic)}, p = ${formatNumber(pValue)}`,
     summary: "Wilcoxon signed-rank test",
-    details: "Paired nonparametric test with normal-approximation p-value",
+    details: exactResult
+      ? "Paired nonparametric test with exact small-sample p-value"
+      : "Paired nonparametric test with normal-approximation p-value",
     variables: [],
     metrics: treeMetrics(statsDatasetNode(nonzeroDifferences)),
     steps: [
@@ -4055,9 +4060,13 @@ function analyzeWilcoxonSignedRank(statement) {
         detail: "Positive and negative differences contribute separate rank sums.",
       },
       {
-        title: "Approximate p-value",
-        expression: `z = ${formatNumber(z)}, p = ${formatNumber(pValue)}`,
-        detail: "The p-value uses a tie-corrected normal approximation.",
+        title: exactResult ? "Compute exact p-value" : "Approximate p-value",
+        expression: exactResult
+          ? `exact p = ${formatNumber(pValue)}`
+          : `z = ${formatNumber(z)}, p = ${formatNumber(pValue)}`,
+        detail: exactResult
+          ? `The solver enumerates ${formatNumber(exactResult.total)} possible sign assignments because the nonzero absolute differences are small and untied.`
+          : "The p-value uses a tie-corrected normal approximation.",
       },
       {
         title: "Compute effect size",
@@ -4080,6 +4089,13 @@ function analyzeWilcoxonSignedRank(statement) {
       ["W-", formatNumber(wMinus)],
       ["Reported W", formatNumber(statistic)],
       ["z statistic", formatNumber(z)],
+      ["Normal approximation p", formatNumber(normalPValue)],
+      ["p-value method", pValueMethod],
+      ...(exactResult ? [
+        ["Exact lower tail", formatNumber(exactResult.lowerTail)],
+        ["Exact upper tail", formatNumber(exactResult.upperTail)],
+        ["Exact sign assignments", formatNumber(exactResult.total)],
+      ] : []),
       ["p-value", formatNumber(pValue)],
       ["Matched rank-biserial r", formatNumber(rankBiserial)],
       ["Normal approximation r", formatNumber(normalR)],
@@ -12638,6 +12654,63 @@ function exactMannWhitneyDistribution(leftCount, rightCount) {
   }
 
   return { counts, total };
+}
+
+function exactWilcoxonSignedRankResult(observedWPlus, rankCount, tieCorrection, alternative) {
+  if (tieCorrection > EPSILON) {
+    return null;
+  }
+
+  const totalAssignments = 2 ** rankCount;
+  if (totalAssignments > 1048576) {
+    return null;
+  }
+
+  const distribution = exactWilcoxonSignedRankDistribution(rankCount);
+  let lowerCount = 0;
+  let upperCount = 0;
+
+  for (const [rankSum, count] of distribution.counts) {
+    if (rankSum <= observedWPlus + EPSILON) {
+      lowerCount += count;
+    }
+    if (rankSum >= observedWPlus - EPSILON) {
+      upperCount += count;
+    }
+  }
+
+  const lowerTail = lowerCount / distribution.total;
+  const upperTail = upperCount / distribution.total;
+  let pValue;
+  if (alternative === "less") {
+    pValue = lowerTail;
+  } else if (alternative === "greater") {
+    pValue = upperTail;
+  } else {
+    pValue = Math.min(1, 2 * Math.min(lowerTail, upperTail));
+  }
+
+  return {
+    pValue: normalizeNumber(pValue),
+    lowerTail: normalizeNumber(lowerTail),
+    upperTail: normalizeNumber(upperTail),
+    total: distribution.total,
+  };
+}
+
+function exactWilcoxonSignedRankDistribution(rankCount) {
+  let counts = new Map([[0, 1]]);
+
+  for (let rank = 1; rank <= rankCount; rank += 1) {
+    const nextCounts = new Map(counts);
+    for (const [rankSum, count] of counts) {
+      const nextSum = rankSum + rank;
+      nextCounts.set(nextSum, (nextCounts.get(nextSum) ?? 0) + count);
+    }
+    counts = nextCounts;
+  }
+
+  return { counts, total: 2 ** rankCount };
 }
 
 function rankAbsoluteValues(values) {
