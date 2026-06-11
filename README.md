@@ -99,6 +99,8 @@ The frontend currently supports:
   initialization, assignments, cluster sizes, and within-cluster SSE
 - Confidence intervals, bootstrap percentile intervals, fixed-effect and
   DerSimonian-Laird random-effects meta-analysis with heterogeneity diagnostics,
+  multiple-testing correction with Bonferroni, Holm, Benjamini-Hochberg FDR,
+  and Benjamini-Yekutieli adjusted p-values,
   Jarque-Bera normality tests,
   two-sample variance F tests and Levene equal-variance tests,
   one-sample/two-sample/paired t tests with Student t p-values,

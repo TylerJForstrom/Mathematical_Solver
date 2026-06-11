@@ -526,6 +526,17 @@ runTest("statistics mode computes meta-analysis models", () => {
   assert.deepEqual(result.table.rows[0], ["1", "0.2", "0.1", "53.924506", "37.076176"]);
 });
 
+runTest("statistics mode adjusts multiple-testing p-values", () => {
+  const result = analyzeStatistics("adjust p-values p: 0.003, 0.02, 0.04, 0.20, 0.001 alpha=0.05");
+
+  assert.equal(result.summary, "multiple-testing correction");
+  assert.equal(result.answer, "Benjamini-Hochberg discoveries = 4 of 5 at alpha=0.05; smallest adjusted p = 0.005");
+  assert.equal(artifactValue(result, "Benjamini-Hochberg discoveries"), "4");
+  assert.equal(artifactValue(result, "BH q-values"), "[0.0075, 0.033333, 0.05, 0.2, 0.005]");
+  assert.equal(artifactValue(result, "BY q-values"), "[0.017125, 0.076111, 0.114167, 0.456667, 0.011417]");
+  assert.deepEqual(result.table.rows[0], ["1", "0.003", "0.015", "0.012", "0.0075", "0.017125", "yes"]);
+});
+
 runTest("statistics mode computes permutation tests", () => {
   const meanResult = analyzeStatistics("permutation test group1: 10, 12, 9; group2: 8, 7, 11 resamples=2000 seed=5");
   const medianResult = analyzeStatistics("permutation median test group1: 1, 2, 3, 4; group2: 4, 5, 6, 7 resamples=2000 seed=5");
@@ -1209,6 +1220,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("bootstrap mean data 10, 12, 14, 16, 18 resamples=1000 seed=7 confidence=95").summary, "bootstrap confidence interval");
   assert.equal(analyzeUniversal("normality test data 10, 12, 13, 15, 30, 31, 32, 33").summary, "Jarque-Bera normality test");
   assert.equal(analyzeUniversal("permutation test group1: 10, 12, 9; group2: 8, 7, 11 resamples=2000 seed=5").summary, "permutation test");
+  assert.equal(analyzeUniversal("adjust p-values p: 0.003, 0.02, 0.04, 0.20, 0.001 alpha=0.05").summary, "multiple-testing correction");
   assert.equal(analyzeUniversal("kaplan-meier times: 5, 6, 6, 8, 10; events: 1, 1, 0, 1, 0").summary, "Kaplan-Meier survival");
   assert.equal(analyzeUniversal("log-rank group1 times: 5, 6, 6, 8, 10 events: 1, 1, 0, 1, 0; group2 times: 4, 6, 7, 9, 12 events: 1, 0, 1, 1, 0").summary, "log-rank test");
   assert.equal(analyzeUniversal("cox regression times: 5, 6, 6, 8, 10, 12; events: 1, 1, 0, 1, 0, 1; x: 0, 1, 0, 1, 1, 0").summary, "Cox proportional hazards");

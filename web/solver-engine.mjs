@@ -138,6 +138,18 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
     },
     {
+      title: "Multiple-testing correction",
+      when: () => wantsStats && /\b(multiple[-\s]?testing|adjust(?:ed)? p|p[-\s]?values?|fdr|false discovery|benjamini|holm|bonferroni)\b/.test(lower),
+      reason: "I detected a p-value adjustment question.",
+      needs: [
+        "A list of p-values",
+        "An alpha level if you want reject/not-reject decisions",
+      ],
+      examples: [
+        ["FDR correction", "statistics", "adjust p-values p: 0.003, 0.02, 0.04, 0.20, 0.001 alpha=0.05"],
+      ],
+    },
+    {
       title: "Bayesian normal mean",
       when: () => wantsStats && /\b(bayesian normal|bayesian mean|normal-normal|posterior mean|credible interval)\b/.test(lower),
       reason: "I detected a Bayesian mean-estimation question.",
@@ -1167,6 +1179,10 @@ export function analyzeStatistics(statement) {
 
   if (isMetaAnalysisQuestion(lower)) {
     return analyzeMetaAnalysis(statement);
+  }
+
+  if (isMultipleTestingQuestion(lower)) {
+    return analyzeMultipleTestingCorrection(statement);
   }
 
   if (isCoxQuestion(lower)) {
@@ -6013,6 +6029,132 @@ function pooledMetaEstimate(effects, variances, weights, level) {
     weightPercents: weights.map((weight) => normalizeNumber((weight / totalWeight) * 100)),
     variances,
   };
+}
+
+function analyzeMultipleTestingCorrection(statement) {
+  const request = parseMultipleTestingInput(statement);
+  const result = computeMultipleTestingCorrections(request.pValues, request.alpha);
+  const selectedValues = result.adjusted[request.method];
+  const selectedDiscoveries = selectedValues.filter((value) => value <= request.alpha).length;
+  const methodLabel = multipleTestingMethodLabel(request.method);
+  const smallestAdjusted = Math.min(...selectedValues);
+  const tree = statsDatasetNode(request.pValues, [
+    statsMetricNode("M", request.pValues.length),
+    statsMetricNode("ALPHA", request.alpha),
+    statsMetricNode("DISC", selectedDiscoveries),
+    statsMetricNode("MINQ", smallestAdjusted),
+  ], "P-ADJ");
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `${methodLabel} discoveries = ${formatNumber(selectedDiscoveries)} of ${formatNumber(request.pValues.length)} at alpha=${formatNumber(request.alpha)}; smallest adjusted p = ${formatNumber(smallestAdjusted)}`,
+    summary: "multiple-testing correction",
+    details: `${request.pValues.length} p-values adjusted with Bonferroni, Holm, Benjamini-Hochberg, and Benjamini-Yekutieli methods`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read p-values",
+        expression: request.pValues.map(formatNumber).join(", "),
+        detail: "Multiple-testing correction controls error rates when several hypotheses are tested together.",
+      },
+      {
+        title: "Apply family-wise corrections",
+        expression: `Bonferroni and Holm at alpha=${formatNumber(request.alpha)}`,
+        detail: "Bonferroni multiplies each p-value by m; Holm is a step-down family-wise error correction.",
+      },
+      {
+        title: "Apply false-discovery corrections",
+        expression: `BH discoveries = ${formatNumber(result.discoveries.bh)}, BY discoveries = ${formatNumber(result.discoveries.by)}`,
+        detail: "Benjamini-Hochberg controls FDR under common dependence assumptions; Benjamini-Yekutieli is more conservative.",
+      },
+      {
+        title: "Choose reported method",
+        expression: `${methodLabel}: ${selectedValues.map(formatNumber).join(", ")}`,
+        detail: "Adjusted p-values are mapped back to the original input order.",
+      },
+    ],
+    table: {
+      headers: ["Test", "p", "Bonferroni", "Holm", "BH q", "BY q", "BH reject"],
+      rows: request.pValues.map((value, index) => [
+        String(index + 1),
+        formatNumber(value),
+        formatNumber(result.adjusted.bonferroni[index]),
+        formatNumber(result.adjusted.holm[index]),
+        formatNumber(result.adjusted.bh[index]),
+        formatNumber(result.adjusted.by[index]),
+        result.adjusted.bh[index] <= request.alpha ? "yes" : "no",
+      ]),
+    },
+    artifacts: [
+      ["Selected method", methodLabel],
+      ["Alpha", formatNumber(request.alpha)],
+      ["Tests", formatNumber(request.pValues.length)],
+      ["Bonferroni discoveries", formatNumber(result.discoveries.bonferroni)],
+      ["Holm discoveries", formatNumber(result.discoveries.holm)],
+      ["Benjamini-Hochberg discoveries", formatNumber(result.discoveries.bh)],
+      ["Benjamini-Yekutieli discoveries", formatNumber(result.discoveries.by)],
+      ["BH q-values", formatVector(result.adjusted.bh)],
+      ["BY q-values", formatVector(result.adjusted.by)],
+    ],
+  };
+}
+
+function computeMultipleTestingCorrections(pValues, alpha = 0.05) {
+  const bonferroni = pValues.map((value) => clampProbability(value * pValues.length));
+  const holm = stepwiseAdjustedPValues(pValues, (pValue, rank, count) => pValue * (count - rank), "increasing");
+  const bh = stepwiseAdjustedPValues(pValues, (pValue, rank, count) => (pValue * count) / (rank + 1), "decreasing");
+  const harmonic = sumRange(1, pValues.length, (value) => 1 / value);
+  const by = stepwiseAdjustedPValues(pValues, (pValue, rank, count) => (pValue * count * harmonic) / (rank + 1), "decreasing");
+  return {
+    adjusted: {
+      bonferroni: bonferroni.map(normalizeNumber),
+      holm,
+      bh,
+      by,
+    },
+    discoveries: {
+      bonferroni: bonferroni.filter((value) => value <= alpha).length,
+      holm: holm.filter((value) => value <= alpha).length,
+      bh: bh.filter((value) => value <= alpha).length,
+      by: by.filter((value) => value <= alpha).length,
+    },
+  };
+}
+
+function stepwiseAdjustedPValues(pValues, rawCallback, direction) {
+  const sorted = pValues
+    .map((value, index) => ({ value, index }))
+    .sort((left, right) => left.value - right.value || left.index - right.index);
+  const adjustedSorted = Array(sorted.length).fill(0);
+
+  if (direction === "increasing") {
+    let previous = 0;
+    for (let rank = 0; rank < sorted.length; rank += 1) {
+      previous = Math.max(previous, clampProbability(rawCallback(sorted[rank].value, rank, sorted.length)));
+      adjustedSorted[rank] = previous;
+    }
+  } else {
+    let previous = 1;
+    for (let rank = sorted.length - 1; rank >= 0; rank -= 1) {
+      previous = Math.min(previous, clampProbability(rawCallback(sorted[rank].value, rank, sorted.length)));
+      adjustedSorted[rank] = previous;
+    }
+  }
+
+  const adjusted = Array(sorted.length);
+  sorted.forEach((entry, rank) => {
+    adjusted[entry.index] = normalizeNumber(adjustedSorted[rank]);
+  });
+  return adjusted;
+}
+
+function multipleTestingMethodLabel(method) {
+  if (method === "bonferroni") return "Bonferroni";
+  if (method === "holm") return "Holm";
+  if (method === "by") return "Benjamini-Yekutieli";
+  return "Benjamini-Hochberg";
 }
 
 function analyzePermutationTest(statement) {
@@ -14852,6 +14994,38 @@ function parseMetaAnalysisInput(text) {
   };
 }
 
+function parseMultipleTestingInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const method = parseMultipleTestingMethod(cleaned);
+  const labeled = cleaned.match(/\b(?:p|pvalues?|pvals?|p[-\s]?values?)\s*[:=]\s*([^;]+)/i);
+  const pValues = labeled
+    ? parseNumberList(labeled[1])
+    : parseNumberList(cleaned
+        .replace(/\b(?:adjust|adjusted|correction|correct|multiple|testing|tests?|comparisons?|p[-\s]?values?|pvals?|fdr|false|discovery|rate|benjamini|hochberg|yekutieli|holm|bonferroni|method|alpha)\b/gi, "")
+        .replace(/\b[A-Za-z_]\w*\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, ""));
+
+  if (pValues.length < 2) {
+    throw new Error("Multiple-testing correction needs at least two p-values, such as adjust p-values p: 0.01, 0.04, 0.2.");
+  }
+  if (pValues.some((value) => !(value >= 0 && value <= 1))) {
+    throw new Error("P-values must be between 0 and 1.");
+  }
+
+  return {
+    alpha,
+    method,
+    pValues,
+  };
+}
+
+function parseMultipleTestingMethod(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes("bonferroni")) return "bonferroni";
+  if (lower.includes("holm")) return "holm";
+  if (lower.includes("yekutieli") || /\bby\b/.test(lower)) return "by";
+  return "bh";
+}
+
 function parseBootstrapInput(text) {
   const lower = text.toLowerCase();
   let dataText = text;
@@ -17517,6 +17691,23 @@ function isMetaAnalysisQuestion(lower) {
     lower.includes("tau squared");
 }
 
+function isMultipleTestingQuestion(lower) {
+  return lower.includes("multiple testing") ||
+    lower.includes("multiple-testing") ||
+    lower.includes("multiple comparisons") ||
+    lower.includes("adjust p") ||
+    lower.includes("adjusted p") ||
+    lower.includes("p-value correction") ||
+    lower.includes("p value correction") ||
+    lower.includes("false discovery") ||
+    /\bfdr\b/.test(lower) ||
+    lower.includes("benjamini") ||
+    lower.includes("hochberg") ||
+    lower.includes("yekutieli") ||
+    lower.includes("holm") ||
+    (lower.includes("bonferroni") && lower.includes("p"));
+}
+
 function isMultipleRegressionQuestion(lower, statement) {
   return lower.includes("multiple regression") ||
     lower.includes("multivariate regression") ||
@@ -17955,6 +18146,7 @@ function isStatisticsQuestion(lower) {
     isPearsonQuestion(lower) ||
     isSpearmanQuestion(lower) ||
     isKendallQuestion(lower) ||
+    isMultipleTestingQuestion(lower) ||
     isQdaQuestion(lower) ||
     isLdaQuestion(lower)
   ) {
@@ -17985,6 +18177,17 @@ function isStatisticsQuestion(lower) {
     "i-squared",
     "i squared",
     "tau squared",
+    "multiple testing",
+    "multiple comparisons",
+    "adjusted p",
+    "p-value correction",
+    "false discovery",
+    "fdr",
+    "benjamini",
+    "hochberg",
+    "yekutieli",
+    "holm",
+    "bonferroni",
     "log-rank",
     "logrank",
     "log rank",
