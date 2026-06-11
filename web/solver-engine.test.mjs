@@ -266,6 +266,18 @@ runTest("statistics mode computes linear regression", () => {
   assert.equal(result.graph.lines[0].label, "Least-squares fit");
 });
 
+runTest("statistics mode computes simple regression predictions", () => {
+  const result = analyzeStatistics("regression for (1,2), (2,3), (3,5), (4,8); predict x=5");
+
+  assert.equal(result.summary, "linear regression");
+  assert.equal(result.answer, "y = 2x - 0.5; prediction = 9.5");
+  assert.equal(artifactValue(result, "Prediction x"), "5");
+  assert.equal(artifactValue(result, "Predicted y"), "9.5");
+  assert.equal(artifactValue(result, "95% mean response CI"), "[5.773793, 13.226207]");
+  assert.equal(artifactValue(result, "95% prediction interval"), "[4.689488, 14.310512]");
+  assert.equal(result.steps.at(-1).title, "Predict at requested x");
+});
+
 runTest("statistics mode computes Pearson correlation tests", () => {
   const result = analyzeStatistics("pearson correlation x: 1, 2, 3, 4, 5, 6; y: 2, 4, 5, 4, 5, 7");
 

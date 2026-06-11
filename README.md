@@ -55,7 +55,7 @@ The frontend currently supports:
 - Linear regression/correlation for coordinate pairs, plus multiple linear
   regression with several predictor lists, residuals, coefficient standard
   errors, t tests, p-values, confidence intervals, R squared, and prediction
-  with fitted-line scatterplots in the demo output
+  intervals with fitted-line scatterplots in the demo output
 - Pearson correlation tests with covariance terms, t p-values, R squared, and
   Fisher-z confidence intervals for linear association, plus a trend-line plot
 - Spearman rank correlation with rank tables, t approximation, p-values, and
@@ -217,9 +217,9 @@ The same idea works for algebra and calculus:
   and `logistic r=0.4 K=100 y0=10 t=8` solve closed-form differential equations.
 - `rk4 dy/dt = t + y y0=1 from t=0 to 1 h=0.25` approximates a first-order
   ODE with fourth-order Runge-Kutta.
-- `regression for (1,2), (2,3), (3,5)` becomes a statistical model tree
+- `regression for (1,2), (2,3), (3,5), (4,8); predict x=5` becomes a statistical model tree
   with coefficient standard errors, t tests, p-values, confidence intervals,
-  and a fitted-line scatterplot.
+  mean-response intervals, prediction intervals, and a fitted-line scatterplot.
 - `pearson correlation x: 1,2,3,4,5,6; y: 2,4,5,4,5,7` tests linear
   association with Pearson `r`, a t p-value, R squared, a Fisher-z interval,
   and a trend-line plot.

@@ -5625,6 +5625,7 @@ function kendallTauB(xValues, yValues) {
 function analyzeRegression(statement) {
   const parsedLists = parseXYLists(statement);
   const pairs = parsedLists ? zipPairs(parsedLists.x, parsedLists.y) : parsePairs(statement);
+  const predictionRequest = parseSimpleRegressionPrediction(statement);
 
   if (pairs.length < 2) {
     throw new Error("Regression needs at least two coordinate pairs, such as (1,2), (2,3), (3,5).");
@@ -5653,6 +5654,19 @@ function analyzeRegression(statement) {
   const inference = Number.isFinite(mse)
     ? regressionCoefficientInference([intercept, slope], normalMatrixInverse, mse, degreesFreedom, ["Intercept", "Slope"])
     : [];
+  const prediction = predictionRequest && Number.isFinite(mse)
+    ? simpleRegressionPredictionInterval({
+        xValue: predictionRequest.x,
+        meanX,
+        sxx,
+        intercept,
+        slope,
+        mse,
+        degreesFreedom,
+        count: xValues.length,
+        level: predictionRequest.level,
+      })
+    : null;
   const wantsCorrelation = statement.toLowerCase().includes("correlation") && !statement.toLowerCase().includes("regression");
 
   const steps = [
@@ -5683,7 +5697,15 @@ function analyzeRegression(statement) {
           detail: "The residual variance and inverse normal-equation matrix give standard errors, t statistics, p-values, and confidence intervals.",
         }]
       : []),
+    ...(prediction
+      ? [{
+          title: "Predict at requested x",
+          expression: `x=${formatNumber(prediction.x)}, yhat=${formatNumber(prediction.yHat)}`,
+          detail: "The mean-response interval estimates the average response; the prediction interval is wider for a new observation.",
+        }]
+      : []),
   ];
+  const percent = prediction ? formatNumber(prediction.level * 100) : "";
 
   return {
     mode: "statistics",
@@ -5697,7 +5719,9 @@ function analyzeRegression(statement) {
     },
     answer: wantsCorrelation
       ? `r = ${formatNumber(r)}`
-      : `y = ${formatNumber(slope)}x ${formatSigned(intercept)}`,
+      : prediction
+        ? `y = ${formatNumber(slope)}x ${formatSigned(intercept)}; prediction = ${formatNumber(prediction.yHat)}`
+        : `y = ${formatNumber(slope)}x ${formatSigned(intercept)}`,
     summary: wantsCorrelation ? "correlation" : "linear regression",
     details: `${pairs.length} paired observations`,
     variables: [],
@@ -5725,6 +5749,16 @@ function analyzeRegression(statement) {
       ["SSE", formatNumber(sse)],
       ["Residual standard error", Number.isFinite(mse) ? formatNumber(Math.sqrt(mse)) : "undefined"],
       ...regressionInferenceArtifacts(inference),
+      ...(prediction
+        ? [
+            ["Prediction x", formatNumber(prediction.x)],
+            ["Predicted y", formatNumber(prediction.yHat)],
+            ["Mean response SE", formatNumber(prediction.meanStandardError)],
+            [`${percent}% mean response CI`, `[${formatNumber(prediction.meanLower)}, ${formatNumber(prediction.meanUpper)}]`],
+            ["Prediction SE", formatNumber(prediction.predictionStandardError)],
+            [`${percent}% prediction interval`, `[${formatNumber(prediction.predictionLower)}, ${formatNumber(prediction.predictionUpper)}]`],
+          ]
+        : []),
     ],
     graph: buildScatterFitGraph(xValues, yValues, slope, intercept, "Least-squares fit"),
   };
@@ -13859,6 +13893,17 @@ function parseXYLists(text) {
   return { x, y };
 }
 
+function parseSimpleRegressionPrediction(text) {
+  const match = text.match(/\bpredict(?:ion)?(?:\s+(?:at|for))?\s*(?:x\s*=\s*)?([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
+  if (!match) {
+    return null;
+  }
+  return {
+    x: Number(match[1]),
+    level: parseConfidenceLevel(text, 0.95),
+  };
+}
+
 function parseMultivariateStatsInput(text) {
   const columns = [];
   const seen = new Set();
@@ -14580,6 +14625,27 @@ function regressionCoefficientInference(coefficients, covarianceBase, mse, degre
       level,
     };
   });
+}
+
+function simpleRegressionPredictionInterval(request) {
+  const leverage = (1 / request.count) + ((request.xValue - request.meanX) ** 2 / request.sxx);
+  const critical = inverseStudentTCdf((1 + request.level) / 2, request.degreesFreedom);
+  const yHat = request.intercept + request.slope * request.xValue;
+  const meanStandardError = Math.sqrt(request.mse * leverage);
+  const predictionStandardError = Math.sqrt(request.mse * (1 + leverage));
+
+  return {
+    x: normalizeNumber(request.xValue),
+    yHat: normalizeNumber(yHat),
+    level: request.level,
+    leverage: normalizeNumber(leverage),
+    meanStandardError: normalizeNumber(meanStandardError),
+    predictionStandardError: normalizeNumber(predictionStandardError),
+    meanLower: normalizeNumber(yHat - critical * meanStandardError),
+    meanUpper: normalizeNumber(yHat + critical * meanStandardError),
+    predictionLower: normalizeNumber(yHat - critical * predictionStandardError),
+    predictionUpper: normalizeNumber(yHat + critical * predictionStandardError),
+  };
 }
 
 function regressionInferenceArtifacts(inference) {
