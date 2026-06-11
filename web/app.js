@@ -259,26 +259,55 @@ function renderGraph(graph) {
   const width = 640;
   const height = 260;
   const pad = 30;
-  const yPad = Math.max(1, (graph.yMax - graph.yMin) * 0.08);
-  const yMin = graph.yMin - yPad;
-  const yMax = graph.yMax + yPad;
-  const mapX = (x) => pad + ((x - graph.xMin) / (graph.xMax - graph.xMin)) * (width - pad * 2);
+  const lineSeries = graph.lines ?? (graph.points ? [{ label: graph.expression, points: graph.points }] : []);
+  const scatterPoints = graph.scatter ?? [];
+  const allPoints = [...lineSeries.flatMap((series) => series.points), ...scatterPoints];
+  const baseXMin = Number.isFinite(graph.xMin) ? graph.xMin : Math.min(...allPoints.map((point) => point.x));
+  const baseXMax = Number.isFinite(graph.xMax) ? graph.xMax : Math.max(...allPoints.map((point) => point.x));
+  const baseYMin = Number.isFinite(graph.yMin) ? graph.yMin : Math.min(...allPoints.map((point) => point.y));
+  const baseYMax = Number.isFinite(graph.yMax) ? graph.yMax : Math.max(...allPoints.map((point) => point.y));
+  const xSpan = baseXMax - baseXMin || 1;
+  const ySpan = baseYMax - baseYMin || 1;
+  const xMin = baseXMin;
+  const xMax = baseXMin === baseXMax ? baseXMax + xSpan : baseXMax;
+  const yPad = Math.max(1, ySpan * 0.08);
+  const yMin = baseYMin - yPad;
+  const yMax = baseYMax + yPad;
+  const mapX = (x) => pad + ((x - xMin) / (xMax - xMin)) * (width - pad * 2);
   const mapY = (y) => height - pad - ((y - yMin) / (yMax - yMin)) * (height - pad * 2);
-  const points = graph.points.map((point) => `${mapX(point.x).toFixed(2)},${mapY(point.y).toFixed(2)}`).join(" ");
+  const lineMarkup = lineSeries
+    .map((series) => {
+      const points = series.points.map((point) => `${mapX(point.x).toFixed(2)},${mapY(point.y).toFixed(2)}`).join(" ");
+      return `<polyline class="graph-line" points="${points}"></polyline>`;
+    })
+    .join("");
+  const scatterMarkup = scatterPoints
+    .map((point) => `<circle class="graph-point" cx="${mapX(point.x).toFixed(2)}" cy="${mapY(point.y).toFixed(2)}" r="4.6"></circle>`)
+    .join("");
+  const legendItems = [
+    ...(scatterPoints.length ? ["Data"] : []),
+    ...lineSeries.map((series) => series.label).filter(Boolean),
+  ];
+  const legend = legendItems.length > 1
+    ? `<div class="graph-legend">${legendItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+    : "";
   const xAxis = yMin <= 0 && yMax >= 0 ? `<line class="graph-axis" x1="${pad}" y1="${mapY(0)}" x2="${width - pad}" y2="${mapY(0)}"></line>` : "";
-  const yAxis = graph.xMin <= 0 && graph.xMax >= 0 ? `<line class="graph-axis" x1="${mapX(0)}" y1="${pad}" x2="${mapX(0)}" y2="${height - pad}"></line>` : "";
+  const yAxis = xMin <= 0 && xMax >= 0 ? `<line class="graph-axis" x1="${mapX(0)}" y1="${pad}" x2="${mapX(0)}" y2="${height - pad}"></line>` : "";
+  const graphLabel = graph.kind === "scatter-fit" ? "Statistical graph" : "Function graph";
 
   return `
-    <div class="graph-card" aria-label="Function graph">
+    <div class="graph-card" aria-label="${graphLabel}">
       <div class="graph-header">
         <strong>${escapeHtml(graph.expression)}</strong>
-        <span>x ${escapeHtml(`[${formatPlotNumber(graph.xMin)}, ${formatPlotNumber(graph.xMax)}]`)}</span>
+        <span>x ${escapeHtml(`[${formatPlotNumber(xMin)}, ${formatPlotNumber(xMax)}]`)}</span>
       </div>
+      ${legend}
       <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(graph.expression)}">
         <rect x="0" y="0" width="${width}" height="${height}"></rect>
         ${xAxis}
         ${yAxis}
-        <polyline class="graph-line" points="${points}"></polyline>
+        ${lineMarkup}
+        ${scatterMarkup}
         <text class="graph-label" x="${pad}" y="20">${escapeHtml(`y ${formatPlotNumber(yMin)} to ${formatPlotNumber(yMax)}`)}</text>
       </svg>
     </div>

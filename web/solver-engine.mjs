@@ -5243,6 +5243,9 @@ function analyzePearsonCorrelation(statement) {
   const sampleCovariance = covarianceNumerator / (request.x.length - 1);
   const r = pearsonCorrelation(request.x, request.y);
   const rSquared = r ** 2;
+  const xVariation = request.x.reduce((sum, value) => sum + (value - xSummary.mean) ** 2, 0);
+  const trendSlope = covarianceNumerator / xVariation;
+  const trendIntercept = ySummary.mean - trendSlope * xSummary.mean;
   const tStatistic = pearsonTStatistic(r, request.x.length);
   const pValue = pValueForPearson(r, request.x.length, request.alternative);
   const interval = fisherCorrelationInterval(r, request.x.length, request.level);
@@ -5330,9 +5333,11 @@ function analyzePearsonCorrelation(statement) {
       ["Alternative", request.alternative],
       ["Fisher z", formatNumber(interval.fisherZ)],
       ["Fisher SE", formatNumber(interval.standardError)],
+      ["Trend line", `y = ${formatNumber(trendSlope)}x ${formatSigned(trendIntercept)}`],
       [`${percent}% Fisher z CI`, `[${formatNumber(interval.lower)}, ${formatNumber(interval.upper)}]`],
       ["Decision", decision],
     ],
+    graph: buildScatterFitGraph(request.x, request.y, trendSlope, trendIntercept, "Pearson trend"),
   };
 }
 
@@ -5578,6 +5583,7 @@ function analyzeRegression(statement) {
       ["Residual standard error", Number.isFinite(mse) ? formatNumber(Math.sqrt(mse)) : "undefined"],
       ...regressionInferenceArtifacts(inference),
     ],
+    graph: buildScatterFitGraph(xValues, yValues, slope, intercept, "Least-squares fit"),
   };
 }
 
@@ -10908,6 +10914,39 @@ function sampleFunction(expression, variable, xMin, xMax, count) {
     }
   }
   return points;
+}
+
+function buildScatterFitGraph(xValues, yValues, slope, intercept, fitLabel) {
+  const rawXMin = Math.min(...xValues);
+  const rawXMax = Math.max(...xValues);
+  const xSpan = rawXMax - rawXMin || 1;
+  const xMin = rawXMin - xSpan * 0.08;
+  const xMax = rawXMax + xSpan * 0.08;
+  const fitPoints = [
+    { x: normalizeNumber(xMin), y: normalizeNumber(intercept + slope * xMin) },
+    { x: normalizeNumber(xMax), y: normalizeNumber(intercept + slope * xMax) },
+  ];
+  const scatter = xValues.map((value, index) => ({
+    x: normalizeNumber(value),
+    y: normalizeNumber(yValues[index]),
+  }));
+  const allYValues = [...yValues, ...fitPoints.map((point) => point.y)];
+
+  return {
+    expression: fitLabel,
+    kind: "scatter-fit",
+    xMin: normalizeNumber(xMin),
+    xMax: normalizeNumber(xMax),
+    yMin: Math.min(...allYValues),
+    yMax: Math.max(...allYValues),
+    scatter,
+    lines: [
+      {
+        label: fitLabel,
+        points: fitPoints,
+      },
+    ],
+  };
 }
 
 function computeFourierSeries(request, expression) {

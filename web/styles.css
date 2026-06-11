@@ -462,6 +462,23 @@ input {
   font-weight: 750;
 }
 
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -2px 0 10px;
+}
+
+.graph-legend span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
 .graph-card svg {
   display: block;
   width: 100%;
@@ -490,6 +507,12 @@ input {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 4;
+}
+
+.graph-point {
+  fill: var(--violet);
+  stroke: #ffffff;
+  stroke-width: 2;
 }
 
 .graph-label {

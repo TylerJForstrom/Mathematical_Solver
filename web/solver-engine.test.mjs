@@ -247,6 +247,9 @@ runTest("statistics mode computes linear regression", () => {
   assert.equal(artifactValue(result, "Slope p"), "0.121038");
   assert.equal(artifactValue(result, "Slope 95% CI"), "[-2.167965, 5.167965]");
   assert.deepEqual(result.table.rows[1], ["2", "3", "3.333333", "-0.333333"]);
+  assert.equal(result.graph.kind, "scatter-fit");
+  assert.deepEqual(result.graph.scatter[0], { x: 1, y: 2 });
+  assert.equal(result.graph.lines[0].label, "Least-squares fit");
 });
 
 runTest("statistics mode computes Pearson correlation tests", () => {
@@ -259,6 +262,10 @@ runTest("statistics mode computes Pearson correlation tests", () => {
   assert.equal(artifactValue(result, "95% Fisher z CI"), "[0.232414, 0.986612]");
   assert.equal(artifactValue(result, "Decision"), "reject H0 at alpha=0.05");
   assert.deepEqual(result.table.rows[3], ["4", "4", "4", "0.5", "-0.5", "-0.25"]);
+  assert.equal(artifactValue(result, "Trend line"), "y = 0.771429x + 1.8");
+  assert.equal(result.graph.kind, "scatter-fit");
+  assert.equal(result.graph.scatter.length, 6);
+  assert.equal(result.graph.lines[0].label, "Pearson trend");
 });
 
 runTest("statistics mode computes Spearman rank correlations", () => {
