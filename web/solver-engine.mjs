@@ -91,6 +91,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       examples: [
         ["ANOVA", "statistics", "anova group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
         ["Welch ANOVA", "statistics", "welch anova group1: 8,9,10; group2: 14,16,17; group3: 20,24,29"],
+        ["MANOVA", "statistics", "manova control: (1,2), (2,1), (1.5,1.8), (2.2,2.5); treatment: (4,5), (5,4.5), (4.2,5.2), (5.1,5.4); followup: (6,7), (7,6.5), (6.5,7.2), (7.1,7.4)"],
         ["Repeated-measures ANOVA", "statistics", "repeated measures anova baseline: 10,12,11,13; week1: 12,13,12,15; week2: 14,15,13,17"],
         ["Two-way ANOVA", "statistics", "two-way anova y: 6,7,8,9,10,11,15,16; A: low,low,low,low,high,high,high,high; B: control,control,treatment,treatment,control,control,treatment,treatment"],
         ["Kruskal", "statistics", "kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
@@ -1188,6 +1189,10 @@ export function analyzeStatistics(statement) {
 
   if (lower.includes("wilcoxon") || lower.includes("signed-rank") || lower.includes("signed rank")) {
     return analyzeWilcoxonSignedRank(statement);
+  }
+
+  if (isManovaQuestion(lower)) {
+    return analyzeManova(statement);
   }
 
   if (isRepeatedMeasuresAnovaQuestion(lower)) {
@@ -4096,6 +4101,146 @@ function analyzeRepeatedMeasuresAnova(statement) {
       ["Pairwise comparisons", formatPairwiseComparisons(pairwiseComparisons)],
       ["Decision", decision],
     ],
+  };
+}
+
+function analyzeManova(statement) {
+  const { groups, alpha } = parseManovaInput(statement);
+  const result = computeOneWayManova(groups);
+  const pValue = chiSquareRightTailApprox(result.bartlettChiSquare, result.degreesFreedom);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const flatValues = groups.flatMap((group) => group.vectors.flat());
+  const tree = {
+    kind: "statsRegression",
+    label: "MANOVA",
+    children: [
+      ...groups.map((group) => statsDatasetNode(group.vectors.flat(), [], group.name.toUpperCase())),
+      statsMetricNode("WILKS", result.wilksLambda),
+      statsMetricNode("X2", result.bartlettChiSquare),
+      statsMetricNode("P", pValue),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `Wilks' lambda = ${formatNumber(result.wilksLambda)}, chi-square = ${formatNumber(result.bartlettChiSquare)}, p = ${formatNumber(pValue)}`,
+    summary: "one-way MANOVA",
+    details: `${result.groupCount} groups, ${result.variableCount} response variables, ${result.observationCount} observations`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(flatValues)),
+    steps: [
+      {
+        title: "Read multivariate groups",
+        expression: groups.map((group) => `${group.name}: n=${group.vectors.length}`).join("; "),
+        detail: "MANOVA compares group mean vectors across multiple response variables at the same time.",
+      },
+      {
+        title: "Compute mean vectors",
+        expression: result.groupMeans.map((vector, index) => `${groups[index].name}=${formatVector(vector)}`).join("; "),
+        detail: "Each group is summarized by a vector of response means rather than a single mean.",
+      },
+      {
+        title: "Build H and E matrices",
+        expression: `H = ${formatMatrix(result.hypothesis)}, E = ${formatMatrix(result.error)}`,
+        detail: "The hypothesis SSCP matrix stores between-group variation; the error SSCP matrix stores within-group variation.",
+      },
+      {
+        title: "Compute multivariate test statistics",
+        expression: `Wilks = ${formatNumber(result.wilksLambda)}, Pillai = ${formatNumber(result.pillaiTrace)}, LH = ${formatNumber(result.lawleyHotellingTrace)}`,
+        detail: "These matrix statistics measure how far apart the group mean vectors are compared with within-group scatter.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `X^2 = ${formatNumber(result.bartlettChiSquare)}, df = ${formatNumber(result.degreesFreedom)}, p = ${formatNumber(pValue)}`,
+        detail: "Bartlett's approximation converts Wilks' lambda into a chi-square test.",
+      },
+      {
+        title: "Compare groups pairwise",
+        expression: result.pairwiseComparisons.length ? formatPairwiseComparisons(result.pairwiseComparisons) : "not enough degrees of freedom",
+        detail: "Pairwise follow-ups use Hotelling's T-squared with Bonferroni-adjusted p-values when the pooled covariance matrix is invertible.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest at least one group has a different multivariate mean vector.",
+      },
+    ],
+    table: {
+      headers: ["Group", "n", "Mean vector"],
+      rows: groups.map((group, index) => [
+        group.name,
+        formatNumber(group.vectors.length),
+        formatVector(result.groupMeans[index]),
+      ]),
+    },
+    artifacts: [
+      ["Grand mean vector", formatVector(result.grandMean)],
+      ["Hypothesis SSCP H", formatMatrix(result.hypothesis)],
+      ["Error SSCP E", formatMatrix(result.error)],
+      ["Wilks' lambda", formatNumber(result.wilksLambda)],
+      ["Bartlett chi-square", formatNumber(result.bartlettChiSquare)],
+      ["Degrees of freedom", formatNumber(result.degreesFreedom)],
+      ["p-value", formatNumber(pValue)],
+      ["Pillai trace", formatNumber(result.pillaiTrace)],
+      ["Lawley-Hotelling trace", formatNumber(result.lawleyHotellingTrace)],
+      ["Pairwise Hotelling T2", result.pairwiseComparisons.length ? formatPairwiseComparisons(result.pairwiseComparisons) : "not available"],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function computeOneWayManova(groups) {
+  const groupCount = groups.length;
+  const variableCount = groups[0].vectors[0].length;
+  const observationCount = groups.reduce((sum, group) => sum + group.vectors.length, 0);
+  const allVectors = groups.flatMap((group) => group.vectors);
+  const grandMean = meanVector(allVectors);
+  const groupMeans = groups.map((group) => meanVector(group.vectors));
+  const hypothesis = zeroMatrix(variableCount, variableCount);
+  const error = zeroMatrix(variableCount, variableCount);
+
+  groups.forEach((group, groupIndex) => {
+    const meanDifference = subtractVectors(groupMeans[groupIndex], grandMean);
+    addMatrixInPlace(hypothesis, scaleMatrix(outerProduct(meanDifference, meanDifference), group.vectors.length));
+
+    group.vectors.forEach((vector) => {
+      const residual = subtractVectors(vector, groupMeans[groupIndex]);
+      addMatrixInPlace(error, outerProduct(residual, residual));
+    });
+  });
+
+  const total = addMatrices(error, hypothesis);
+  const detError = determinant(error);
+  const detTotal = determinant(total);
+  if (!(detError > EPSILON) || !(detTotal > EPSILON)) {
+    throw new Error("MANOVA needs full-rank within-group scatter. Add more varied observations or fewer response variables.");
+  }
+
+  const wilksLambda = normalizeNumber(clampProbability(detError / detTotal));
+  const errorInverse = invertMatrix(error);
+  const totalInverse = invertMatrix(total);
+  const lawleyHotellingTrace = normalizeNumber(traceMatrix(multiplyMatrices(errorInverse, hypothesis)));
+  const pillaiTrace = normalizeNumber(traceMatrix(multiplyMatrices(hypothesis, totalInverse)));
+  const degreesFreedom = variableCount * (groupCount - 1);
+  const correction = observationCount - 1 - (variableCount + groupCount) / 2;
+  const bartlettChiSquare = normalizeNumber(Math.max(0, -correction * Math.log(Math.max(wilksLambda, EPSILON))));
+  const pairwiseComparisons = pairwiseHotellingComparisons(groups);
+
+  return {
+    groupCount,
+    variableCount,
+    observationCount,
+    grandMean: grandMean.map(normalizeNumber),
+    groupMeans: groupMeans.map((vector) => vector.map(normalizeNumber)),
+    hypothesis: hypothesis.map((row) => row.map(normalizeNumber)),
+    error: error.map((row) => row.map(normalizeNumber)),
+    wilksLambda,
+    bartlettChiSquare,
+    degreesFreedom,
+    pillaiTrace,
+    lawleyHotellingTrace,
+    pairwiseComparisons,
   };
 }
 
@@ -9486,6 +9631,50 @@ function transposeMatrix(matrix) {
   return matrix[0].map((_, column) => matrix.map((row) => row[column]));
 }
 
+function zeroMatrix(rowCount, columnCount) {
+  return Array.from({ length: rowCount }, () => Array(columnCount).fill(0));
+}
+
+function addMatrices(left, right) {
+  return left.map((row, rowIndex) =>
+    row.map((value, columnIndex) => value + right[rowIndex][columnIndex]),
+  );
+}
+
+function addMatrixInPlace(target, source) {
+  for (let row = 0; row < target.length; row += 1) {
+    for (let column = 0; column < target[row].length; column += 1) {
+      target[row][column] += source[row][column];
+    }
+  }
+}
+
+function scaleMatrix(matrix, scalar) {
+  return matrix.map((row) => row.map((value) => value * scalar));
+}
+
+function traceMatrix(matrix) {
+  return matrix.reduce((sum, row, index) => sum + row[index], 0);
+}
+
+function meanVector(vectors) {
+  const totals = Array(vectors[0].length).fill(0);
+  vectors.forEach((vector) => {
+    vector.forEach((value, index) => {
+      totals[index] += value;
+    });
+  });
+  return totals.map((total) => total / vectors.length);
+}
+
+function subtractVectors(left, right) {
+  return left.map((value, index) => value - right[index]);
+}
+
+function outerProduct(left, right) {
+  return left.map((leftValue) => right.map((rightValue) => leftValue * rightValue));
+}
+
 function addRidgePenalty(matrix, lambda) {
   return matrix.map((row, rowIndex) =>
     row.map((value, columnIndex) =>
@@ -13765,6 +13954,53 @@ function parsePairedInput(text) {
   throw new Error("Use paired t-test before: 10, 12, 9; after: 11, 14, 10.");
 }
 
+function parseManovaInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const groupText = cleaned
+    .replace(/\bmanova\b/gi, "")
+    .replace(/\bmultivariate\s+analysis\s+of\s+variance\b/gi, "")
+    .replace(/\bone[-\s]?way\b/gi, "");
+  const groups = [...groupText.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)]
+    .map((match) => ({
+      name: match[1],
+      vectors: parseManovaVectors(match[2]),
+    }))
+    .filter((group) => group.vectors.length > 0);
+
+  if (groups.length < 2) {
+    throw new Error("Use MANOVA group1: (1,2), (2,1), (1.5,1.8); group2: (4,5), (5,4.5), (4.2,5.2).");
+  }
+  const variableCount = groups[0].vectors[0].length;
+  if (variableCount < 2) {
+    throw new Error("MANOVA needs at least two response variables per observation.");
+  }
+  for (const group of groups) {
+    if (group.vectors.length < 2) {
+      throw new Error("MANOVA needs at least two vector observations in every group.");
+    }
+    if (group.vectors.some((vector) => vector.length !== variableCount)) {
+      throw new Error("Every MANOVA observation vector must have the same dimension.");
+    }
+  }
+  const observationCount = groups.reduce((sum, group) => sum + group.vectors.length, 0);
+  if (observationCount <= groups.length + variableCount) {
+    throw new Error("MANOVA needs more observations than groups plus response variables.");
+  }
+
+  return { alpha, groups };
+}
+
+function parseManovaVectors(text) {
+  const vectors = [];
+  for (const match of text.matchAll(/[\[(]([^\]\)]+)[\])]/g)) {
+    const values = parseNumbers(match[1]);
+    if (values.length > 0) {
+      vectors.push(values);
+    }
+  }
+  return vectors;
+}
+
 function parseRepeatedMeasuresAnovaInput(text) {
   const { alpha, cleaned } = extractAlpha(text);
   const conditionText = cleaned
@@ -14917,6 +15153,63 @@ function pairwiseWelchComparisons(groupSummaries) {
     }
   }
   return comparisons;
+}
+
+function pairwiseHotellingComparisons(groups) {
+  const comparisons = [];
+  const pairCount = (groups.length * (groups.length - 1)) / 2;
+  const variableCount = groups[0].vectors[0].length;
+  for (let left = 0; left < groups.length; left += 1) {
+    for (let right = left + 1; right < groups.length; right += 1) {
+      const leftGroup = groups[left];
+      const rightGroup = groups[right];
+      const totalCount = leftGroup.vectors.length + rightGroup.vectors.length;
+      const denominatorDf = totalCount - variableCount - 1;
+      if (denominatorDf <= 0) {
+        continue;
+      }
+
+      const leftMean = meanVector(leftGroup.vectors);
+      const rightMean = meanVector(rightGroup.vectors);
+      const meanDifference = subtractVectors(leftMean, rightMean);
+      const pooledScatter = addMatrices(
+        withinGroupScatter(leftGroup.vectors, leftMean),
+        withinGroupScatter(rightGroup.vectors, rightMean),
+      );
+      const pooledCovariance = scaleMatrix(pooledScatter, 1 / (totalCount - 2));
+      let inverseCovariance;
+      try {
+        inverseCovariance = invertMatrix(pooledCovariance);
+      } catch {
+        continue;
+      }
+
+      const solved = multiplyMatrixVector(inverseCovariance, meanDifference);
+      const tSquared = normalizeNumber(
+        (leftGroup.vectors.length * rightGroup.vectors.length / totalCount) *
+        dotProduct(meanDifference, solved),
+      );
+      const fStatistic = normalizeNumber((denominatorDf * tSquared) / (variableCount * (totalCount - 2)));
+      const pValue = fRightTail(fStatistic, variableCount, denominatorDf);
+      comparisons.push({
+        label: `${leftGroup.name} vs ${rightGroup.name}`,
+        statistic: fStatistic,
+        adjustedP: bonferroniAdjust(pValue, pairCount),
+        estimateLabel: "T2",
+        estimate: tSquared,
+      });
+    }
+  }
+  return comparisons;
+}
+
+function withinGroupScatter(vectors, center) {
+  const scatter = zeroMatrix(center.length, center.length);
+  vectors.forEach((vector) => {
+    const residual = subtractVectors(vector, center);
+    addMatrixInPlace(scatter, outerProduct(residual, residual));
+  });
+  return scatter;
 }
 
 function studentTCdf(tStatistic, degreesFreedom) {
@@ -16724,11 +17017,21 @@ function isRocQuestion(lower) {
 }
 
 function isMultivariateStatsQuestion(lower, statement = lower) {
-  return lower.includes("pca") ||
+  return isManovaQuestion(lower) ||
+    lower.includes("pca") ||
     lower.includes("principal component") ||
     lower.includes("covariance") ||
     lower.includes("correlation matrix") ||
     /\bcorr(?:elation)?\s+matrix\b/i.test(statement);
+}
+
+function isManovaQuestion(lower) {
+  return /\bmanova\b/.test(lower) ||
+    lower.includes("multivariate analysis of variance") ||
+    lower.includes("wilks lambda") ||
+    lower.includes("wilks' lambda") ||
+    lower.includes("pillai trace") ||
+    lower.includes("lawley-hotelling");
 }
 
 function isKMeansQuestion(lower) {
@@ -17159,6 +17462,10 @@ function isStatisticsQuestion(lower) {
     "chisquare",
     "paired",
     "matched pairs",
+    "manova",
+    "multivariate analysis of variance",
+    "wilks",
+    "pillai",
     "anova",
     "analysis of variance",
     "mann-whitney",

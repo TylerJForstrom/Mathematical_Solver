@@ -91,8 +91,10 @@ The frontend currently supports:
   rates, likelihood deviance, pseudo R squared, and expected-count prediction
 - Time-series AR(1) forecasting with lag coefficients, autocorrelation,
   residual error, and multi-step predictions
-- Multivariate statistics: covariance matrices, correlation matrices, and
-  2D principal component analysis with explained variance and component directions
+- Multivariate statistics: covariance matrices, correlation matrices,
+  one-way MANOVA with Wilks' lambda, Pillai trace, Lawley-Hotelling trace, and
+  pairwise Hotelling T-squared follow-ups, and 2D principal component analysis
+  with explained variance and component directions
 - K-means clustering for coordinate points with deterministic centroid
   initialization, assignments, cluster sizes, and within-cluster SSE
 - Confidence intervals, bootstrap percentile intervals,
@@ -100,7 +102,7 @@ The frontend currently supports:
   two-sample variance F tests and Levene equal-variance tests,
   one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
-  permutation tests, one-way ANOVA, Welch ANOVA, repeated-measures ANOVA,
+  permutation tests, one-way MANOVA, one-way ANOVA, Welch ANOVA, repeated-measures ANOVA,
   two-way ANOVA with interaction, Mann-Whitney U with exact small-sample p-values when there are no ties,
   Wilcoxon signed-rank with exact
   small-sample p-values when absolute differences are untied,

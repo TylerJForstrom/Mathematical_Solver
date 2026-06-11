@@ -686,6 +686,15 @@ runTest("statistics mode computes Welch one-way ANOVA", () => {
   assert.equal(artifactValue(result, "Pairwise comparisons"), "1 vs 2: diff=-6.666667, p_adj=0.015604; 1 vs 3: diff=-15.333333, p_adj=0.069755; 2 vs 3: diff=-8.666667, p_adj=0.201282");
 });
 
+runTest("statistics mode computes one-way MANOVA", () => {
+  const result = analyzeStatistics("manova control: (1,2), (2,1), (1.5,1.8), (2.2,2.5); treatment: (4,5), (5,4.5), (4.2,5.2), (5.1,5.4); followup: (6,7), (7,6.5), (6.5,7.2), (7.1,7.4)");
+
+  assert.equal(result.summary, "one-way MANOVA");
+  assert.equal(result.answer, "Wilks' lambda = 0.01976, chi-square = 33.354726, p = 0.000002");
+  assert.equal(artifactValue(result, "Pillai trace"), "0.994341");
+  assert.equal(artifactValue(result, "Pairwise Hotelling T2"), "control vs treatment: T2=140.912428, p_adj=0.001011; control vs followup: T2=395.032494, p_adj=0.000082; treatment vs followup: T2=91.420607, p_adj=0.002824");
+});
+
 runTest("statistics mode computes repeated-measures ANOVA", () => {
   const result = analyzeStatistics("repeated measures anova baseline: 10,12,11,13; week1: 12,13,12,15; week2: 14,15,13,17");
 
@@ -1199,6 +1208,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("fisher exact [[1,9],[11,3]]").summary, "Fisher exact test");
   assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
+  assert.equal(analyzeUniversal("manova control: (1,2), (2,1), (1.5,1.8), (2.2,2.5); treatment: (4,5), (5,4.5), (4.2,5.2), (5.1,5.4); followup: (6,7), (7,6.5), (6.5,7.2), (7.1,7.4)").summary, "one-way MANOVA");
   assert.equal(analyzeUniversal("repeated measures anova baseline: 10,12,11,13; week1: 12,13,12,15; week2: 14,15,13,17").summary, "repeated-measures ANOVA");
   assert.equal(analyzeUniversal("two-way anova y: 6,7,8,9,10,11,15,16; A: low,low,low,low,high,high,high,high; B: control,control,treatment,treatment,control,control,treatment,treatment").summary, "two-way ANOVA");
   assert.equal(analyzeUniversal("poisson lambda=3 k=2").summary, "Poisson probability");
