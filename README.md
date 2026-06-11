@@ -124,6 +124,8 @@ The frontend currently supports:
 - Bayesian normal-mean inference with normal-normal conjugate updates,
   posterior credible intervals, posterior-predictive intervals, and posterior
   tail probabilities
+- Bayesian A/B conversion-rate testing with beta-binomial posteriors,
+  posterior win probabilities, expected lift, and approximate lift intervals
 - Bayesian beta-binomial proportion updates with posterior means, credible
   intervals, and posterior predictive probabilities
 - Statistical power and sample-size planning for one-sample means,

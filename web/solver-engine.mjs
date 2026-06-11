@@ -163,6 +163,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
     },
     {
+      title: "Bayesian A/B test",
+      when: () => wantsStats && /\b(bayesian a\/b|bayesian ab|a\/b test|ab test|conversion lift)\b/.test(lower),
+      reason: "I detected a conversion-rate experiment.",
+      needs: [
+        "Conversions and trials for arm A",
+        "Conversions and trials for arm B",
+        "Optional beta prior alpha and beta",
+      ],
+      examples: [
+        ["Bayesian A/B", "statistics", "bayesian ab test A: 120/1000; B: 150/1000; alpha=1 beta=1"],
+      ],
+    },
+    {
       title: "Probability distribution",
       when: () => wantsStats && /\b(binomial|normal|poisson|geometric|hypergeometric|probability|cdf|percentile)\b/.test(lower),
       reason: "I detected a probability distribution question.",
@@ -1167,6 +1180,10 @@ export function analyzeStatistics(statement) {
 
   if (isMarkovQuestion(lower)) {
     return analyzeMarkovChain(statement);
+  }
+
+  if (isBayesianAbQuestion(lower)) {
+    return analyzeBayesianAbTest(statement);
   }
 
   if (isBayesianProportionQuestion(lower)) {
@@ -9331,6 +9348,126 @@ function analyzeBayesianNormalMean(statement) {
   };
 }
 
+function analyzeBayesianAbTest(statement) {
+  const request = parseBayesianAbInput(statement);
+  const armA = bayesianAbPosterior(request.left, request.priorAlpha, request.priorBeta, request.level);
+  const armB = bayesianAbPosterior(request.right, request.priorAlpha, request.priorBeta, request.level);
+  const probabilityRightBetter = betaGreaterProbability(armB.alpha, armB.beta, armA.alpha, armA.beta);
+  const probabilityLeftBetter = 1 - probabilityRightBetter;
+  const meanDifference = armB.mean - armA.mean;
+  const differenceSd = Math.sqrt(armA.variance + armB.variance);
+  const critical = zCriticalForLevel(request.level);
+  const differenceLower = meanDifference - critical * differenceSd;
+  const differenceUpper = meanDifference + critical * differenceSd;
+  const relativeLift = armA.mean > 0 ? meanDifference / armA.mean : Number.NaN;
+  const decision = probabilityRightBetter >= request.decisionThreshold
+    ? `${request.right.name} likely better`
+    : probabilityLeftBetter >= request.decisionThreshold
+      ? `${request.left.name} likely better`
+      : "no clear winner";
+  const percent = formatNumber(request.level * 100);
+  const tree = {
+    kind: "statsDistribution",
+    label: "BAYES-AB",
+    children: [
+      statsMetricNode(`${request.left.name} mean`, armA.mean),
+      statsMetricNode(`${request.right.name} mean`, armB.mean),
+      statsMetricNode("P(B>A)", probabilityRightBetter),
+      statsMetricNode("lift", relativeLift),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `P(${request.right.name} > ${request.left.name}) = ${formatNumber(probabilityRightBetter)}, expected lift = ${formatPercent(relativeLift)}`,
+    summary: "Bayesian A/B test",
+    details: "Beta-binomial posterior comparison for two conversion rates",
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read A/B conversion data",
+        expression: `${request.left.name}: ${formatNumber(request.left.successes)}/${formatNumber(request.left.trials)}; ${request.right.name}: ${formatNumber(request.right.successes)}/${formatNumber(request.right.trials)}`,
+        detail: "Each arm is modeled as a binomial conversion rate with a beta prior.",
+      },
+      {
+        title: "Update beta posteriors",
+        expression: `${request.left.name}: Beta(${formatNumber(armA.alpha)}, ${formatNumber(armA.beta)}); ${request.right.name}: Beta(${formatNumber(armB.alpha)}, ${formatNumber(armB.beta)})`,
+        detail: "Successes add to alpha; non-conversions add to beta.",
+      },
+      {
+        title: "Compare posterior rates",
+        expression: `P(${request.right.name} > ${request.left.name}) = ${formatNumber(probabilityRightBetter)}`,
+        detail: "The solver integrates one beta posterior against the other arm's beta CDF.",
+      },
+      {
+        title: "Estimate lift",
+        expression: `difference = ${formatNumber(meanDifference)}, lift = ${formatPercent(relativeLift)}`,
+        detail: "Expected lift compares posterior mean conversion rates.",
+      },
+      {
+        title: "Build difference interval",
+        expression: `${percent}% approx interval = [${formatNumber(differenceLower)}, ${formatNumber(differenceUpper)}]`,
+        detail: "The difference interval uses a normal approximation from independent beta posterior variances.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: `A winner is called only when posterior probability exceeds ${formatNumber(request.decisionThreshold)}.`,
+      },
+    ],
+    table: {
+      headers: ["Arm", "Conversions", "Trials", "Posterior", "Mean", `${percent}% credible interval`],
+      rows: [
+        [request.left.name, formatNumber(request.left.successes), formatNumber(request.left.trials), `Beta(${formatNumber(armA.alpha)}, ${formatNumber(armA.beta)})`, formatNumber(armA.mean), `[${formatNumber(armA.lower)}, ${formatNumber(armA.upper)}]`],
+        [request.right.name, formatNumber(request.right.successes), formatNumber(request.right.trials), `Beta(${formatNumber(armB.alpha)}, ${formatNumber(armB.beta)})`, formatNumber(armB.mean), `[${formatNumber(armB.lower)}, ${formatNumber(armB.upper)}]`],
+      ],
+    },
+    artifacts: [
+      [`${request.left.name} posterior mean`, formatNumber(armA.mean)],
+      [`${request.right.name} posterior mean`, formatNumber(armB.mean)],
+      [`P(${request.right.name} > ${request.left.name})`, formatNumber(probabilityRightBetter)],
+      [`P(${request.left.name} > ${request.right.name})`, formatNumber(probabilityLeftBetter)],
+      ["Expected absolute lift", formatNumber(meanDifference)],
+      ["Expected relative lift", formatPercent(relativeLift)],
+      [`${percent}% difference interval`, `[${formatNumber(differenceLower)}, ${formatNumber(differenceUpper)}]`],
+      ["Decision threshold", formatNumber(request.decisionThreshold)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function bayesianAbPosterior(arm, priorAlpha, priorBeta, level) {
+  const alpha = priorAlpha + arm.successes;
+  const beta = priorBeta + arm.trials - arm.successes;
+  const meanValue = alpha / (alpha + beta);
+  const variance = (alpha * beta) / (((alpha + beta) ** 2) * (alpha + beta + 1));
+  const lowerTail = (1 - level) / 2;
+  return {
+    alpha,
+    beta,
+    mean: normalizeNumber(meanValue),
+    variance,
+    lower: normalizeNumber(inverseBetaCdf(lowerTail, alpha, beta)),
+    upper: normalizeNumber(inverseBetaCdf(1 - lowerTail, alpha, beta)),
+  };
+}
+
+function betaGreaterProbability(alphaRight, betaRight, alphaLeft, betaLeft) {
+  const epsilon = 1e-6;
+  const evaluator = (value) =>
+    betaPdf(value, alphaRight, betaRight) * regularizedBeta(value, alphaLeft, betaLeft);
+  return clampProbability(approximateDefiniteIntegral(evaluator, epsilon, 1 - epsilon, 800, "simpson").value);
+}
+
+function betaPdf(value, alpha, beta) {
+  if (!(value > 0 && value < 1)) {
+    return 0;
+  }
+  return Math.exp((alpha - 1) * Math.log(value) + (beta - 1) * Math.log(1 - value) - logBeta(alpha, beta));
+}
+
 function analyzeBayesianProportion(statement) {
   const request = parseBayesianProportionInput(statement);
   const posteriorAlpha = request.priorAlpha + request.successes;
@@ -17196,6 +17333,89 @@ function parseBayesInput(text) {
   return { prior, sensitivity, falsePositiveRate, specificity };
 }
 
+function parseBayesianAbInput(text) {
+  const priorAlpha = readNamedNumber(text, ["priorAlpha", "prioralpha", "alpha0", "alpha"], 1);
+  const priorBeta = readNamedNumber(text, ["priorBeta", "priorbeta", "beta0", "beta"], 1);
+  const decisionThreshold = readNamedNumber(text, ["decisionThreshold", "decisionthreshold", "probThreshold", "probthreshold"], 0.95);
+  const level = parseCredibleLevel(text, 0.95);
+  const left = parseBayesianAbArm(text, ["a", "control", "left"], "A");
+  const right = parseBayesianAbArm(text, ["b", "variant", "treatment", "right"], "B");
+
+  if (!(priorAlpha > 0) || !(priorBeta > 0)) {
+    throw new Error("Bayesian A/B test prior alpha and beta must be positive.");
+  }
+  if (!(decisionThreshold > 0.5 && decisionThreshold < 1)) {
+    throw new Error("Bayesian A/B decision threshold must be between 0.5 and 1.");
+  }
+  validateBayesianAbArm(left);
+  validateBayesianAbArm(right);
+
+  return {
+    left,
+    right,
+    priorAlpha,
+    priorBeta,
+    decisionThreshold,
+    level,
+  };
+}
+
+function parseBayesianAbArm(text, labels, fallbackName) {
+  for (const label of labels) {
+    const chunkMatch = text.match(new RegExp(`\\b${label}\\s*[:=]\\s*([^;]+)`, "i"));
+    if (!chunkMatch) continue;
+    const direct = chunkMatch[1].match(/([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s*(?:\/|of|out\s+of)\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/i);
+    const successes = direct
+      ? Number(direct[1])
+      : readNamedNumber(chunkMatch[1], ["successes", "success", "conversions", "converted", "x"], Number.NaN);
+    const trials = direct
+      ? Number(direct[2])
+      : readNamedNumber(chunkMatch[1], ["n", "trials", "total", "visitors", "users"], Number.NaN);
+    return {
+      name: bayesianAbDisplayName(label, fallbackName),
+      successes,
+      trials,
+    };
+  }
+
+  const suffix = fallbackName.toLowerCase();
+  const successes = readNamedNumber(text, [
+    `successes${suffix}`,
+    `success${suffix}`,
+    `conversions${suffix}`,
+    `converted${suffix}`,
+    `x${suffix}`,
+  ], Number.NaN);
+  const trials = readNamedNumber(text, [
+    `n${suffix}`,
+    `trials${suffix}`,
+    `total${suffix}`,
+    `visitors${suffix}`,
+    `users${suffix}`,
+  ], Number.NaN);
+
+  return {
+    name: fallbackName,
+    successes,
+    trials,
+  };
+}
+
+function bayesianAbDisplayName(label, fallbackName) {
+  if (label === "a") return "A";
+  if (label === "b") return "B";
+  return label || fallbackName;
+}
+
+function validateBayesianAbArm(arm) {
+  if (!Number.isSafeInteger(arm.successes) || !Number.isSafeInteger(arm.trials)) {
+    throw new Error("Bayesian A/B test arms need integer conversions and trials.");
+  }
+  if (arm.trials <= 0 || arm.successes < 0 || arm.successes > arm.trials) {
+    throw new Error("Bayesian A/B test needs 0 <= conversions <= trials and trials > 0.");
+  }
+}
+
 function parseBayesianNormalInput(text) {
   const dataMatch = text.match(/\b(?:data|sample|values|observations?)\s*[:=]\s*([^;]+)/i);
   const values = dataMatch
@@ -17666,6 +17886,17 @@ function isBayesianProportionQuestion(lower) {
     lower.includes("beta binomial") ||
     lower.includes("bayesian proportion") ||
     (lower.includes("posterior") && lower.includes("success"));
+}
+
+function isBayesianAbQuestion(lower) {
+  return lower.includes("bayesian a/b") ||
+    lower.includes("bayesian ab") ||
+    lower.includes("bayesian split") ||
+    lower.includes("bayesian conversion") ||
+    lower.includes("bayesian experiment") ||
+    lower.includes("ab test") ||
+    lower.includes("a/b test") ||
+    lower.includes("conversion lift");
 }
 
 function isBayesianNormalQuestion(lower) {
@@ -18147,6 +18378,7 @@ function isStatisticsQuestion(lower) {
     isSpearmanQuestion(lower) ||
     isKendallQuestion(lower) ||
     isMultipleTestingQuestion(lower) ||
+    isBayesianAbQuestion(lower) ||
     isQdaQuestion(lower) ||
     isLdaQuestion(lower)
   ) {
@@ -18275,6 +18507,11 @@ function isStatisticsQuestion(lower) {
     "beta-binomial",
     "beta binomial",
     "bayesian proportion",
+    "bayesian ab",
+    "bayesian a/b",
+    "ab test",
+    "a/b test",
+    "conversion lift",
     "bayesian normal",
     "bayesian mean",
     "normal-normal",
@@ -20673,6 +20910,10 @@ function formatNumber(value) {
     return String(normalized);
   }
   return String(Number(normalized.toFixed(6))).replace(/\.0+$/, "");
+}
+
+function formatPercent(value) {
+  return Number.isFinite(value) ? `${formatNumber(value * 100)}%` : "undefined";
 }
 
 function formatStatisticValue(value) {
