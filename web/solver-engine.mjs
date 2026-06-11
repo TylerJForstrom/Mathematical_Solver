@@ -91,6 +91,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       examples: [
         ["ANOVA", "statistics", "anova group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
         ["Welch ANOVA", "statistics", "welch anova group1: 8,9,10; group2: 14,16,17; group3: 20,24,29"],
+        ["Two-way ANOVA", "statistics", "two-way anova y: 6,7,8,9,10,11,15,16; A: low,low,low,low,high,high,high,high; B: control,control,treatment,treatment,control,control,treatment,treatment"],
         ["Kruskal", "statistics", "kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
       ],
     },
@@ -1186,6 +1187,10 @@ export function analyzeStatistics(statement) {
 
   if (lower.includes("wilcoxon") || lower.includes("signed-rank") || lower.includes("signed rank")) {
     return analyzeWilcoxonSignedRank(statement);
+  }
+
+  if (isTwoWayAnovaQuestion(lower)) {
+    return analyzeTwoWayAnova(statement);
   }
 
   if ((lower.includes("welch") || lower.includes("unequal variance")) &&
@@ -4193,6 +4198,193 @@ function analyzeWelchAnova(statement) {
       ["Decision", decision],
     ],
   };
+}
+
+function analyzeTwoWayAnova(statement) {
+  const request = parseTwoWayAnovaInput(statement);
+  const observations = request.y.map((value, index) => ({
+    value,
+    a: request.factorA.values[index],
+    b: request.factorB.values[index],
+  }));
+  const aLevels = uniqueOrdered(request.factorA.values);
+  const bLevels = uniqueOrdered(request.factorB.values);
+  if (aLevels.length < 2 || bLevels.length < 2) {
+    throw new Error("Two-way ANOVA needs at least two levels for each factor.");
+  }
+
+  const cells = new Map();
+  for (const levelA of aLevels) {
+    for (const levelB of bLevels) {
+      cells.set(twoWayCellKey(levelA, levelB), []);
+    }
+  }
+  for (const observation of observations) {
+    cells.get(twoWayCellKey(observation.a, observation.b)).push(observation.value);
+  }
+
+  const cellCounts = [...cells.values()].map((values) => values.length);
+  const replicateCount = cellCounts[0];
+  if (replicateCount < 2 || cellCounts.some((count) => count !== replicateCount)) {
+    throw new Error("Two-way ANOVA currently needs a balanced design with at least two observations in every A x B cell.");
+  }
+
+  const grandMean = mean(request.y);
+  const aMeans = new Map(aLevels.map((level) => [
+    level,
+    mean(observations.filter((observation) => observation.a === level).map((observation) => observation.value)),
+  ]));
+  const bMeans = new Map(bLevels.map((level) => [
+    level,
+    mean(observations.filter((observation) => observation.b === level).map((observation) => observation.value)),
+  ]));
+  const cellMeans = new Map([...cells.entries()].map(([key, values]) => [key, mean(values)]));
+
+  const ssA = aLevels.reduce((sum, level) =>
+    sum + bLevels.length * replicateCount * (aMeans.get(level) - grandMean) ** 2,
+  0);
+  const ssB = bLevels.reduce((sum, level) =>
+    sum + aLevels.length * replicateCount * (bMeans.get(level) - grandMean) ** 2,
+  0);
+  const ssInteraction = aLevels.reduce((sum, levelA) =>
+    sum + bLevels.reduce((inner, levelB) => {
+      const key = twoWayCellKey(levelA, levelB);
+      const interactionEffect = cellMeans.get(key) - aMeans.get(levelA) - bMeans.get(levelB) + grandMean;
+      return inner + replicateCount * interactionEffect ** 2;
+    }, 0),
+  0);
+  const ssError = observations.reduce((sum, observation) =>
+    sum + (observation.value - cellMeans.get(twoWayCellKey(observation.a, observation.b))) ** 2,
+  0);
+  if (!(ssError > 0)) {
+    throw new Error("Two-way ANOVA needs within-cell variation to estimate residual error.");
+  }
+  const ssTotal = request.y.reduce((sum, value) => sum + (value - grandMean) ** 2, 0);
+
+  const dfA = aLevels.length - 1;
+  const dfB = bLevels.length - 1;
+  const dfInteraction = dfA * dfB;
+  const dfError = aLevels.length * bLevels.length * (replicateCount - 1);
+  const dfTotal = request.y.length - 1;
+  const msError = ssError / dfError;
+  const effects = [
+    twoWayAnovaEffect(request.factorA.name, ssA, dfA, msError, ssError),
+    twoWayAnovaEffect(request.factorB.name, ssB, dfB, msError, ssError),
+    twoWayAnovaEffect(`${request.factorA.name} x ${request.factorB.name}`, ssInteraction, dfInteraction, msError, ssError),
+  ];
+  const answer = effects
+    .map((effect) => `${effect.name}: F = ${formatNumber(effect.fStatistic)}, p = ${formatNumber(effect.pValue)}`)
+    .join("; ");
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(request.y, [
+      statsMetricNode("A", effects[0].fStatistic),
+      statsMetricNode("B", effects[1].fStatistic),
+      statsMetricNode("AxB", effects[2].fStatistic),
+      statsMetricNode("ERR", msError),
+    ], "2WAY"),
+    answer,
+    summary: "two-way ANOVA",
+    details: `${aLevels.length} x ${bLevels.length} balanced factorial design, ${replicateCount} replicates per cell`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.y)),
+    steps: [
+      {
+        title: "Read factorial design",
+        expression: `${request.factorA.name}: ${aLevels.join(", ")}; ${request.factorB.name}: ${bLevels.join(", ")}`,
+        detail: "Two-way ANOVA compares two categorical factors and their interaction.",
+      },
+      {
+        title: "Compute cell means",
+        expression: formatTwoWayCellMeans(aLevels, bLevels, cellMeans),
+        detail: "Each A x B cell mean is compared with the factor means and grand mean.",
+      },
+      {
+        title: "Partition variation",
+        expression: `SSA = ${formatNumber(ssA)}, SSB = ${formatNumber(ssB)}, SSAB = ${formatNumber(ssInteraction)}, SSE = ${formatNumber(ssError)}`,
+        detail: "Total variation is split into factor A, factor B, interaction, and residual error.",
+      },
+      {
+        title: "Compute F statistics",
+        expression: answer,
+        detail: "Each effect mean square is divided by the residual mean square.",
+      },
+      {
+        title: "Evaluate p-values",
+        expression: effects.map((effect) => `${effect.name}: p=${formatNumber(effect.pValue)}`).join("; "),
+        detail: "The solver evaluates the F distribution for each effect.",
+      },
+    ],
+    table: {
+      headers: ["Source", "SS", "df", "MS", "F", "p", "Partial eta^2"],
+      rows: [
+        ...effects.map((effect) => [
+          effect.name,
+          formatNumber(effect.sumSquares),
+          formatNumber(effect.degreesFreedom),
+          formatNumber(effect.meanSquare),
+          formatNumber(effect.fStatistic),
+          formatNumber(effect.pValue),
+          formatNumber(effect.partialEtaSquared),
+        ]),
+        ["Error", formatNumber(ssError), formatNumber(dfError), formatNumber(msError), "", "", ""],
+        ["Total", formatNumber(ssTotal), formatNumber(dfTotal), "", "", "", ""],
+      ],
+    },
+    artifacts: [
+      ["Grand mean", formatNumber(grandMean)],
+      ["Replicates per cell", formatNumber(replicateCount)],
+      [`${request.factorA.name} F`, formatNumber(effects[0].fStatistic)],
+      [`${request.factorA.name} p-value`, formatNumber(effects[0].pValue)],
+      [`${request.factorB.name} F`, formatNumber(effects[1].fStatistic)],
+      [`${request.factorB.name} p-value`, formatNumber(effects[1].pValue)],
+      ["Interaction F", formatNumber(effects[2].fStatistic)],
+      ["Interaction p-value", formatNumber(effects[2].pValue)],
+      ["Residual MS", formatNumber(msError)],
+    ],
+  };
+}
+
+function twoWayAnovaEffect(name, sumSquares, degreesFreedom, msError, ssError) {
+  const meanSquare = sumSquares / degreesFreedom;
+  const fStatistic = meanSquare / msError;
+  const pValue = fRightTail(fStatistic, degreesFreedom, ssError / msError);
+  return {
+    name,
+    sumSquares,
+    degreesFreedom,
+    meanSquare,
+    fStatistic,
+    pValue,
+    partialEtaSquared: sumSquares / (sumSquares + ssError),
+  };
+}
+
+function twoWayCellKey(levelA, levelB) {
+  return `${levelA}\u0000${levelB}`;
+}
+
+function formatTwoWayCellMeans(aLevels, bLevels, cellMeans) {
+  return aLevels
+    .flatMap((levelA) =>
+      bLevels.map((levelB) =>
+        `${levelA}/${levelB}=${formatNumber(cellMeans.get(twoWayCellKey(levelA, levelB)))}`,
+      ),
+    )
+    .join("; ");
+}
+
+function uniqueOrdered(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    if (!seen.has(value)) {
+      seen.add(value);
+      result.push(value);
+    }
+  }
+  return result;
 }
 
 function analyzeMannWhitney(statement) {
@@ -13488,6 +13680,54 @@ function parseAnovaInput(text) {
   return { alpha, groups };
 }
 
+function parseTwoWayAnovaInput(text) {
+  const { cleaned } = extractAlpha(text);
+  const lists = new Map();
+  for (const match of cleaned.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    lists.set(match[1].toLowerCase(), {
+      name: twoWayFactorDisplayName(match[1]),
+      raw: match[2],
+    });
+  }
+
+  const response = lists.get("y") ?? lists.get("response") ?? lists.get("outcome");
+  const factorA = lists.get("a") ?? lists.get("factora") ?? lists.get("factor1");
+  const factorB = lists.get("b") ?? lists.get("factorb") ?? lists.get("factor2");
+  if (!response || !factorA || !factorB) {
+    throw new Error("Use two-way ANOVA y: 6,7,...; A: low,low,...; B: control,treatment,...");
+  }
+
+  const y = parseNumbers(response.raw);
+  const valuesA = parseCategoryList(factorA.raw);
+  const valuesB = parseCategoryList(factorB.raw);
+  if (y.length < 8 || valuesA.length !== y.length || valuesB.length !== y.length) {
+    throw new Error("Two-way ANOVA needs y, A, and B lists with the same length and at least eight observations.");
+  }
+
+  return {
+    y,
+    factorA: { name: factorA.name, values: valuesA },
+    factorB: { name: factorB.name, values: valuesB },
+  };
+}
+
+function twoWayFactorDisplayName(label) {
+  const lower = label.toLowerCase();
+  if (lower === "factora" || lower === "factor1") return "A";
+  if (lower === "factorb" || lower === "factor2") return "B";
+  return label;
+}
+
+function parseCategoryList(text) {
+  const cleaned = text.trim();
+  const parts = cleaned.includes(",")
+    ? cleaned.split(",")
+    : cleaned.split(/\s+/);
+  return parts
+    .map((part) => part.trim().replace(/^['"]|['"]$/g, ""))
+    .filter(Boolean);
+}
+
 function parseEqualVarianceInput(text) {
   const { alpha, cleaned } = extractAlpha(text);
   const lower = cleaned.toLowerCase();
@@ -16771,6 +17011,14 @@ function isStatisticsQuestion(lower) {
     "kruskal",
     "wallis",
   ].some((word) => lower.includes(word)) || parsePairs(lower).length >= 2;
+}
+
+function isTwoWayAnovaQuestion(lower) {
+  return (
+    /\btwo[-\s]?way\b/.test(lower) ||
+    /\btwo[-\s]?factor\b/.test(lower) ||
+    lower.includes("factorial anova")
+  ) && (lower.includes("anova") || lower.includes("analysis of variance"));
 }
 
 function isLogicQuestion(question) {

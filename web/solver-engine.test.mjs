@@ -686,6 +686,15 @@ runTest("statistics mode computes Welch one-way ANOVA", () => {
   assert.equal(artifactValue(result, "Pairwise comparisons"), "1 vs 2: diff=-6.666667, p_adj=0.015604; 1 vs 3: diff=-15.333333, p_adj=0.069755; 2 vs 3: diff=-8.666667, p_adj=0.201282");
 });
 
+runTest("statistics mode computes two-way ANOVA", () => {
+  const result = analyzeStatistics("two-way anova y: 6,7,8,9,10,11,15,16; A: low,low,low,low,high,high,high,high; B: control,control,treatment,treatment,control,control,treatment,treatment");
+
+  assert.equal(result.summary, "two-way ANOVA");
+  assert.equal(result.answer, "A: F = 121, p = 0.000388; B: F = 49, p = 0.002192; A x B: F = 9, p = 0.039942");
+  assert.equal(artifactValue(result, "Interaction p-value"), "0.039942");
+  assert.deepEqual(result.table.rows[0], ["A", "60.5", "1", "60.5", "121", "0.000388", "0.968"]);
+});
+
 runTest("statistics mode computes Poisson probabilities", () => {
   const result = analyzeStatistics("poisson lambda=3 at most k=2");
 
@@ -1180,6 +1189,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("fisher exact [[1,9],[11,3]]").summary, "Fisher exact test");
   assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
+  assert.equal(analyzeUniversal("two-way anova y: 6,7,8,9,10,11,15,16; A: low,low,low,low,high,high,high,high; B: control,control,treatment,treatment,control,control,treatment,treatment").summary, "two-way ANOVA");
   assert.equal(analyzeUniversal("poisson lambda=3 k=2").summary, "Poisson probability");
   assert.equal(analyzeUniversal("geometric p=0.25 k=3").summary, "geometric probability");
   assert.equal(analyzeUniversal("exponential lambda=2 x=1").summary, "exponential probability");

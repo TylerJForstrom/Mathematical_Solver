@@ -100,8 +100,9 @@ The frontend currently supports:
   two-sample variance F tests and Levene equal-variance tests,
   one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
-  permutation tests, one-way ANOVA, Welch ANOVA, Mann-Whitney U with exact
-  small-sample p-values when there are no ties, Wilcoxon signed-rank with exact
+  permutation tests, one-way ANOVA, Welch ANOVA, two-way ANOVA with interaction,
+  Mann-Whitney U with exact small-sample p-values when there are no ties,
+  Wilcoxon signed-rank with exact
   small-sample p-values when absolute differences are untied,
   Kruskal-Wallis, chi-square goodness-of-fit, chi-square independence tests
   for contingency tables, Fisher exact tests for 2x2 tables, binomial
@@ -283,6 +284,8 @@ The same idea works for algebra and calculus:
   samples.
 - `ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10` reports F,
   p-value, eta squared, omega squared, and pairwise comparisons.
+- `two-way anova y: 6,7,8,9,10,11,15,16; A: low,low,low,low,high,high,high,high; B: control,control,treatment,treatment,control,control,treatment,treatment`
+  partitions a balanced factorial design into A, B, interaction, and error terms.
 - `hypergeometric population=50 successes=5 draws=10 k=2` models sampling
   without replacement and returns `P(X = 2) = 0.20984`.
 - `inverse normal p=0.975 mean=0 sd=1` inverts the normal CDF and returns
