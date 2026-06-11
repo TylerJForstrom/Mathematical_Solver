@@ -282,6 +282,58 @@ input {
   font-size: 0.92rem;
 }
 
+.error-box > strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.input-assist {
+  margin-top: 10px;
+  border: 1px solid rgba(184, 50, 60, 0.2);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+  color: var(--ink);
+}
+
+.input-assist span {
+  display: block;
+  color: var(--red);
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.input-assist p {
+  margin-top: 5px;
+  color: var(--muted);
+}
+
+.input-assist ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.input-assist li + li {
+  margin-top: 3px;
+}
+
+.assist-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.assist-examples button {
+  min-height: 32px;
+  border-color: rgba(15, 139, 141, 0.24);
+  padding: 5px 9px;
+  color: var(--teal-dark);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .answer-band {
   display: flex;
   align-items: center;

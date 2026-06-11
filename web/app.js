@@ -9,6 +9,7 @@ import {
   nodeChildren,
   nodeLabel,
   nodeTone,
+  suggestProblemHelp,
 } from "./solver-engine.mjs";
 
 const MODE_CONFIG = {
@@ -108,10 +109,42 @@ function update() {
   try {
     const analysis = runAnalysis();
     elements.errorBox.hidden = true;
+    elements.errorBox.innerHTML = "";
     renderAnalysis(analysis);
   } catch (error) {
-    elements.errorBox.hidden = false;
-    elements.errorBox.textContent = error.message;
+    renderError(error);
+  }
+}
+
+function renderError(error) {
+  const help = suggestProblemHelp(elements.statementInput.value.trim(), state.mode, error.message);
+  elements.errorBox.hidden = false;
+  elements.errorBox.innerHTML = `
+    <strong>${escapeHtml(error.message)}</strong>
+    <div class="input-assist">
+      <span>Detected: ${escapeHtml(help.title)}</span>
+      <p>${escapeHtml(help.reason)}</p>
+      <ul>
+        ${help.needs.map((need) => `<li>${escapeHtml(need)}</li>`).join("")}
+      </ul>
+      <div class="assist-examples">
+        ${help.examples.map(([label, mode, statement]) => `
+          <button type="button" data-assist-mode="${escapeHtml(mode)}" data-assist-sample="${escapeHtml(statement)}">
+            ${escapeHtml(label)}
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+
+  for (const button of elements.errorBox.querySelectorAll("[data-assist-sample]")) {
+    button.addEventListener("click", () => {
+      const mode = button.dataset.assistMode;
+      setMode(mode, false);
+      elements.statementInput.value = button.dataset.assistSample;
+      elements.compareInput.value = MODE_CONFIG[mode].compare;
+      update();
+    });
   }
 }
 

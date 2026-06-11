@@ -49,6 +49,8 @@ The frontend currently supports:
   growth, and separable power ODEs
 - Numerical ODE solvers: Euler's method and fourth-order Runge-Kutta for
   first-order differential equations
+- Smart input assistance for incomplete math/statistics questions, including
+  detected problem type, missing data requirements, and clickable examples
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
 - Linear regression/correlation for coordinate pairs, plus multiple linear
   regression with several predictor lists, residuals, coefficient standard
@@ -349,6 +351,7 @@ The demo includes:
 
 - Six simple modes: Ask, Equation, Simplify, Derivative, Stats, and Logic
 - A single problem input with example buttons
+- Smart input hints when a question is incomplete or missing required data
 - A clear answer area
 - Expression-tree visualization
 - Truth tables for logic mode

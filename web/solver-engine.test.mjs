@@ -28,6 +28,7 @@ import {
   analyzeTaylor,
   analyzeUniversal,
   analyzeVector,
+  suggestProblemHelp,
 } from "./solver-engine.mjs";
 
 function runTest(name, callback) {
@@ -44,6 +45,19 @@ runTest("logic mode classifies tautologies", () => {
 
   assert.equal(result.summary, "tautology");
   assert.equal(result.answer, "true");
+});
+
+runTest("input assistant suggests structured problem formats", () => {
+  const twoSample = suggestProblemHelp("compare two groups with a t-test", "statistics", "Two-sample tests need group1 and group2.");
+  assert.equal(twoSample.title, "Two-sample t-test");
+  assert.equal(twoSample.examples[0][2], "two-sample t-test group1: 10, 12, 9; group2: 8, 7, 11");
+
+  const correlation = suggestProblemHelp("pearson correlation", "statistics", "Pearson correlation needs x and y lists.");
+  assert.equal(correlation.title, "Correlation or regression");
+  assert.ok(correlation.needs.some((need) => need.includes("x and y")));
+
+  const matrix = suggestProblemHelp("inverse matrix", "ask", "Matrix mode needs a matrix.");
+  assert.equal(matrix.title, "Matrix or system solver");
 });
 
 runTest("simplify mode combines like terms", () => {

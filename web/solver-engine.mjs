@@ -33,6 +33,149 @@ const LOGIC_LABELS = {
 
 const MATH_FUNCTIONS = new Set(["sin", "cos", "tan", "exp", "ln", "sqrt"]);
 
+export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
+  const lower = statement.toLowerCase();
+  const errorLower = errorMessage.toLowerCase();
+  const activeMode = mode.toLowerCase();
+  const wantsStats = activeMode === "statistics" ||
+    /\b(mean|median|variance|standard deviation|regression|correlation|pearson|spearman|kendall|test|p-value|anova|chi-square|fisher|proportion|probability|binomial|normal|poisson|sample|group)\b/.test(lower);
+
+  const suggestions = [
+    {
+      title: "Two-sample t-test",
+      when: () => wantsStats && /\b(two[-\s]?sample|welch|compare|difference)\b/.test(lower),
+      reason: "I detected a comparison between two numeric samples.",
+      needs: [
+        "A first sample labeled group1",
+        "A second sample labeled group2",
+        "Optional alpha or one-sided direction",
+      ],
+      examples: [
+        ["Welch test", "statistics", "two-sample t-test group1: 10, 12, 9; group2: 8, 7, 11"],
+      ],
+    },
+    {
+      title: "Paired test",
+      when: () => wantsStats && /\b(paired|matched|before|after|wilcoxon)\b/.test(lower),
+      reason: "I detected paired or before/after data.",
+      needs: [
+        "Before values and after values with the same length",
+        "Use paired t-test for numeric differences or Wilcoxon for signed ranks",
+      ],
+      examples: [
+        ["Paired t-test", "statistics", "paired t-test before: 10, 12, 9, 11; after: 11, 14, 10, 13"],
+        ["Wilcoxon", "statistics", "wilcoxon signed-rank before: 10, 12, 9, 11; after: 11, 14, 10, 13"],
+      ],
+    },
+    {
+      title: "Correlation or regression",
+      when: () => wantsStats && (/\b(correlation|pearson|spearman|kendall|linear association|regression)\b/.test(lower) || errorLower.includes("coordinate pairs")),
+      reason: "I detected paired x/y data or a linear association question.",
+      needs: [
+        "Two equal-length lists labeled x and y",
+        "Or coordinate pairs like (1,2), (2,3), (3,5)",
+      ],
+      examples: [
+        ["Regression", "statistics", "regression for (1,2), (2,3), (3,5), (4,8)"],
+        ["Pearson", "statistics", "pearson correlation x: 1, 2, 3, 4, 5, 6; y: 2, 4, 5, 4, 5, 7"],
+      ],
+    },
+    {
+      title: "ANOVA or grouped rank test",
+      when: () => wantsStats && /\b(anova|analysis of variance|kruskal|groups?)\b/.test(lower),
+      reason: "I detected a comparison across three or more groups.",
+      needs: [
+        "Each group as a labeled numeric list",
+        "Use ANOVA for means or Kruskal-Wallis for ranks",
+      ],
+      examples: [
+        ["ANOVA", "statistics", "anova group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
+        ["Kruskal", "statistics", "kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
+      ],
+    },
+    {
+      title: "Proportion test or interval",
+      when: () => wantsStats && /\b(proportion|successes|rate|percentage|percent)\b/.test(lower),
+      reason: "I detected a question about a sample proportion.",
+      needs: [
+        "Number of successes",
+        "Sample size n",
+        "For a test, include a null proportion p0",
+      ],
+      examples: [
+        ["Proportion test", "statistics", "one-proportion z-test successes=56 n=100 p0=0.5"],
+        ["Proportion CI", "statistics", "proportion ci successes=42 n=100 confidence=95"],
+      ],
+    },
+    {
+      title: "Contingency table test",
+      when: () => wantsStats && /\b(chi[-\s]?square|chisquare|fisher|contingency|independence)\b/.test(lower),
+      reason: "I detected a categorical-count test.",
+      needs: [
+        "A count table written as a matrix",
+        "Use Fisher exact for 2x2 tables or chi-square independence for larger tables",
+      ],
+      examples: [
+        ["Chi-square", "statistics", "chi-square independence [[30,10],[20,40]]"],
+        ["Fisher exact", "statistics", "fisher exact [[1,9],[11,3]]"],
+      ],
+    },
+    {
+      title: "Probability distribution",
+      when: () => wantsStats && /\b(binomial|normal|poisson|geometric|hypergeometric|probability|cdf|percentile)\b/.test(lower),
+      reason: "I detected a probability distribution question.",
+      needs: [
+        "The distribution name",
+        "Its parameters",
+        "The target value or probability",
+      ],
+      examples: [
+        ["Binomial", "statistics", "binomial n=10 p=0.3 k=4"],
+        ["Normal", "statistics", "normal mean=100 sd=15 x=130"],
+      ],
+    },
+    {
+      title: "Matrix or system solver",
+      when: () => activeMode === "ask" && /\b(matrix|determinant|inverse|rref|rank|system|simultaneous)\b/.test(lower),
+      reason: "I detected linear algebra.",
+      needs: [
+        "A matrix like [[1,2],[3,4]]",
+        "Or equations separated with semicolons",
+      ],
+      examples: [
+        ["Matrix inverse", "ask", "inverse [[1,2],[3,4]]"],
+        ["System", "ask", "system 2x + y = 5; x - y = 1"],
+      ],
+    },
+    {
+      title: "Calculus solver",
+      when: () => activeMode === "ask" && /\b(derivative|differentiate|integral|integrate|limit|graph)\b/.test(lower),
+      reason: "I detected calculus or graphing.",
+      needs: [
+        "A function expression",
+        "A variable or interval when needed",
+      ],
+      examples: [
+        ["Derivative", "ask", "derivative of x^3 + 2x^2 - 7x"],
+        ["Graph", "ask", "graph x^2 - 4 from -5 to 5"],
+      ],
+    },
+  ];
+
+  return suggestions.find((suggestion) => suggestion.when()) ?? {
+    title: wantsStats ? "Statistics problem" : "Math problem",
+    reason: wantsStats
+      ? "I detected a statistics-style question, but I need more structured data."
+      : "I could not fully classify the problem from the current input.",
+    needs: wantsStats
+      ? ["Name the method or goal", "Label your data lists", "Include parameters such as alpha, confidence, or p0 when relevant"]
+      : ["Use a supported command word such as solve, factor, derivative, integral, graph, matrix, or system", "Include the expression, equation, data, or matrix to evaluate"],
+    examples: wantsStats
+      ? [["Summary stats", "statistics", "mean, median, and standard deviation of 2, 4, 4, 5, 9"]]
+      : [["Ask mode", "ask", "solve x^2 - 5x + 6 = 0"]],
+  };
+}
+
 export function analyzeLogic(statement, values = {}, compareStatement = "") {
   const tree = parseLogic(statement);
   const names = logicVariables(tree);
