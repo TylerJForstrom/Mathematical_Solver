@@ -1689,6 +1689,8 @@ export function analyzeMatrix(statement) {
         detail: "For each eigenvalue, the solver finds the null space of A - lambda I.",
       },
     ];
+  } else if (lower.includes("eigenvector")) {
+    throw new Error("Eigenvector mode currently supports exact 2x2 eigenvectors. Use dominant eigen [[...]] for a larger-matrix approximate eigenvector.");
   } else if (lower.includes("rref") || lower.includes("row reduce") || lower.includes("row-reduce")) {
     const result = rowReduceMatrix(matrices[0]);
     answer = formatMatrix(result.rref);
@@ -1761,7 +1763,7 @@ export function analyzeMatrix(statement) {
           detail: "For 2x2 matrices, lambda^2 - trace(A)lambda + det(A) = 0.",
         },
       ];
-    } else {
+    } else if (wantsDominantEigenpair(lower)) {
       const maxIterations = Math.max(1, Math.min(10000, Math.round(readNamedNumber(statement, ["iterations", "iter", "maxIterations", "maxiter"], 1000))));
       const tolerance = readNamedNumber(statement, ["tolerance", "tol", "epsilon"], 1e-10);
       const result = dominantEigenpairPowerIteration(matrices[0], { maxIterations, tolerance });
@@ -1798,6 +1800,47 @@ export function analyzeMatrix(statement) {
           title: "Check residual",
           expression: `||Av - lambda v|| = ${formatNumber(result.residualNorm)}`,
           detail: "A small residual means the approximate vector behaves like an eigenvector.",
+        },
+      ];
+    } else {
+      const maxIterations = Math.max(1, Math.min(50000, Math.round(readNamedNumber(statement, ["iterations", "iter", "maxIterations", "maxiter"], 2000))));
+      const tolerance = readNamedNumber(statement, ["tolerance", "tol", "epsilon"], 1e-10);
+      const result = symmetricEigenvaluesJacobi(matrices[0], { maxIterations, tolerance });
+      answer = `lambda ~= ${formatVector(result.eigenvalues)}`;
+      summary = "symmetric matrix eigenvalues";
+      artifacts = [
+        ["Matrix", formatMatrix(matrices[0])],
+        ["Method", "Jacobi rotations"],
+        ["Eigenvalues", formatVector(result.eigenvalues)],
+        ["Iterations", formatNumber(result.iterations)],
+        ["Converged", result.converged ? "yes" : "no"],
+        ["Off-diagonal norm", formatNumber(result.offDiagonalNorm)],
+        ["Tolerance", String(result.tolerance)],
+      ];
+      children = [
+        matrixNode("A", matrices[0]),
+        ...result.eigenvalues.map((value, index) => statsMetricNode(`lambda${index + 1}`, value)),
+      ];
+      steps = [
+        {
+          title: "Read symmetric matrix",
+          expression: matrixShape(matrices[0]),
+          detail: "For larger matrices, the solver approximates all real eigenvalues for symmetric square matrices.",
+        },
+        {
+          title: "Apply Jacobi rotations",
+          expression: `${formatNumber(result.iterations)} rotations, ${result.converged ? "converged" : "stopped"}`,
+          detail: "Each rotation reduces one off-diagonal entry while preserving the eigenvalues.",
+        },
+        {
+          title: "Read diagonal eigenvalues",
+          expression: formatVector(result.eigenvalues),
+          detail: "After convergence, the diagonal entries approximate the matrix eigenvalues.",
+        },
+        {
+          title: "Check off-diagonal norm",
+          expression: `offdiag = ${formatNumber(result.offDiagonalNorm)}`,
+          detail: "A small off-diagonal norm means the matrix is nearly diagonalized.",
         },
       ];
     }
@@ -8893,6 +8936,20 @@ function is2x2Matrix(matrix) {
   return matrix.length === 2 && matrix[0].length === 2;
 }
 
+function isSymmetricMatrix(matrix) {
+  if (matrix.length !== matrix[0].length) {
+    return false;
+  }
+  for (let row = 0; row < matrix.length; row += 1) {
+    for (let column = row + 1; column < matrix.length; column += 1) {
+      if (!nearlyEqual(matrix[row][column], matrix[column][row])) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 function formatMatrix(matrix) {
   return `[${matrix.map((row) => `[${row.map(formatNumber).join(", ")}]`).join(", ")}]`;
 }
@@ -10349,6 +10406,105 @@ function dominantEigenpairPowerIteration(matrix, options = {}) {
     residualNorm: normalizeNumber(residualNorm),
     tolerance,
   };
+}
+
+function symmetricEigenvaluesJacobi(matrix, options = {}) {
+  if (matrix.length !== matrix[0].length) {
+    throw new Error("Symmetric eigenvalue approximation needs a square matrix.");
+  }
+  if (!isSymmetricMatrix(matrix)) {
+    throw new Error("Larger-matrix eigenvalue approximation currently supports real symmetric matrices.");
+  }
+
+  const size = matrix.length;
+  const maxIterations = options.maxIterations ?? 2000;
+  const tolerance = options.tolerance ?? 1e-10;
+  if (!(tolerance > 0)) {
+    throw new Error("Eigenvalue approximation tolerance must be positive.");
+  }
+
+  const working = matrix.map((row) => row.map((value) => Number(value)));
+  let converged = false;
+  let iterations = 0;
+
+  for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+    const pivot = largestOffDiagonalEntry(working);
+    if (pivot.value <= tolerance) {
+      converged = true;
+      break;
+    }
+
+    const { row: p, column: q } = pivot;
+    const theta = 0.5 * Math.atan2(2 * working[p][q], working[q][q] - working[p][p]);
+    const cosine = Math.cos(theta);
+    const sine = Math.sin(theta);
+    const app = cosine ** 2 * working[p][p] - 2 * sine * cosine * working[p][q] + sine ** 2 * working[q][q];
+    const aqq = sine ** 2 * working[p][p] + 2 * sine * cosine * working[p][q] + cosine ** 2 * working[q][q];
+
+    for (let index = 0; index < size; index += 1) {
+      if (index === p || index === q) continue;
+      const aip = working[index][p];
+      const aiq = working[index][q];
+      working[index][p] = cosine * aip - sine * aiq;
+      working[p][index] = working[index][p];
+      working[index][q] = sine * aip + cosine * aiq;
+      working[q][index] = working[index][q];
+    }
+
+    working[p][p] = app;
+    working[q][q] = aqq;
+    working[p][q] = 0;
+    working[q][p] = 0;
+    iterations = iteration;
+  }
+
+  const offDiagonalNorm = symmetricOffDiagonalNorm(working);
+  if (!converged && offDiagonalNorm <= tolerance) {
+    converged = true;
+  }
+
+  const eigenvalues = working
+    .map((row, index) => normalizeNumber(row[index]))
+    .sort((left, right) => right - left);
+
+  return {
+    eigenvalues,
+    iterations,
+    converged,
+    offDiagonalNorm: normalizeNumber(offDiagonalNorm),
+    tolerance,
+  };
+}
+
+function largestOffDiagonalEntry(matrix) {
+  let row = 0;
+  let column = 1;
+  let value = 0;
+
+  for (let left = 0; left < matrix.length; left += 1) {
+    for (let right = left + 1; right < matrix.length; right += 1) {
+      const candidate = Math.abs(matrix[left][right]);
+      if (candidate > value) {
+        row = left;
+        column = right;
+        value = candidate;
+      }
+    }
+  }
+
+  return { row, column, value };
+}
+
+function symmetricOffDiagonalNorm(matrix) {
+  let sum = 0;
+  for (let row = 0; row < matrix.length; row += 1) {
+    for (let column = 0; column < matrix.length; column += 1) {
+      if (row !== column) {
+        sum += matrix[row][column] ** 2;
+      }
+    }
+  }
+  return Math.sqrt(sum);
 }
 
 function eigenvalues2x2(matrix) {

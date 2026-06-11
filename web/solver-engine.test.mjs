@@ -881,6 +881,16 @@ runTest("matrix mode computes 2x2 eigenvalues", () => {
   assert.equal(result.answer, "lambda = 3, 1");
 });
 
+runTest("matrix mode approximates symmetric matrix eigenvalues", () => {
+  const result = analyzeMatrix("eigenvalues [[4,1,0],[1,3,0],[0,0,2]]");
+
+  assert.equal(result.summary, "symmetric matrix eigenvalues");
+  assert.equal(result.answer, "lambda ~= [4.618034, 2.381966, 2]");
+  assert.equal(artifactValue(result, "Method"), "Jacobi rotations");
+  assert.equal(artifactValue(result, "Converged"), "yes");
+  assert.equal(artifactValue(result, "Tolerance"), "1e-10");
+});
+
 runTest("matrix mode approximates dominant eigenpairs", () => {
   const result = analyzeMatrix("dominant eigen [[4,1,0],[1,3,0],[0,0,2]]");
 
@@ -1155,6 +1165,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("qr [[1,1],[1,0],[0,1]]").summary, "QR decomposition");
   assert.equal(analyzeUniversal("svd [[3,1],[1,3]]").summary, "singular value decomposition");
   assert.equal(analyzeUniversal("eigen [[2,1],[1,2]]").summary, "2x2 eigenvalues");
+  assert.equal(analyzeUniversal("eigenvalues [[4,1,0],[1,3,0],[0,0,2]]").summary, "symmetric matrix eigenvalues");
   assert.equal(analyzeUniversal("power iteration [[4,1,0],[1,3,0],[0,0,2]]").summary, "dominant eigenpair");
   assert.equal(analyzeUniversal("nullspace [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix null space");
   assert.equal(analyzeUniversal("eigenvectors [[2,1],[1,2]]").summary, "2x2 eigenvectors");
