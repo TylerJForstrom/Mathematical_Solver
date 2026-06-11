@@ -580,6 +580,8 @@ runTest("statistics mode computes one-sample tests", () => {
   assert.equal(result.summary, "one-sample t test");
   assert.equal(result.answer, "t = 0, p = 1");
   assert.equal(artifactValue(result, "Cohen's d"), "0");
+  assert.equal(artifactValue(result, "Cohen's d 95% CI"), "[-1.241664, 1.241664]");
+  assert.equal(artifactValue(result, "Effect size CI method"), "approximate t interval");
 });
 
 runTest("statistics mode computes one-proportion z tests", () => {
@@ -604,6 +606,8 @@ runTest("statistics mode computes two-sample tests", () => {
   assert.equal(result.summary, "two-sample t test");
   assert.equal(result.answer, "t = 1.118034, p = 0.331352");
   assert.equal(artifactValue(result, "Hedges g"), "0.730297");
+  assert.equal(artifactValue(result, "Hedges g 95% CI"), "[-1.219814, 2.680408]");
+  assert.equal(artifactValue(result, "Effect size CI method"), "approximate t interval");
 });
 
 runTest("statistics mode computes equal-variance tests", () => {
@@ -660,6 +664,8 @@ runTest("statistics mode computes paired t-tests", () => {
   assert.equal(result.summary, "paired t test");
   assert.equal(result.answer, "t = 4, p = 0.057191");
   assert.equal(artifactValue(result, "Cohen's dz"), "2.309401");
+  assert.equal(artifactValue(result, "Cohen's dz 95% CI"), "[-3.2453, 7.864102]");
+  assert.equal(artifactValue(result, "Effect size CI method"), "approximate t interval");
 });
 
 runTest("statistics mode computes one-way ANOVA", () => {

@@ -3342,6 +3342,9 @@ function analyzeHypothesisTest(statement) {
   const pValue = pValueForT(tStatistic, degreesFreedom, alternative);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
   const cohenD = (summary.mean - mu) / summary.sampleStdDev;
+  const effectLevel = 1 - alpha;
+  const cohenDInterval = oneSampleEffectSizeInterval(cohenD, summary.count, effectLevel);
+  const effectIntervalLabel = `${formatNumber(effectLevel * 100)}% CI`;
 
   return {
     mode: "statistics",
@@ -3380,8 +3383,8 @@ function analyzeHypothesisTest(statement) {
       },
       {
         title: "Compute effect size",
-        expression: `Cohen's d = ${formatNumber(cohenD)}`,
-        detail: "Effect size reports the mean difference in sample-standard-deviation units.",
+        expression: `Cohen's d = ${formatNumber(cohenD)}, ${effectIntervalLabel} = ${formatEffectSizeInterval(cohenDInterval)}`,
+        detail: "Effect size reports the mean difference in sample-standard-deviation units; the interval is an approximate uncertainty range.",
       },
       {
         title: "Make decision",
@@ -3399,6 +3402,8 @@ function analyzeHypothesisTest(statement) {
       ["t statistic", formatNumber(tStatistic)],
       ["p-value", formatNumber(pValue)],
       ["Cohen's d", formatNumber(cohenD)],
+      [`Cohen's d ${effectIntervalLabel}`, formatEffectSizeInterval(cohenDInterval)],
+      ["Effect size CI method", "approximate t interval"],
       ["Decision", decision],
     ],
   };
@@ -3429,7 +3434,13 @@ function analyzeTwoSampleTTest(statement) {
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
   const pooledStdDev = pooledSampleStdDev(leftSummary, rightSummary);
   const cohenD = (leftSummary.mean - rightSummary.mean) / pooledStdDev;
-  const hedgesG = hedgesCorrection(leftSummary.count + rightSummary.count - 2) * cohenD;
+  const pooledDegreesFreedom = leftSummary.count + rightSummary.count - 2;
+  const hedgesFactor = hedgesCorrection(pooledDegreesFreedom);
+  const hedgesG = hedgesFactor * cohenD;
+  const effectLevel = 1 - alpha;
+  const cohenDInterval = twoSampleEffectSizeInterval(cohenD, leftSummary.count, rightSummary.count, effectLevel);
+  const hedgesGInterval = scaleEffectSizeInterval(cohenDInterval, hedgesFactor);
+  const effectIntervalLabel = `${formatNumber(effectLevel * 100)}% CI`;
 
   return {
     mode: "statistics",
@@ -3468,8 +3479,8 @@ function analyzeTwoSampleTTest(statement) {
       },
       {
         title: "Compute effect size",
-        expression: `Hedges g = ${formatNumber(hedgesG)}`,
-        detail: "Hedges g standardizes the mean difference and corrects Cohen's d for small samples.",
+        expression: `Hedges g = ${formatNumber(hedgesG)}, ${effectIntervalLabel} = ${formatEffectSizeInterval(hedgesGInterval)}`,
+        detail: "Hedges g standardizes the mean difference, corrects Cohen's d for small samples, and reports an approximate interval.",
       },
       {
         title: "Make decision",
@@ -3486,7 +3497,10 @@ function analyzeTwoSampleTTest(statement) {
       ["t statistic", formatNumber(tStatistic)],
       ["p-value", formatNumber(pValue)],
       ["Cohen's d", formatNumber(cohenD)],
+      [`Cohen's d ${effectIntervalLabel}`, formatEffectSizeInterval(cohenDInterval)],
       ["Hedges g", formatNumber(hedgesG)],
+      [`Hedges g ${effectIntervalLabel}`, formatEffectSizeInterval(hedgesGInterval)],
+      ["Effect size CI method", "approximate t interval"],
       ["Decision", decision],
     ],
   };
@@ -3709,6 +3723,9 @@ function analyzePairedTTest(statement) {
   const pValue = pValueForT(tStatistic, degreesFreedom, alternative);
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
   const cohenDz = summary.mean / summary.sampleStdDev;
+  const effectLevel = 1 - alpha;
+  const cohenDzInterval = oneSampleEffectSizeInterval(cohenDz, summary.count, effectLevel);
+  const effectIntervalLabel = `${formatNumber(effectLevel * 100)}% CI`;
 
   return {
     mode: "statistics",
@@ -3741,8 +3758,8 @@ function analyzePairedTTest(statement) {
       },
       {
         title: "Compute effect size",
-        expression: `Cohen's dz = ${formatNumber(cohenDz)}`,
-        detail: "Paired effect size standardizes the mean difference by the SD of differences.",
+        expression: `Cohen's dz = ${formatNumber(cohenDz)}, ${effectIntervalLabel} = ${formatEffectSizeInterval(cohenDzInterval)}`,
+        detail: "Paired effect size standardizes the mean difference by the SD of differences; the interval is approximate.",
       },
       {
         title: "Make decision",
@@ -3767,6 +3784,8 @@ function analyzePairedTTest(statement) {
       ["t statistic", formatNumber(tStatistic)],
       ["p-value", formatNumber(pValue)],
       ["Cohen's dz", formatNumber(cohenDz)],
+      [`Cohen's dz ${effectIntervalLabel}`, formatEffectSizeInterval(cohenDzInterval)],
+      ["Effect size CI method", "approximate t interval"],
       ["Decision", decision],
     ],
   };
@@ -13793,6 +13812,44 @@ function pooledSampleStdDev(leftSummary, rightSummary) {
 
 function hedgesCorrection(degreesFreedom) {
   return degreesFreedom > 1 ? 1 - 3 / (4 * degreesFreedom - 1) : 1;
+}
+
+function oneSampleEffectSizeInterval(effectSize, count, level) {
+  const degreesFreedom = count - 1;
+  const standardError = Math.sqrt((1 / count) + (effectSize ** 2) / (2 * degreesFreedom));
+  return effectSizeInterval(effectSize, standardError, degreesFreedom, level);
+}
+
+function twoSampleEffectSizeInterval(effectSize, leftCount, rightCount, level) {
+  const degreesFreedom = leftCount + rightCount - 2;
+  const standardError = Math.sqrt(
+    ((leftCount + rightCount) / (leftCount * rightCount)) +
+      (effectSize ** 2) / (2 * degreesFreedom),
+  );
+  return effectSizeInterval(effectSize, standardError, degreesFreedom, level);
+}
+
+function effectSizeInterval(effectSize, standardError, degreesFreedom, level) {
+  const critical = inverseStudentTCdf((1 + level) / 2, degreesFreedom);
+  return {
+    lower: normalizeNumber(effectSize - critical * standardError),
+    upper: normalizeNumber(effectSize + critical * standardError),
+    standardError: normalizeNumber(standardError),
+    level,
+  };
+}
+
+function scaleEffectSizeInterval(interval, factor) {
+  return {
+    lower: normalizeNumber(interval.lower * factor),
+    upper: normalizeNumber(interval.upper * factor),
+    standardError: normalizeNumber(interval.standardError * factor),
+    level: interval.level,
+  };
+}
+
+function formatEffectSizeInterval(interval) {
+  return `[${formatNumber(interval.lower)}, ${formatNumber(interval.upper)}]`;
 }
 
 function pairwiseAnovaComparisons(groupSummaries, groups, msWithin, degreesFreedom) {

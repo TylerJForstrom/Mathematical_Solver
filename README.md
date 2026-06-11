@@ -116,10 +116,11 @@ The frontend currently supports:
   intervals, and posterior predictive probabilities
 - Statistical power and sample-size planning for one-sample means,
   one-proportion z designs, and equal-size two-sample mean designs
-- Effect sizes and follow-up comparisons, including Cohen's d/dz, Hedges g,
-  eta squared, omega squared, rank-biserial correlation, epsilon squared,
-  Cohen's w, Bonferroni-adjusted ANOVA pairwise comparisons, and Dunn-style
-  rank comparisons
+- Effect sizes and follow-up comparisons, including Cohen's d/dz, Hedges g
+  with approximate confidence intervals for t-test effect sizes, eta squared,
+  omega squared, rank-biserial correlation, epsilon squared, Cohen's w,
+  Bonferroni-adjusted ANOVA pairwise comparisons, and Dunn-style rank
+  comparisons
 - Newton and bisection numerical root solvers
 - Simpson's rule and trapezoidal-rule numerical integration
 - Expression-tree visualization for every mode
@@ -397,8 +398,9 @@ The demo includes:
   of goodness-of-fit and independence, Fisher exact tests,
   nonparametric rank tests including exact small-sample Mann-Whitney and
   Wilcoxon signed-rank p-values, Kaplan-Meier survival analysis, log-rank tests,
-  Cox proportional hazards regression, power/sample-size analysis, effect sizes,
-  and pairwise follow-up summaries in Stats mode
+  Cox proportional hazards regression, power/sample-size analysis, effect sizes
+  with approximate confidence intervals for t tests, and pairwise follow-up
+  summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,
   linear programming,
   vector geometry, geometry formulas, sequences/series, graphing, differential
@@ -430,7 +432,7 @@ These are good ways to make the project more impressive mathematically:
 2. Add exact radical output for quadratic equations with irrational roots.
 3. Add trigonometric simplification identities.
 4. Add substitution, integration by parts, and partial-fraction decomposition.
-5. Add confidence intervals for effect sizes and more exact rank-test variants.
+5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add row-space bases, column-space bases, and larger-matrix eigenvalue approximation.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add systems of differential equations and phase-plane direction fields.
