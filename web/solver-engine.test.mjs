@@ -515,6 +515,17 @@ runTest("statistics mode computes bootstrap confidence intervals", () => {
   assert.equal(medianResult.answer, "bootstrap 90% CI for median = [1, 8]");
 });
 
+runTest("statistics mode computes meta-analysis models", () => {
+  const result = analyzeStatistics("meta-analysis effects: 0.2, 0.5, 0.1, 0.7; se: 0.1, 0.2, 0.15, 0.25");
+
+  assert.equal(result.summary, "meta-analysis");
+  assert.equal(result.answer, "random-effects pooled effect = 0.308813, 95% CI = [0.081935, 0.53569], p = 0.007635");
+  assert.equal(artifactValue(result, "Fixed-effect pooled estimate"), "0.259617");
+  assert.equal(artifactValue(result, "I squared"), "50.292862%");
+  assert.equal(artifactValue(result, "Tau squared"), "0.02614");
+  assert.deepEqual(result.table.rows[0], ["1", "0.2", "0.1", "53.924506", "37.076176"]);
+});
+
 runTest("statistics mode computes permutation tests", () => {
   const meanResult = analyzeStatistics("permutation test group1: 10, 12, 9; group2: 8, 7, 11 resamples=2000 seed=5");
   const medianResult = analyzeStatistics("permutation median test group1: 1, 2, 3, 4; group2: 4, 5, 6, 7 resamples=2000 seed=5");
@@ -1192,6 +1203,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("cox regression times: 5, 6, 6, 8, 10, 12; events: 1, 1, 0, 1, 0, 1; x: 0, 1, 0, 1, 1, 0").summary, "Cox proportional hazards");
   assert.equal(analyzeUniversal("ar(1) series: 10, 12, 13, 15, 16, 18 forecast=3").summary, "AR(1) time-series forecast");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
+  assert.equal(analyzeUniversal("meta-analysis effects: 0.2, 0.5, 0.1, 0.7; se: 0.1, 0.2, 0.15, 0.25").summary, "meta-analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
   assert.equal(analyzeUniversal("pearson correlation x: 1,2,3,4,5,6; y: 2,4,5,4,5,7").summary, "Pearson correlation test");

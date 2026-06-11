@@ -97,7 +97,8 @@ The frontend currently supports:
   with explained variance and component directions
 - K-means clustering for coordinate points with deterministic centroid
   initialization, assignments, cluster sizes, and within-cluster SSE
-- Confidence intervals, bootstrap percentile intervals,
+- Confidence intervals, bootstrap percentile intervals, fixed-effect and
+  DerSimonian-Laird random-effects meta-analysis with heterogeneity diagnostics,
   Jarque-Bera normality tests,
   two-sample variance F tests and Levene equal-variance tests,
   one-sample/two-sample/paired t tests with Student t p-values,

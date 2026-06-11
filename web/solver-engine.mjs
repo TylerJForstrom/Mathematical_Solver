@@ -126,6 +126,18 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
     },
     {
+      title: "Meta-analysis",
+      when: () => wantsStats && /\b(meta[-\s]?analysis|pooled effect|heterogeneity|i-squared|tau squared)\b/.test(lower),
+      reason: "I detected a study-pooling question.",
+      needs: [
+        "Study effects or estimates",
+        "Matching standard errors or variances",
+      ],
+      examples: [
+        ["Meta-analysis", "statistics", "meta-analysis effects: 0.2, 0.5, 0.1, 0.7; se: 0.1, 0.2, 0.15, 0.25"],
+      ],
+    },
+    {
       title: "Probability distribution",
       when: () => wantsStats && /\b(binomial|normal|poisson|geometric|hypergeometric|probability|cdf|percentile)\b/.test(lower),
       reason: "I detected a probability distribution question.",
@@ -1134,6 +1146,10 @@ export function analyzeStatistics(statement) {
 
   if (isBayesianProportionQuestion(lower)) {
     return analyzeBayesianProportion(statement);
+  }
+
+  if (isMetaAnalysisQuestion(lower)) {
+    return analyzeMetaAnalysis(statement);
   }
 
   if (isCoxQuestion(lower)) {
@@ -5852,6 +5868,133 @@ function analyzeBootstrapInterval(statement) {
       ["Lower bound", formatNumber(lower)],
       ["Upper bound", formatNumber(upper)],
     ],
+  };
+}
+
+function analyzeMetaAnalysis(statement) {
+  const request = parseMetaAnalysisInput(statement);
+  const result = computeMetaAnalysis(request);
+  const percent = formatNumber(request.level * 100);
+  const tree = statsDatasetNode(request.effects, [
+    statsMetricNode("FIXED", result.fixed.effect),
+    statsMetricNode("RANDOM", result.random.effect),
+    statsMetricNode("I2", result.iSquared),
+    statsMetricNode("TAU2", result.tauSquared),
+  ], "META");
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `random-effects pooled effect = ${formatNumber(result.random.effect)}, ${percent}% CI = [${formatNumber(result.random.lower)}, ${formatNumber(result.random.upper)}], p = ${formatNumber(result.random.pValue)}`,
+    summary: "meta-analysis",
+    details: `${request.effects.length} studies, inverse-variance fixed effect and DerSimonian-Laird random effects`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read study estimates",
+        expression: `${request.effects.length} effects with ${request.varianceSource}`,
+        detail: "Each study contributes an effect estimate and uncertainty.",
+      },
+      {
+        title: "Compute fixed-effect model",
+        expression: `fixed = ${formatNumber(result.fixed.effect)}, SE = ${formatNumber(result.fixed.standardError)}`,
+        detail: "The fixed-effect estimate uses inverse-variance weights.",
+      },
+      {
+        title: "Measure heterogeneity",
+        expression: `Q = ${formatNumber(result.qStatistic)}, I^2 = ${formatNumber(result.iSquared)}%, tau^2 = ${formatNumber(result.tauSquared)}`,
+        detail: "Cochran's Q, I squared, and tau squared measure between-study disagreement.",
+      },
+      {
+        title: "Compute random-effects model",
+        expression: `random = ${formatNumber(result.random.effect)}, SE = ${formatNumber(result.random.standardError)}`,
+        detail: "DerSimonian-Laird random effects add tau squared to each study variance.",
+      },
+      {
+        title: "Build interval",
+        expression: `${percent}% CI = [${formatNumber(result.random.lower)}, ${formatNumber(result.random.upper)}]`,
+        detail: "The interval is centered on the random-effects pooled estimate.",
+      },
+    ],
+    table: {
+      headers: ["Study", "Effect", "SE", "Fixed weight %", "Random weight %"],
+      rows: request.effects.map((effect, index) => [
+        String(index + 1),
+        formatNumber(effect),
+        formatNumber(Math.sqrt(request.variances[index])),
+        formatNumber(result.fixed.weightPercents[index]),
+        formatNumber(result.random.weightPercents[index]),
+      ]),
+    },
+    artifacts: [
+      ["Studies", formatNumber(request.effects.length)],
+      ["Fixed-effect pooled estimate", formatNumber(result.fixed.effect)],
+      [`Fixed-effect ${percent}% CI`, `[${formatNumber(result.fixed.lower)}, ${formatNumber(result.fixed.upper)}]`],
+      ["Fixed-effect p-value", formatNumber(result.fixed.pValue)],
+      ["Random-effects pooled estimate", formatNumber(result.random.effect)],
+      [`Random-effects ${percent}% CI`, `[${formatNumber(result.random.lower)}, ${formatNumber(result.random.upper)}]`],
+      ["Random-effects p-value", formatNumber(result.random.pValue)],
+      ["Cochran Q", formatNumber(result.qStatistic)],
+      ["Heterogeneity df", formatNumber(result.heterogeneityDf)],
+      ["Heterogeneity p-value", formatNumber(result.heterogeneityPValue)],
+      ["I squared", `${formatNumber(result.iSquared)}%`],
+      ["Tau squared", formatNumber(result.tauSquared)],
+      [`${percent}% prediction interval`, `[${formatNumber(result.predictionLower)}, ${formatNumber(result.predictionUpper)}]`],
+    ],
+  };
+}
+
+function computeMetaAnalysis(request) {
+  const fixedWeights = request.variances.map((variance) => 1 / variance);
+  const fixed = pooledMetaEstimate(request.effects, request.variances, fixedWeights, request.level);
+  const qStatistic = request.effects.reduce(
+    (sum, effect, index) => sum + fixedWeights[index] * (effect - fixed.effect) ** 2,
+    0,
+  );
+  const heterogeneityDf = request.effects.length - 1;
+  const sumWeights = fixedWeights.reduce((sum, weight) => sum + weight, 0);
+  const sumSquaredWeights = fixedWeights.reduce((sum, weight) => sum + weight ** 2, 0);
+  const tauDenominator = sumWeights - sumSquaredWeights / sumWeights;
+  const tauSquared = Math.max(0, (qStatistic - heterogeneityDf) / tauDenominator);
+  const randomVariances = request.variances.map((variance) => variance + tauSquared);
+  const randomWeights = randomVariances.map((variance) => 1 / variance);
+  const random = pooledMetaEstimate(request.effects, randomVariances, randomWeights, request.level);
+  const iSquared = qStatistic > EPSILON
+    ? Math.max(0, ((qStatistic - heterogeneityDf) / qStatistic) * 100)
+    : 0;
+  const critical = zCriticalForLevel(request.level);
+  const predictionSe = Math.sqrt(random.standardError ** 2 + tauSquared);
+
+  return {
+    fixed,
+    random,
+    qStatistic: normalizeNumber(qStatistic),
+    heterogeneityDf,
+    heterogeneityPValue: normalizeNumber(chiSquareRightTailApprox(qStatistic, heterogeneityDf)),
+    iSquared: normalizeNumber(iSquared),
+    tauSquared: normalizeNumber(tauSquared),
+    predictionLower: normalizeNumber(random.effect - critical * predictionSe),
+    predictionUpper: normalizeNumber(random.effect + critical * predictionSe),
+  };
+}
+
+function pooledMetaEstimate(effects, variances, weights, level) {
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const effect = weights.reduce((sum, weight, index) => sum + weight * effects[index], 0) / totalWeight;
+  const standardError = Math.sqrt(1 / totalWeight);
+  const critical = zCriticalForLevel(level);
+  const zStatistic = effect / standardError;
+
+  return {
+    effect: normalizeNumber(effect),
+    standardError: normalizeNumber(standardError),
+    lower: normalizeNumber(effect - critical * standardError),
+    upper: normalizeNumber(effect + critical * standardError),
+    zStatistic: normalizeNumber(zStatistic),
+    pValue: normalizeNumber(pValueForNormal(zStatistic, "two-sided")),
+    weightPercents: weights.map((weight) => normalizeNumber((weight / totalWeight) * 100)),
+    variances,
   };
 }
 
@@ -14540,6 +14683,55 @@ function parseTwoProportionInput(text) {
   };
 }
 
+function parseMetaAnalysisInput(text) {
+  const level = parseConfidenceLevel(text, 0.95);
+  const lists = new Map();
+  for (const match of text.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    lists.set(match[1].toLowerCase(), parseNumberList(match[2]));
+  }
+
+  const effects = lists.get("effects") ??
+    lists.get("effect") ??
+    lists.get("estimates") ??
+    lists.get("estimate") ??
+    lists.get("yi") ??
+    lists.get("logor") ??
+    lists.get("logrr");
+  const standardErrors = lists.get("se") ??
+    lists.get("ses") ??
+    lists.get("stderr") ??
+    lists.get("stderror") ??
+    lists.get("standarderror") ??
+    lists.get("standarderrors");
+  const variances = lists.get("variance") ??
+    lists.get("variances") ??
+    lists.get("var") ??
+    lists.get("vars") ??
+    lists.get("vi");
+
+  if (!effects || (!standardErrors && !variances)) {
+    throw new Error("Use meta-analysis effects: 0.2, 0.5, 0.1; se: 0.1, 0.2, 0.15.");
+  }
+  const selectedVariances = standardErrors
+    ? standardErrors.map((standardError) => standardError ** 2)
+    : variances;
+  const varianceSource = standardErrors ? "standard errors" : "variances";
+
+  if (effects.length < 2 || selectedVariances.length !== effects.length) {
+    throw new Error("Meta-analysis needs equal-length effect and standard-error/variance lists with at least two studies.");
+  }
+  if (selectedVariances.some((variance) => !(variance > 0))) {
+    throw new Error("Meta-analysis variances must be positive.");
+  }
+
+  return {
+    effects,
+    variances: selectedVariances,
+    level,
+    varianceSource,
+  };
+}
+
 function parseBootstrapInput(text) {
   const lower = text.toLowerCase();
   let dataText = text;
@@ -17142,6 +17334,21 @@ function isBayesianProportionQuestion(lower) {
     (lower.includes("posterior") && lower.includes("success"));
 }
 
+function isMetaAnalysisQuestion(lower) {
+  return lower.includes("meta-analysis") ||
+    lower.includes("meta analysis") ||
+    lower.includes("metaanalysis") ||
+    lower.includes("pooled effect") ||
+    lower.includes("random-effects") ||
+    lower.includes("random effects model") ||
+    lower.includes("fixed-effect") ||
+    lower.includes("fixed effect model") ||
+    lower.includes("heterogeneity") ||
+    lower.includes("i-squared") ||
+    lower.includes("i squared") ||
+    lower.includes("tau squared");
+}
+
 function isMultipleRegressionQuestion(lower, statement) {
   return lower.includes("multiple regression") ||
     lower.includes("multivariate regression") ||
@@ -17603,6 +17810,13 @@ function isStatisticsQuestion(lower) {
     "survival curve",
     "survival times",
     "censored",
+    "meta-analysis",
+    "meta analysis",
+    "pooled effect",
+    "heterogeneity",
+    "i-squared",
+    "i squared",
+    "tau squared",
     "log-rank",
     "logrank",
     "log rank",
