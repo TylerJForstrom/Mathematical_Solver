@@ -100,8 +100,8 @@ The frontend currently supports:
   two-sample variance F tests and Levene equal-variance tests,
   one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
-  permutation tests, one-way ANOVA, Mann-Whitney U with exact small-sample
-  p-values when there are no ties, Wilcoxon signed-rank with exact
+  permutation tests, one-way ANOVA, Welch ANOVA, Mann-Whitney U with exact
+  small-sample p-values when there are no ties, Wilcoxon signed-rank with exact
   small-sample p-values when absolute differences are untied,
   Kruskal-Wallis, chi-square goodness-of-fit, chi-square independence tests
   for contingency tables, Fisher exact tests for 2x2 tables, binomial
@@ -311,6 +311,8 @@ The same idea works for algebra and calculus:
 - `variance test group1: 10,12,9,11; group2: 8,7,11,9` compares two sample
   variances with an F test, while `levene group1: ...; group2: ...; group3: ...`
   checks equal variances across several groups.
+- `welch anova group1: 8,9,10; group2: 14,16,17; group3: 20,24,29` compares
+  three or more means without assuming equal variances.
 - `power mean effect=0.5 n=64 alpha=0.05` estimates statistical power, while
   `sample size mean effect=0.5 power=0.8 alpha=0.05` finds a required sample size.
 - `expected value values: 0,1,2 probabilities: 0.2,0.5,0.3` treats the

@@ -86,10 +86,11 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       reason: "I detected a comparison across three or more groups.",
       needs: [
         "Each group as a labeled numeric list",
-        "Use ANOVA for means or Kruskal-Wallis for ranks",
+        "Use ANOVA for means, Welch ANOVA for unequal variances, or Kruskal-Wallis for ranks",
       ],
       examples: [
         ["ANOVA", "statistics", "anova group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
+        ["Welch ANOVA", "statistics", "welch anova group1: 8,9,10; group2: 14,16,17; group3: 20,24,29"],
         ["Kruskal", "statistics", "kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
       ],
     },
@@ -1185,6 +1186,11 @@ export function analyzeStatistics(statement) {
 
   if (lower.includes("wilcoxon") || lower.includes("signed-rank") || lower.includes("signed rank")) {
     return analyzeWilcoxonSignedRank(statement);
+  }
+
+  if ((lower.includes("welch") || lower.includes("unequal variance")) &&
+    (lower.includes("anova") || lower.includes("analysis of variance"))) {
+    return analyzeWelchAnova(statement);
   }
 
   if (lower.includes("anova") || lower.includes("analysis of variance")) {
@@ -4078,6 +4084,111 @@ function analyzeAnova(statement) {
       ["p-value", formatNumber(pValue)],
       ["Eta squared", formatNumber(etaSquared)],
       ["Omega squared", formatNumber(omegaSquared)],
+      ["Pairwise comparisons", formatPairwiseComparisons(pairwiseComparisons)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeWelchAnova(statement) {
+  const { groups, alpha } = parseAnovaInput(statement);
+  if (groups.length < 2 || groups.some((group) => group.length < 2)) {
+    throw new Error("Welch ANOVA needs at least two groups with at least two values each.");
+  }
+
+  const allValues = groups.flat();
+  const groupSummaries = groups.map(descriptiveSummary);
+  if (groupSummaries.some((summary) => !(summary.sampleVariance > 0))) {
+    throw new Error("Welch ANOVA needs nonzero sample variance in every group.");
+  }
+
+  const groupCount = groups.length;
+  const weights = groupSummaries.map((summary) => summary.count / summary.sampleVariance);
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const weightedMean = weights.reduce((sum, weight, index) =>
+    sum + weight * groupSummaries[index].mean,
+  0) / totalWeight;
+  const numerator = weights.reduce((sum, weight, index) =>
+    sum + weight * (groupSummaries[index].mean - weightedMean) ** 2,
+  0) / (groupCount - 1);
+  const correctionSum = weights.reduce((sum, weight, index) =>
+    sum + ((1 - weight / totalWeight) ** 2) / (groupSummaries[index].count - 1),
+  0);
+  const correction = 1 + (2 * (groupCount - 2) / (groupCount ** 2 - 1)) * correctionSum;
+  const fStatistic = numerator / correction;
+  const dfNumerator = groupCount - 1;
+  const dfDenominator = (groupCount ** 2 - 1) / (3 * correctionSum);
+  const pValue = fRightTail(fStatistic, dfNumerator, dfDenominator);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const pairwiseComparisons = pairwiseWelchComparisons(groupSummaries);
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(allValues, [
+      statsMetricNode("F", fStatistic),
+      statsMetricNode("DF1", dfNumerator),
+      statsMetricNode("DF2", dfDenominator),
+      statsMetricNode("P", pValue),
+    ], "WELCH"),
+    answer: `F = ${formatNumber(fStatistic)}, df = ${formatNumber(dfNumerator)}, ${formatNumber(dfDenominator)}, p = ${formatNumber(pValue)}`,
+    summary: "Welch one-way ANOVA",
+    details: `${groups.length} groups, unequal-variance mean comparison`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(allValues)),
+    steps: [
+      {
+        title: "Read unequal-variance groups",
+        expression: groups.map((group, index) => `group ${index + 1}: n=${group.length}`).join("; "),
+        detail: "Welch ANOVA compares group means without assuming equal variances.",
+      },
+      {
+        title: "Compute inverse-variance weights",
+        expression: weights.map((weight, index) => `w${index + 1}=${formatNumber(weight)}`).join(", "),
+        detail: "Groups with more precise means receive larger weights.",
+      },
+      {
+        title: "Compute weighted mean",
+        expression: `xbar_w = ${formatNumber(weightedMean)}`,
+        detail: "The weighted mean replaces the ordinary grand mean used in classic ANOVA.",
+      },
+      {
+        title: "Compute Welch F statistic",
+        expression: `F = ${formatNumber(fStatistic)} with df ${formatNumber(dfNumerator)}, ${formatNumber(dfDenominator)}`,
+        detail: "The denominator is corrected with Welch-Satterthwaite degrees of freedom.",
+      },
+      {
+        title: "Compute p-value",
+        expression: `p = ${formatNumber(pValue)}`,
+        detail: "The solver evaluates the F distribution with fractional denominator degrees of freedom.",
+      },
+      {
+        title: "Compare groups pairwise",
+        expression: formatPairwiseComparisons(pairwiseComparisons),
+        detail: "Pairwise rows use Welch t approximations with Bonferroni-adjusted p-values.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest at least one group mean differs.",
+      },
+    ],
+    table: {
+      headers: ["Group", "n", "Mean", "Variance", "Weight"],
+      rows: groups.map((group, index) => [
+        `Group ${index + 1}`,
+        formatNumber(group.length),
+        formatNumber(groupSummaries[index].mean),
+        formatNumber(groupSummaries[index].sampleVariance),
+        formatNumber(weights[index]),
+      ]),
+    },
+    artifacts: [
+      ["Weighted mean", formatNumber(weightedMean)],
+      ["F statistic", formatNumber(fStatistic)],
+      ["Numerator df", formatNumber(dfNumerator)],
+      ["Denominator df", formatNumber(dfDenominator)],
+      ["p-value", formatNumber(pValue)],
+      ["Correction", formatNumber(correction)],
       ["Pairwise comparisons", formatPairwiseComparisons(pairwiseComparisons)],
       ["Decision", decision],
     ],
@@ -13360,6 +13471,8 @@ function parsePairedInput(text) {
 function parseAnovaInput(text) {
   const { alpha, cleaned } = extractAlpha(text);
   const groups = cleaned
+    .replace(/\bwelch'?s?\b/gi, "")
+    .replace(/\bunequal[-\s]?variance\b/gi, "")
     .replace(/\banova\b/gi, "")
     .replace(/\banalysis of variance\b/gi, "")
     .replace(/\bone-way\b/gi, "")
@@ -14379,6 +14492,31 @@ function formatPairwiseComparisons(comparisons) {
       `${comparison.label}: ${comparison.estimateLabel}=${formatNumber(comparison.estimate)}, p_adj=${formatNumber(comparison.adjustedP)}`,
     )
     .join("; ");
+}
+
+function pairwiseWelchComparisons(groupSummaries) {
+  const comparisons = [];
+  const pairCount = (groupSummaries.length * (groupSummaries.length - 1)) / 2;
+  for (let left = 0; left < groupSummaries.length; left += 1) {
+    for (let right = left + 1; right < groupSummaries.length; right += 1) {
+      const leftTerm = groupSummaries[left].sampleVariance / groupSummaries[left].count;
+      const rightTerm = groupSummaries[right].sampleVariance / groupSummaries[right].count;
+      const standardError = Math.sqrt(leftTerm + rightTerm);
+      const difference = groupSummaries[left].mean - groupSummaries[right].mean;
+      const statistic = difference / standardError;
+      const degreesFreedom = ((leftTerm + rightTerm) ** 2) /
+        ((leftTerm ** 2) / (groupSummaries[left].count - 1) + (rightTerm ** 2) / (groupSummaries[right].count - 1));
+      const pValue = pValueForT(statistic, degreesFreedom, "two-sided");
+      comparisons.push({
+        label: `${left + 1} vs ${right + 1}`,
+        statistic,
+        adjustedP: bonferroniAdjust(pValue, pairCount),
+        estimateLabel: "diff",
+        estimate: difference,
+      });
+    }
+  }
+  return comparisons;
 }
 
 function studentTCdf(tStatistic, degreesFreedom) {

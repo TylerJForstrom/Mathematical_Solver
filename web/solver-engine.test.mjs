@@ -677,6 +677,15 @@ runTest("statistics mode computes one-way ANOVA", () => {
   assert.equal(artifactValue(result, "Pairwise comparisons"), "1 vs 2: diff=-4, p_adj=0.008141; 1 vs 3: diff=-1, p_adj=0.799709; 2 vs 3: diff=3, p_adj=0.031205");
 });
 
+runTest("statistics mode computes Welch one-way ANOVA", () => {
+  const result = analyzeStatistics("welch anova group1: 8,9,10; group2: 14,16,17; group3: 20,24,29");
+
+  assert.equal(result.summary, "Welch one-way ANOVA");
+  assert.equal(result.answer, "F = 27.394147, df = 2, 3.456146, p = 0.00759");
+  assert.equal(artifactValue(result, "Weighted mean"), "11.44374");
+  assert.equal(artifactValue(result, "Pairwise comparisons"), "1 vs 2: diff=-6.666667, p_adj=0.015604; 1 vs 3: diff=-15.333333, p_adj=0.069755; 2 vs 3: diff=-8.666667, p_adj=0.201282");
+});
+
 runTest("statistics mode computes Poisson probabilities", () => {
   const result = analyzeStatistics("poisson lambda=3 at most k=2");
 
@@ -1185,6 +1194,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("mann-whitney group1: 10,12,9; group2: 8,7,11").summary, "Mann-Whitney U test");
   assert.equal(analyzeUniversal("wilcoxon signed-rank before: 10,12,9,11; after: 11,14,10,13").summary, "Wilcoxon signed-rank test");
   assert.equal(analyzeUniversal("kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "Kruskal-Wallis test");
+  assert.equal(analyzeUniversal("welch anova group1: 8,9,10; group2: 14,16,17; group3: 20,24,29").summary, "Welch one-way ANOVA");
   assert.equal(analyzeUniversal("rank [[1,2],[2,4]]").summary, "matrix rank");
   assert.equal(analyzeUniversal("row space [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix row space");
   assert.equal(analyzeUniversal("column space [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix column space");
