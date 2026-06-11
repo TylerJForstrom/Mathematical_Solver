@@ -58,6 +58,10 @@ runTest("input assistant suggests structured problem formats", () => {
 
   const matrix = suggestProblemHelp("inverse matrix", "ask", "Matrix mode needs a matrix.");
   assert.equal(matrix.title, "Matrix or system solver");
+
+  const nonlinear = suggestProblemHelp("nonlinear system with a guess", "ask", "System solving needs a guess.");
+  assert.equal(nonlinear.title, "Nonlinear system solver");
+  assert.ok(nonlinear.examples[0][2].includes("guess x=3 y=2"));
 });
 
 runTest("simplify mode combines like terms", () => {
@@ -918,6 +922,16 @@ runTest("system solver handles two-variable systems", () => {
   assert.equal(result.answer, "x = 2, y = 1");
 });
 
+runTest("system solver handles nonlinear systems with Newton iteration", () => {
+  const result = analyzeSystem("solve nonlinear system x^2 + y^2 = 25; x - y = 1 guess x=3 y=2");
+
+  assert.equal(result.summary, "nonlinear system");
+  assert.equal(result.answer, "x = 4, y = 3");
+  assert.equal(artifactValue(result, "Initial guess"), "[3, 2]");
+  assert.equal(artifactValue(result, "Converged"), "yes");
+  assert.deepEqual(result.table.rows[1], ["1", "4.2", "3.2", "2.88", "1.697056"]);
+});
+
 runTest("matrix mode computes determinants", () => {
   const result = analyzeMatrix("det [[1,2],[3,4]]");
 
@@ -1212,9 +1226,12 @@ runTest("universal mode routes derivative questions", () => {
 
 runTest("universal mode routes systems", () => {
   const result = analyzeUniversal("solve system 2x + y = 5; x - y = 1");
+  const nonlinear = analyzeUniversal("solve nonlinear equations x^2 + y^2 = 25; x - y = 1 guess x=3 y=2");
 
   assert.equal(result.summary, "linear system");
   assert.equal(result.answer, "x = 2, y = 1");
+  assert.equal(nonlinear.summary, "nonlinear system");
+  assert.equal(nonlinear.answer, "x = 4, y = 3");
 });
 
 runTest("universal mode routes advanced solvers", () => {

@@ -203,6 +203,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
     },
     {
+      title: "Nonlinear system solver",
+      when: () => activeMode === "ask" && /\b(nonlinear system|nonlinear equations|newton system|system.*guess)\b/.test(lower),
+      reason: "I detected a nonlinear equation system.",
+      needs: [
+        "Equations separated by semicolons",
+        "The same number of equations and variables",
+        "A starting guess for each variable",
+      ],
+      examples: [
+        ["Nonlinear system", "ask", "solve nonlinear system x^2 + y^2 = 25; x - y = 1 guess x=3 y=2"],
+      ],
+    },
+    {
       title: "Matrix or system solver",
       when: () => activeMode === "ask" && /\b(matrix|determinant|inverse|rref|rank|system|simultaneous)\b/.test(lower),
       reason: "I detected linear algebra.",
@@ -1594,7 +1607,8 @@ export function analyzeUniversal(question, values = {}) {
 
 export function analyzeSystem(statement) {
   const cleaned = cleanSystemQuestion(statement);
-  const parts = cleaned
+  const equationText = stripNonlinearSystemOptions(cleaned);
+  const parts = equationText
     .split(/[;\n]+/)
     .map((part) => part.trim())
     .filter(Boolean);
@@ -1609,11 +1623,21 @@ export function analyzeSystem(statement) {
   }
 
   const polynomials = equations.map((equation) => polynomialFrom(mathBinary("-", equation.left, equation.right)));
-  if (polynomials.some((polynomial) => !polynomial)) {
-    throw new Error("System solving currently supports linear polynomial equations.");
+  let rows = null;
+  let variables = [];
+  if (polynomials.every(Boolean)) {
+    variables = [...new Set(polynomials.flatMap((polynomial) => polynomialVariables(polynomial)))].sort();
+    try {
+      rows = polynomials.map((polynomial) => linearPolynomialRow(polynomial, variables));
+    } catch {
+      rows = null;
+    }
   }
 
-  const variables = [...new Set(polynomials.flatMap((polynomial) => polynomialVariables(polynomial)))].sort();
+  if (!rows) {
+    return analyzeNonlinearSystem(statement, equations, parts);
+  }
+
   if (variables.length === 0) {
     throw new Error("The system must contain variables.");
   }
@@ -1621,7 +1645,6 @@ export function analyzeSystem(statement) {
     throw new Error("This solver needs the same number of independent equations as variables.");
   }
 
-  const rows = polynomials.map((polynomial) => linearPolynomialRow(polynomial, variables));
   const matrix = rows.map((row) => row.coefficients);
   const constants = rows.map((row) => row.constant);
   const solution = solveLinearSystem(matrix, constants);
@@ -1664,6 +1687,82 @@ export function analyzeSystem(statement) {
       ["Variables", variables.join(", ")],
       ["Augmented matrix", formatAugmentedMatrix(matrix, constants)],
       ["Solution", answer],
+    ],
+  };
+}
+
+function analyzeNonlinearSystem(statement, equations, parts) {
+  const residualExpressions = equations.map((equation) => mathBinary("-", equation.left, equation.right));
+  const variables = [...new Set(residualExpressions.flatMap((expression) => mathVariables(expression)))]
+    .filter((name) => !isMathConstantName(name))
+    .sort();
+
+  if (variables.length === 0) {
+    throw new Error("The nonlinear system must contain variables.");
+  }
+  if (parts.length !== variables.length) {
+    throw new Error("Nonlinear system solving needs the same number of equations as variables.");
+  }
+
+  const options = parseNonlinearSystemOptions(statement, variables);
+  const result = solveNonlinearSystemNewton(residualExpressions, variables, options);
+  const solution = Object.fromEntries(variables.map((variable, index) => [variable, result.solution[index]]));
+  const answer = variables
+    .map((variable, index) => `${variable} = ${formatNumber(result.solution[index])}`)
+    .join(", ");
+  const tree = {
+    kind: "system",
+    children: equations,
+  };
+
+  return {
+    mode: "system",
+    tree,
+    answer,
+    summary: "nonlinear system",
+    details: `${variables.length} variables, Newton iteration${result.converged ? "" : " did not fully converge"}`,
+    variables,
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Parse nonlinear equations",
+        expression: parts.join("; "),
+        detail: "Each equation is moved into residual form F_i(x) = left - right.",
+      },
+      {
+        title: "Choose starting point",
+        expression: formatPointAssignments(Object.fromEntries(variables.map((variable, index) => [variable, options.initialGuess[index]]))),
+        detail: "Newton's method needs an initial estimate for every variable.",
+      },
+      {
+        title: "Approximate Jacobian",
+        expression: "J_ij ~= dF_i / dx_j",
+        detail: "The solver uses centered finite differences to estimate each partial derivative.",
+      },
+      {
+        title: "Iterate Newton steps",
+        expression: `${formatPointAssignments(solution)}, residual norm = ${formatNumber(result.residualNorm)}`,
+        detail: "Each step solves J delta = -F and uses damping when a full step does not reduce the residual.",
+      },
+    ],
+    table: {
+      headers: ["Iter", ...variables, "Residual norm", "Step norm"],
+      rows: result.rows.map((row) => [
+        String(row.iteration),
+        ...row.point.map(formatNumber),
+        formatNumber(row.residualNorm),
+        formatNumber(row.stepNorm),
+      ]),
+    },
+    artifacts: [
+      ["Variables", variables.join(", ")],
+      ["Initial guess", formatVector(options.initialGuess)],
+      ["Solution", answer],
+      ["Residuals", formatVector(result.residuals)],
+      ["Residual norm", formatNumber(result.residualNorm)],
+      ["Iterations", formatNumber(result.iterations)],
+      ["Converged", result.converged ? "yes" : "no"],
+      ["Tolerance", String(options.tolerance)],
     ],
   };
 }
@@ -13881,6 +13980,137 @@ function safeEvaluateMath(node, values = {}) {
   }
 }
 
+function parseNonlinearSystemOptions(text, variables) {
+  const tolerance = readNamedNumber(text, ["tolerance", "tol"], 1e-9);
+  const maxIterations = readNamedNumber(text, ["maxIterations", "maxiterations", "maxIter", "maxiter", "iterations"], 40);
+  const guessMatch = text.match(/\b(?:guess|initial|start|near)\b(.+)$/i);
+  const guessText = guessMatch ? guessMatch[1] : "";
+  const namedGuesses = variables.map((variable) => readNamedNumber(guessText, [variable], Number.NaN));
+  const numericGuesses = parseNumbers(guessText);
+  const initialGuess = namedGuesses.every(Number.isFinite)
+    ? namedGuesses
+    : numericGuesses.length >= variables.length
+      ? numericGuesses.slice(0, variables.length)
+      : namedGuesses.map((value) => (Number.isFinite(value) ? value : 1));
+
+  if (!(tolerance > 0)) {
+    throw new Error("Nonlinear system tolerance must be positive.");
+  }
+  if (!Number.isSafeInteger(maxIterations) || maxIterations < 1 || maxIterations > 100) {
+    throw new Error("Nonlinear system maxIterations must be an integer from 1 to 100.");
+  }
+  if (!initialGuess.every(Number.isFinite)) {
+    throw new Error("Nonlinear system guesses must be finite numbers.");
+  }
+
+  return {
+    tolerance,
+    maxIterations,
+    initialGuess,
+  };
+}
+
+function solveNonlinearSystemNewton(expressions, variables, options) {
+  let point = [...options.initialGuess];
+  const rows = [];
+  let residuals = evaluateNonlinearSystem(expressions, variables, point);
+  let residualNorm = vectorMagnitude(residuals);
+  let stepNorm = 0;
+
+  for (let iteration = 0; iteration <= options.maxIterations; iteration += 1) {
+    rows.push({
+      iteration,
+      point: point.map(normalizeNumber),
+      residualNorm: normalizeNumber(residualNorm),
+      stepNorm: normalizeNumber(stepNorm),
+    });
+
+    if (residualNorm <= options.tolerance) {
+      return {
+        solution: point.map(normalizeNumber),
+        residuals: residuals.map(normalizeNumber),
+        residualNorm: normalizeNumber(residualNorm),
+        iterations: iteration,
+        converged: true,
+        rows,
+      };
+    }
+    if (iteration === options.maxIterations) break;
+
+    const jacobian = approximateSystemJacobian(expressions, variables, point);
+    const step = solveLinearSystem(jacobian, residuals.map((value) => -value));
+    stepNorm = vectorMagnitude(step);
+    if (!(stepNorm > 0) || !Number.isFinite(stepNorm)) {
+      throw new Error("Newton's method found a zero or non-finite step; try a different starting guess.");
+    }
+
+    const accepted = dampedNewtonStep(expressions, variables, point, step, residualNorm);
+    point = accepted.point;
+    residuals = accepted.residuals;
+    residualNorm = accepted.residualNorm;
+    stepNorm = accepted.stepNorm;
+  }
+
+  return {
+    solution: point.map(normalizeNumber),
+    residuals: residuals.map(normalizeNumber),
+    residualNorm: normalizeNumber(residualNorm),
+    iterations: options.maxIterations,
+    converged: false,
+    rows,
+  };
+}
+
+function dampedNewtonStep(expressions, variables, point, step, currentNorm) {
+  let best = null;
+  for (let scale = 1; scale >= 1 / 1024; scale /= 2) {
+    const candidate = point.map((value, index) => value + scale * step[index]);
+    const residuals = evaluateNonlinearSystem(expressions, variables, candidate);
+    const residualNorm = vectorMagnitude(residuals);
+    if (!Number.isFinite(residualNorm)) continue;
+    const stepNorm = vectorMagnitude(step.map((value) => scale * value));
+    if (!best || residualNorm < best.residualNorm) {
+      best = { point: candidate, residuals, residualNorm, stepNorm };
+    }
+    if (residualNorm < currentNorm) {
+      return best;
+    }
+  }
+
+  if (!best) {
+    throw new Error("Newton's method produced non-finite trial points; try a different starting guess.");
+  }
+  return best;
+}
+
+function evaluateNonlinearSystem(expressions, variables, point) {
+  const values = Object.fromEntries(variables.map((variable, index) => [variable, point[index]]));
+  return expressions.map((expression) => {
+    const value = evaluateMath(expression, values);
+    if (!Number.isFinite(value)) {
+      throw new Error("A nonlinear system residual became non-finite; try a different starting guess.");
+    }
+    return value;
+  });
+}
+
+function approximateSystemJacobian(expressions, variables, point) {
+  const jacobian = Array.from({ length: expressions.length }, () => Array(variables.length).fill(0));
+  for (let column = 0; column < variables.length; column += 1) {
+    const step = 1e-5 * Math.max(1, Math.abs(point[column]));
+    const plus = [...point];
+    const minus = [...point];
+    plus[column] += step;
+    minus[column] -= step;
+    const plusValues = evaluateNonlinearSystem(expressions, variables, plus);
+    const minusValues = evaluateNonlinearSystem(expressions, variables, minus);
+    for (let row = 0; row < expressions.length; row += 1) {
+      jacobian[row][column] = (plusValues[row] - minusValues[row]) / (2 * step);
+    }
+  }
+  return jacobian;
+}
+
 function approximateDefiniteIntegral(evaluator, lower, upper, subintervals, method) {
   const stepSize = (upper - lower) / subintervals;
   const samples = [];
@@ -18651,7 +18881,9 @@ function isNumericalIntegrationQuestion(lower) {
 }
 
 function isSystemQuestion(lower) {
-  return lower.includes("system") || lower.includes("simultaneous equations");
+  return lower.includes("system") ||
+    lower.includes("simultaneous equations") ||
+    lower.includes("nonlinear equations");
 }
 
 function isStatisticsQuestion(lower) {
@@ -19161,9 +19393,19 @@ function cleanEquationQuestion(question) {
 function cleanSystemQuestion(question) {
   return question
     .replace(/^(solve|find|calculate|compute)\s+/i, "")
+    .replace(/\bnonlinear\s+equations?\s*:?\s*/i, "")
     .replace(/\bsystem\s*(?:of equations)?\s*:?\s*/i, "")
     .replace(/\bsimultaneous equations\s*:?\s*/i, "")
     .replace(/[?!.]+$/, "")
+    .trim();
+}
+
+function stripNonlinearSystemOptions(text) {
+  return text
+    .replace(/\b(?:tol|tolerance|maxIterations|maxiterations|maxIter|maxiter|iterations)\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, "")
+    .replace(/\b(?:guess|initial|start|near)\b.*$/i, "")
+    .replace(/\bnonlinear\b/gi, "")
+    .replace(/[;\s]+$/g, "")
     .trim();
 }
 

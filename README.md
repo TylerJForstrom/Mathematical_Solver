@@ -21,7 +21,8 @@ The frontend currently supports:
 - Linear and quadratic equation solving, including complex roots
 - Complex-number arithmetic and elementary complex functions through Ask mode
 - Numerical real-root approximation for higher-degree one-variable polynomials
-- Systems of linear equations through Universal Ask mode
+- Systems of linear equations and Newton-style nonlinear systems through
+  Universal Ask mode
 - Matrix determinants, inverses, multiplication, row reduction, rank, row-space
   bases, column-space bases, null spaces, QR decomposition, reduced SVD,
   real and complex 2x2 eigenvalues/eigenvectors, symmetric
@@ -205,6 +206,8 @@ The same idea works for algebra and calculus:
 - `complex (3+4i)*(2-i)` evaluates the same math tree with complex pairs and
   returns `10 + 5i`.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
+- `solve nonlinear system x^2 + y^2 = 25; x - y = 1 guess x=3 y=2`
+  numerically solves a square nonlinear system with Newton iterations.
 - `det [[1,2],[3,4]]` becomes a matrix-operation tree.
 - `dot [1,2,3] [4,5,6]`, `angle between [1,0] [0,1]`, and
   `projection [3,4] onto [1,0]` evaluate vector-geometry trees.
@@ -440,9 +443,9 @@ The demo includes:
   Cox proportional hazards regression, power/sample-size analysis, effect sizes
   with approximate confidence intervals for t tests, and pairwise follow-up
   summaries in Stats mode
-- Systems of equations, matrices with fundamental subspace bases, complex 2x2
-  eigenvectors, symmetric eigenvalue/eigenvector approximation, and dominant
-  eigenpair approximation,
+- Linear and nonlinear systems of equations, matrices with fundamental subspace
+  bases, complex 2x2 eigenvectors, symmetric eigenvalue/eigenvector
+  approximation, and dominant eigenpair approximation,
   polynomial/elementary integrals, optimization, linear programming,
   vector geometry, geometry formulas, sequences/series, graphing, differential
   equations, numerical roots, numerical integration, and numerical ODEs
