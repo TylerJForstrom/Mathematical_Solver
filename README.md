@@ -97,7 +97,8 @@ The frontend currently supports:
   two-sample variance F tests and Levene equal-variance tests,
   one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
-  permutation tests, one-way ANOVA, Mann-Whitney U, Wilcoxon signed-rank,
+  permutation tests, one-way ANOVA, Mann-Whitney U with exact small-sample
+  p-values when there are no ties, Wilcoxon signed-rank,
   Kruskal-Wallis, chi-square goodness-of-fit, chi-square independence tests
   for contingency tables, Fisher exact tests for 2x2 tables, binomial
   probability, Poisson probability, normal probability, inverse-normal percentiles, geometric
@@ -262,7 +263,8 @@ The same idea works for algebra and calculus:
 - `k-means k=3 points (1,1), (1,2), (5,5), (6,5), (10,10), (10,11)`
   clusters coordinate data and reports centroids plus within-cluster SSE.
 - `mann-whitney group1: 10,12,9; group2: 8,7,11` ranks combined samples
-  and computes a nonparametric U test.
+  and computes a nonparametric U test with exact p-values for small no-tie
+  samples.
 - `ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10` reports F,
   p-value, eta squared, omega squared, and pairwise comparisons.
 - `hypergeometric population=50 successes=5 draws=10 k=2` models sampling
@@ -392,7 +394,8 @@ The demo includes:
   one-proportion/two-proportion z tests,
   proportion confidence intervals, permutation tests, ANOVA, chi-square tests
   of goodness-of-fit and independence, Fisher exact tests,
-  nonparametric rank tests, Kaplan-Meier survival analysis, log-rank tests,
+  nonparametric rank tests including exact small-sample Mann-Whitney p-values,
+  Kaplan-Meier survival analysis, log-rank tests,
   Cox proportional hazards regression, power/sample-size analysis, effect sizes,
   and pairwise follow-up summaries in Stats mode
 - Systems of equations, matrices, polynomial/elementary integrals, optimization,

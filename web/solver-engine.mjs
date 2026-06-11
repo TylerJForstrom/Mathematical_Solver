@@ -3896,7 +3896,10 @@ function analyzeMannWhitney(statement) {
   }
 
   const z = (u1 - meanU) / Math.sqrt(varianceU);
-  const pValue = pValueForNormal(z, alternative);
+  const normalPValue = pValueForNormal(z, alternative);
+  const exactResult = exactMannWhitneyResult(u1, left.length, right.length, ranked.tieCorrection, alternative);
+  const pValue = exactResult ? exactResult.pValue : normalPValue;
+  const pValueMethod = exactResult ? "exact enumeration" : "normal approximation";
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
   const rankBiserial = (u1 - u2) / (left.length * right.length);
   const normalR = z / Math.sqrt(allValues.length);
@@ -3911,7 +3914,9 @@ function analyzeMannWhitney(statement) {
     ], "MANN-WHITNEY"),
     answer: `U = ${formatNumber(statistic)}, p = ${formatNumber(pValue)}`,
     summary: "Mann-Whitney U test",
-    details: "Rank-sum test with normal-approximation p-value",
+    details: exactResult
+      ? "Rank-sum test with exact small-sample p-value"
+      : "Rank-sum test with normal-approximation p-value",
     variables: [],
     metrics: treeMetrics(statsDatasetNode(allValues)),
     steps: [
@@ -3931,9 +3936,13 @@ function analyzeMannWhitney(statement) {
         detail: "The smaller U is reported; the signed z-score uses group 1 versus group 2.",
       },
       {
-        title: "Approximate p-value",
-        expression: `z = ${formatNumber(z)}, p = ${formatNumber(pValue)}`,
-        detail: "The p-value uses a tie-corrected normal approximation.",
+        title: exactResult ? "Compute exact p-value" : "Approximate p-value",
+        expression: exactResult
+          ? `exact p = ${formatNumber(pValue)}`
+          : `z = ${formatNumber(z)}, p = ${formatNumber(pValue)}`,
+        detail: exactResult
+          ? `The solver enumerates ${formatNumber(exactResult.total)} possible rank assignments because the samples are small and have no ties.`
+          : "The p-value uses a tie-corrected normal approximation.",
       },
       {
         title: "Compute effect size",
@@ -3960,6 +3969,13 @@ function analyzeMannWhitney(statement) {
       ["U2", formatNumber(u2)],
       ["Reported U", formatNumber(statistic)],
       ["z statistic", formatNumber(z)],
+      ["Normal approximation p", formatNumber(normalPValue)],
+      ["p-value method", pValueMethod],
+      ...(exactResult ? [
+        ["Exact lower tail", formatNumber(exactResult.lowerTail)],
+        ["Exact upper tail", formatNumber(exactResult.upperTail)],
+        ["Exact arrangements", formatNumber(exactResult.total)],
+      ] : []),
       ["p-value", formatNumber(pValue)],
       ["Rank-biserial r", formatNumber(rankBiserial)],
       ["Normal approximation r", formatNumber(normalR)],
@@ -12554,6 +12570,74 @@ function rankValues(values) {
   }
 
   return { ranks, tieCorrection };
+}
+
+function exactMannWhitneyResult(observedU, leftCount, rightCount, tieCorrection, alternative) {
+  if (tieCorrection > EPSILON) {
+    return null;
+  }
+
+  const totalArrangements = combination(leftCount + rightCount, leftCount);
+  if (totalArrangements > 200000) {
+    return null;
+  }
+
+  const distribution = exactMannWhitneyDistribution(leftCount, rightCount);
+  let lowerCount = 0;
+  let upperCount = 0;
+
+  for (const [uValue, count] of distribution.counts) {
+    if (uValue <= observedU + EPSILON) {
+      lowerCount += count;
+    }
+    if (uValue >= observedU - EPSILON) {
+      upperCount += count;
+    }
+  }
+
+  const lowerTail = lowerCount / distribution.total;
+  const upperTail = upperCount / distribution.total;
+  let pValue;
+  if (alternative === "less") {
+    pValue = lowerTail;
+  } else if (alternative === "greater") {
+    pValue = upperTail;
+  } else {
+    pValue = Math.min(1, 2 * Math.min(lowerTail, upperTail));
+  }
+
+  return {
+    pValue: normalizeNumber(pValue),
+    lowerTail: normalizeNumber(lowerTail),
+    upperTail: normalizeNumber(upperTail),
+    total: distribution.total,
+  };
+}
+
+function exactMannWhitneyDistribution(leftCount, rightCount) {
+  const totalCount = leftCount + rightCount;
+  const minimumRankSum = (leftCount * (leftCount + 1)) / 2;
+  const rankSumCountsByChosen = Array.from({ length: leftCount + 1 }, () => new Map());
+  rankSumCountsByChosen[0].set(0, 1);
+
+  for (let rank = 1; rank <= totalCount; rank += 1) {
+    for (let chosen = Math.min(rank, leftCount); chosen >= 1; chosen -= 1) {
+      for (const [rankSum, count] of rankSumCountsByChosen[chosen - 1]) {
+        const nextSum = rankSum + rank;
+        rankSumCountsByChosen[chosen].set(nextSum, (rankSumCountsByChosen[chosen].get(nextSum) ?? 0) + count);
+      }
+    }
+  }
+
+  const counts = new Map();
+  let total = 0;
+  for (const [rankSum, count] of rankSumCountsByChosen[leftCount]) {
+    const uValue = rankSum - minimumRankSum;
+    counts.set(uValue, count);
+    total += count;
+  }
+
+  return { counts, total };
 }
 
 function rankAbsoluteValues(values) {

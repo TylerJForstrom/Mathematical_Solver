@@ -756,8 +756,18 @@ runTest("statistics mode computes Mann-Whitney U tests", () => {
   const result = analyzeStatistics("mann-whitney group1: 10, 12, 9; group2: 8, 7, 11");
 
   assert.equal(result.summary, "Mann-Whitney U test");
-  assert.equal(result.answer, "U = 2, p = 0.275234");
+  assert.equal(result.answer, "U = 2, p = 0.4");
+  assert.equal(artifactValue(result, "p-value method"), "exact enumeration");
+  assert.equal(artifactValue(result, "Exact arrangements"), "20");
   assert.equal(artifactValue(result, "Rank-biserial r"), "0.555556");
+});
+
+runTest("statistics mode falls back to Mann-Whitney normal approximation with ties", () => {
+  const result = analyzeStatistics("mann-whitney group1: 1, 2, 2; group2: 2, 3, 4");
+
+  assert.equal(result.summary, "Mann-Whitney U test");
+  assert.equal(artifactValue(result, "p-value method"), "normal approximation");
+  assert.equal(artifactValue(result, "p-value"), "0.104571");
 });
 
 runTest("statistics mode computes Wilcoxon signed-rank tests", () => {
