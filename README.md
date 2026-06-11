@@ -23,8 +23,9 @@ The frontend currently supports:
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations through Universal Ask mode
 - Matrix determinants, inverses, multiplication, row reduction, rank, row-space
-  bases, column-space bases, null spaces, QR decomposition, reduced SVD, and
-  2x2 eigenvalues/eigenvectors
+  bases, column-space bases, null spaces, QR decomposition, reduced SVD,
+  2x2 eigenvalues/eigenvectors, and dominant eigenpair approximation for
+  larger square matrices
 - Vector geometry: dot products, cross products, magnitudes, angles,
   projections, and point distances
 - Geometry formulas: circles, rectangles, triangles, Pythagorean theorem,
@@ -203,6 +204,8 @@ The same idea works for algebra and calculus:
 - `nullspace [[1,2,1],[2,4,2],[1,1,0]]` extracts a basis from the RREF free variables.
 - `eigenvectors [[2,1],[1,2]]` solves the 2x2 characteristic polynomial and then
   finds each eigenspace.
+- `dominant eigen [[4,1,0],[1,3,0],[0,0,2]]` uses power iteration to
+  approximate the largest-magnitude eigenvalue and eigenvector.
 - `limit (x^2 - 1)/(x - 1) as x approaches 1` samples both sides of a
   removable discontinuity and returns `limit = 2`.
 - `taylor sin(x) order=5` repeatedly differentiates and returns
@@ -405,8 +408,9 @@ The demo includes:
   Cox proportional hazards regression, power/sample-size analysis, effect sizes
   with approximate confidence intervals for t tests, and pairwise follow-up
   summaries in Stats mode
-- Systems of equations, matrices with fundamental subspace bases,
-  polynomial/elementary integrals, optimization, linear programming,
+- Systems of equations, matrices with fundamental subspace bases and dominant
+  eigenpair approximation, polynomial/elementary integrals, optimization,
+  linear programming,
   vector geometry, geometry formulas, sequences/series, graphing, differential
   equations, numerical roots, numerical integration, and numerical ODEs
   through Ask mode
@@ -437,7 +441,7 @@ These are good ways to make the project more impressive mathematically:
 3. Add trigonometric simplification identities.
 4. Add substitution, integration by parts, and partial-fraction decomposition.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
-6. Add larger-matrix eigenvalue approximation.
+6. Add QR-based eigenvalue approximation for multiple eigenvalues.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add systems of differential equations and phase-plane direction fields.
 9. Add multi-step natural-language explanations for word problems.

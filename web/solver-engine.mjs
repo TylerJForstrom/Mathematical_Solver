@@ -1665,7 +1665,7 @@ export function analyzeMatrix(statement) {
         detail: "Pivot variables are written in terms of the free variables.",
       },
     ];
-  } else if (lower.includes("eigenvector")) {
+  } else if (lower.includes("eigenvector") && is2x2Matrix(matrices[0]) && !wantsDominantEigenpair(lower)) {
     const result = eigenvectors2x2(matrices[0]);
     answer = result.map((entry) => `lambda ${entry.lambda}: ${formatVectorList(entry.basis)}`).join("; ");
     summary = "2x2 eigenvectors";
@@ -1735,31 +1735,72 @@ export function analyzeMatrix(statement) {
         detail: "Pivot count measures the dimension of the column space.",
       },
     ];
-  } else if (lower.includes("eigen")) {
-    const eigenvalues = eigenvalues2x2(matrices[0]);
-    const trace = matrices[0][0][0] + matrices[0][1][1];
-    const determinantValue = determinant(matrices[0]);
-    answer = `lambda = ${eigenvalues.join(", ")}`;
-    summary = "2x2 eigenvalues";
-    artifacts = [
-      ["Matrix", formatMatrix(matrices[0])],
-      ["Trace", formatNumber(trace)],
-      ["Determinant", formatNumber(determinantValue)],
-      ["Eigenvalues", eigenvalues.join(", ")],
-    ];
-    children = [matrixNode("A", matrices[0]), statsMetricNode("lambda1", eigenvalues[0]), statsMetricNode("lambda2", eigenvalues[1])];
-    steps = [
-      {
-        title: "Read 2x2 matrix",
-        expression: formatMatrix(matrices[0]),
-        detail: "The demo computes eigenvalues from the characteristic polynomial.",
-      },
-      {
-        title: "Solve characteristic equation",
-        expression: `lambda = ${eigenvalues.join(", ")}`,
-        detail: "For 2x2 matrices, lambda^2 - trace(A)lambda + det(A) = 0.",
-      },
-    ];
+  } else if (lower.includes("eigen") || lower.includes("power iteration")) {
+    if (is2x2Matrix(matrices[0]) && !wantsDominantEigenpair(lower)) {
+      const eigenvalues = eigenvalues2x2(matrices[0]);
+      const trace = matrices[0][0][0] + matrices[0][1][1];
+      const determinantValue = determinant(matrices[0]);
+      answer = `lambda = ${eigenvalues.join(", ")}`;
+      summary = "2x2 eigenvalues";
+      artifacts = [
+        ["Matrix", formatMatrix(matrices[0])],
+        ["Trace", formatNumber(trace)],
+        ["Determinant", formatNumber(determinantValue)],
+        ["Eigenvalues", eigenvalues.join(", ")],
+      ];
+      children = [matrixNode("A", matrices[0]), statsMetricNode("lambda1", eigenvalues[0]), statsMetricNode("lambda2", eigenvalues[1])];
+      steps = [
+        {
+          title: "Read 2x2 matrix",
+          expression: formatMatrix(matrices[0]),
+          detail: "The demo computes eigenvalues from the characteristic polynomial.",
+        },
+        {
+          title: "Solve characteristic equation",
+          expression: `lambda = ${eigenvalues.join(", ")}`,
+          detail: "For 2x2 matrices, lambda^2 - trace(A)lambda + det(A) = 0.",
+        },
+      ];
+    } else {
+      const maxIterations = Math.max(1, Math.min(10000, Math.round(readNamedNumber(statement, ["iterations", "iter", "maxIterations", "maxiter"], 1000))));
+      const tolerance = readNamedNumber(statement, ["tolerance", "tol", "epsilon"], 1e-10);
+      const result = dominantEigenpairPowerIteration(matrices[0], { maxIterations, tolerance });
+      answer = `lambda ~= ${formatNumber(result.eigenvalue)}, v ~= ${formatVector(result.vector)}`;
+      summary = "dominant eigenpair";
+      artifacts = [
+        ["Matrix", formatMatrix(matrices[0])],
+        ["Method", "power iteration"],
+        ["Dominant eigenvalue", formatNumber(result.eigenvalue)],
+        ["Eigenvector", formatVector(result.vector)],
+        ["Iterations", formatNumber(result.iterations)],
+        ["Converged", result.converged ? "yes" : "no"],
+        ["Residual norm", formatNumber(result.residualNorm)],
+        ["Tolerance", String(result.tolerance)],
+      ];
+      children = [matrixNode("A", matrices[0]), statsMetricNode("lambda", result.eigenvalue), vectorNode("v", result.vector)];
+      steps = [
+        {
+          title: "Read square matrix",
+          expression: matrixShape(matrices[0]),
+          detail: "Power iteration approximates the eigenpair with largest magnitude eigenvalue.",
+        },
+        {
+          title: "Iterate matrix-vector products",
+          expression: `${formatNumber(result.iterations)} iterations, ${result.converged ? "converged" : "stopped"}`,
+          detail: "Each step multiplies by A and renormalizes the vector.",
+        },
+        {
+          title: "Estimate eigenvalue",
+          expression: `lambda ~= ${formatNumber(result.eigenvalue)}`,
+          detail: "The Rayleigh quotient estimates the eigenvalue for the final vector.",
+        },
+        {
+          title: "Check residual",
+          expression: `||Av - lambda v|| = ${formatNumber(result.residualNorm)}`,
+          detail: "A small residual means the approximate vector behaves like an eigenvector.",
+        },
+      ];
+    }
   } else if (lower.includes("svd") || lower.includes("singular value")) {
     const result = singularValueDecomposition(matrices[0]);
     answer = `singular values = ${formatVector(result.singularValues)}`;
@@ -8848,6 +8889,10 @@ function matrixShape(matrix) {
   return `${matrix.length}x${matrix[0].length}`;
 }
 
+function is2x2Matrix(matrix) {
+  return matrix.length === 2 && matrix[0].length === 2;
+}
+
 function formatMatrix(matrix) {
   return `[${matrix.map((row) => `[${row.map(formatNumber).join(", ")}]`).join(", ")}]`;
 }
@@ -10253,6 +10298,56 @@ function columnSpaceBasis(matrix) {
   return {
     ...reduced,
     basis,
+  };
+}
+
+function dominantEigenpairPowerIteration(matrix, options = {}) {
+  if (matrix.length !== matrix[0].length) {
+    throw new Error("Power iteration needs a square matrix.");
+  }
+  const size = matrix.length;
+  const maxIterations = options.maxIterations ?? 1000;
+  const tolerance = options.tolerance ?? 1e-10;
+  if (!(tolerance > 0)) {
+    throw new Error("Power iteration tolerance must be positive.");
+  }
+
+  let vector = normalizeUnitVector(Array.from({ length: size }, (_, index) => index + 1));
+  let eigenvalue = 0;
+  let residualNorm = Number.POSITIVE_INFINITY;
+  let converged = false;
+  let iterations = 0;
+
+  for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+    const next = multiplyMatrixVector(matrix, vector);
+    if (vectorMagnitude(next) <= EPSILON) {
+      throw new Error("Power iteration reached the zero vector; dominant eigenpair is not identifiable from this start vector.");
+    }
+
+    const nextVector = normalizeUnitVector(next);
+    const product = multiplyMatrixVector(matrix, nextVector);
+    const nextEigenvalue = dotProduct(nextVector, product) / dotProduct(nextVector, nextVector);
+    const residual = product.map((value, index) => value - nextEigenvalue * nextVector[index]);
+    residualNorm = vectorMagnitude(residual);
+    const vectorChange = vectorMagnitude(nextVector.map((value, index) => value - vector[index]));
+    const eigenvalueChange = Math.abs(nextEigenvalue - eigenvalue);
+
+    vector = nextVector;
+    eigenvalue = nextEigenvalue;
+    iterations = iteration;
+    if (residualNorm <= tolerance || (vectorChange <= tolerance && eigenvalueChange <= tolerance)) {
+      converged = true;
+      break;
+    }
+  }
+
+  return {
+    eigenvalue: normalizeNumber(eigenvalue),
+    vector: vector.map(normalizeNumber),
+    iterations,
+    converged,
+    residualNorm: normalizeNumber(residualNorm),
+    tolerance,
   };
 }
 
@@ -15892,6 +15987,7 @@ function hasImaginaryUnit(text) {
 function isMatrixQuestion(lower) {
   return lower.includes("matrix") ||
     lower.includes("determinant") ||
+    wantsDominantEigenpair(lower) ||
     lower.startsWith("svd ") ||
     lower.includes("singular value") ||
     lower.startsWith("qr ") ||
@@ -15914,12 +16010,20 @@ function isMatrixQuestion(lower) {
     lower.startsWith("eigen ") ||
     lower.includes("eigenvalue") ||
     lower.includes("eigenvector") ||
+    lower.includes("power iteration") ||
     lower.startsWith("nullspace ") ||
     lower.startsWith("null space ") ||
     lower.startsWith("kernel ") ||
     lower.includes("inverse [[") ||
     lower.includes("multiply [[") ||
     lower.includes("product [[");
+}
+
+function wantsDominantEigenpair(lower) {
+  return lower.includes("dominant eigen") ||
+    lower.includes("largest eigen") ||
+    lower.includes("principal eigen") ||
+    lower.includes("power iteration");
 }
 
 function isVectorQuestion(lower) {
