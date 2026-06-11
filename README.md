@@ -24,8 +24,8 @@ The frontend currently supports:
 - Systems of linear equations through Universal Ask mode
 - Matrix determinants, inverses, multiplication, row reduction, rank, row-space
   bases, column-space bases, null spaces, QR decomposition, reduced SVD,
-  2x2 eigenvalues/eigenvectors, symmetric eigenvalue approximation for larger
-  matrices, and dominant eigenpair approximation
+  2x2 eigenvalues/eigenvectors, symmetric eigenvalue/eigenvector approximation
+  for larger matrices, and dominant eigenpair approximation
 - Vector geometry: dot products, cross products, magnitudes, angles,
   projections, and point distances
 - Geometry formulas: circles, rectangles, triangles, Pythagorean theorem,
@@ -206,6 +206,8 @@ The same idea works for algebra and calculus:
   finds each eigenspace.
 - `eigenvalues [[4,1,0],[1,3,0],[0,0,2]]` approximates all eigenvalues of
   a larger symmetric matrix.
+- `eigenvectors [[4,1,0],[1,3,0],[0,0,2]]` approximates orthonormal
+  eigenvectors for a larger symmetric matrix.
 - `dominant eigen [[4,1,0],[1,3,0],[0,0,2]]` uses power iteration to
   approximate the largest-magnitude eigenvalue and eigenvector.
 - `limit (x^2 - 1)/(x - 1) as x approaches 1` samples both sides of a
@@ -411,7 +413,7 @@ The demo includes:
   with approximate confidence intervals for t tests, and pairwise follow-up
   summaries in Stats mode
 - Systems of equations, matrices with fundamental subspace bases, symmetric
-  eigenvalue approximation, and dominant eigenpair approximation,
+  eigenvalue/eigenvector approximation, and dominant eigenpair approximation,
   polynomial/elementary integrals, optimization, linear programming,
   vector geometry, geometry formulas, sequences/series, graphing, differential
   equations, numerical roots, numerical integration, and numerical ODEs
@@ -443,7 +445,7 @@ These are good ways to make the project more impressive mathematically:
 3. Add trigonometric simplification identities.
 4. Add substitution, integration by parts, and partial-fraction decomposition.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
-6. Add complex eigenvalue handling and approximate eigenvectors for larger matrices.
+6. Add complex eigenvalue handling and nonsymmetric eigenvector approximations.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add systems of differential equations and phase-plane direction fields.
 9. Add multi-step natural-language explanations for word problems.
