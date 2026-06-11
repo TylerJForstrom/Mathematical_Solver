@@ -846,6 +846,18 @@ runTest("matrix mode computes rank", () => {
   assert.equal(result.answer, "rank = 1");
 });
 
+runTest("matrix mode computes row-space and column-space bases", () => {
+  const rowSpace = analyzeMatrix("row space [[1,2,1],[2,4,2],[1,1,0]]");
+  const columnSpace = analyzeMatrix("column space [[1,2,1],[2,4,2],[1,1,0]]");
+
+  assert.equal(rowSpace.summary, "matrix row space");
+  assert.equal(rowSpace.answer, "basis = [[1, 0, -1], [0, 1, 1]]");
+  assert.equal(artifactValue(rowSpace, "Rank"), "2");
+  assert.equal(columnSpace.summary, "matrix column space");
+  assert.equal(columnSpace.answer, "basis = [[1, 2, 1], [2, 4, 1]]");
+  assert.equal(artifactValue(columnSpace, "Pivot columns"), "1, 2");
+});
+
 runTest("matrix mode computes QR decompositions", () => {
   const result = analyzeMatrix("qr [[1,1],[1,0],[0,1]]");
 
@@ -1128,6 +1140,8 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("wilcoxon signed-rank before: 10,12,9,11; after: 11,14,10,13").summary, "Wilcoxon signed-rank test");
   assert.equal(analyzeUniversal("kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "Kruskal-Wallis test");
   assert.equal(analyzeUniversal("rank [[1,2],[2,4]]").summary, "matrix rank");
+  assert.equal(analyzeUniversal("row space [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix row space");
+  assert.equal(analyzeUniversal("column space [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix column space");
   assert.equal(analyzeUniversal("qr [[1,1],[1,0],[0,1]]").summary, "QR decomposition");
   assert.equal(analyzeUniversal("svd [[3,1],[1,3]]").summary, "singular value decomposition");
   assert.equal(analyzeUniversal("eigen [[2,1],[1,2]]").summary, "2x2 eigenvalues");

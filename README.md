@@ -22,8 +22,9 @@ The frontend currently supports:
 - Complex-number arithmetic and elementary complex functions through Ask mode
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations through Universal Ask mode
-- Matrix determinants, inverses, multiplication, row reduction, rank, null spaces,
-  QR decomposition, reduced SVD, and 2x2 eigenvalues/eigenvectors
+- Matrix determinants, inverses, multiplication, row reduction, rank, row-space
+  bases, column-space bases, null spaces, QR decomposition, reduced SVD, and
+  2x2 eigenvalues/eigenvectors
 - Vector geometry: dot products, cross products, magnitudes, angles,
   projections, and point distances
 - Geometry formulas: circles, rectangles, triangles, Pythagorean theorem,
@@ -194,6 +195,9 @@ The same idea works for algebra and calculus:
 - `arithmetic sequence a1=3 d=5 n=10`, `geometric sequence a1=2 r=3 n=5`,
   and `sum k^2 from k=1 to 5` evaluate sequence and series trees.
 - `rref [[1,2,1],[2,4,2],[1,1,0]]` becomes a row-operation tree with rank and pivots.
+- `row space [[1,2,1],[2,4,2],[1,1,0]]` and
+  `column space [[1,2,1],[2,4,2],[1,1,0]]` return bases for the fundamental
+  subspaces.
 - `qr [[1,1],[1,0],[0,1]]` uses Gram-Schmidt to return `Q`, `R`, and `Q*R`.
 - `svd [[3,1],[1,3]]` returns singular values plus `U`, `Sigma`, `V^T`, and reconstruction.
 - `nullspace [[1,2,1],[2,4,2],[1,1,0]]` extracts a basis from the RREF free variables.
@@ -401,8 +405,8 @@ The demo includes:
   Cox proportional hazards regression, power/sample-size analysis, effect sizes
   with approximate confidence intervals for t tests, and pairwise follow-up
   summaries in Stats mode
-- Systems of equations, matrices, polynomial/elementary integrals, optimization,
-  linear programming,
+- Systems of equations, matrices with fundamental subspace bases,
+  polynomial/elementary integrals, optimization, linear programming,
   vector geometry, geometry formulas, sequences/series, graphing, differential
   equations, numerical roots, numerical integration, and numerical ODEs
   through Ask mode
@@ -433,7 +437,7 @@ These are good ways to make the project more impressive mathematically:
 3. Add trigonometric simplification identities.
 4. Add substitution, integration by parts, and partial-fraction decomposition.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
-6. Add row-space bases, column-space bases, and larger-matrix eigenvalue approximation.
+6. Add larger-matrix eigenvalue approximation.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add systems of differential equations and phase-plane direction fields.
 9. Add multi-step natural-language explanations for word problems.

@@ -1572,7 +1572,69 @@ export function analyzeMatrix(statement) {
   let children;
   let steps;
 
-  if (lower.includes("nullspace") || lower.includes("null space") || lower.includes("kernel")) {
+  if (lower.includes("rowspace") || lower.includes("row space") || lower.includes("row-space")) {
+    const result = rowSpaceBasis(matrices[0]);
+    answer = result.basis.length ? `basis = ${formatVectorList(result.basis)}` : "row space = {0}";
+    summary = "matrix row space";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["RREF", formatMatrix(result.rref)],
+      ["Rank", formatNumber(result.rank)],
+      ["Pivot columns", result.pivots.map((index) => String(index + 1)).join(", ") || "none"],
+      ["Basis", result.basis.length ? formatVectorList(result.basis) : "{0}"],
+    ];
+    children = result.basis.length
+      ? [matrixNode("A", matrices[0]), matrixNode("RREF", result.rref), matrixNode("BASIS", result.basis)]
+      : [matrixNode("A", matrices[0]), matrixNode("RREF", result.rref), statsMetricNode("dim", 0)];
+    steps = [
+      {
+        title: "Row reduce matrix",
+        expression: formatMatrix(result.rref),
+        detail: "Elementary row operations preserve the row space while revealing independent rows.",
+      },
+      {
+        title: "Keep nonzero RREF rows",
+        expression: result.basis.length ? formatVectorList(result.basis) : "{0}",
+        detail: "The nonzero rows of RREF form a basis for the row space.",
+      },
+      {
+        title: "Report dimension",
+        expression: `dim row(A) = ${formatNumber(result.rank)}`,
+        detail: "The row-space dimension equals the rank.",
+      },
+    ];
+  } else if (lower.includes("columnspace") || lower.includes("column space") || lower.includes("column-space") || lower.includes("colspace") || lower.includes("col space")) {
+    const result = columnSpaceBasis(matrices[0]);
+    answer = result.basis.length ? `basis = ${formatVectorList(result.basis)}` : "column space = {0}";
+    summary = "matrix column space";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["RREF", formatMatrix(result.rref)],
+      ["Rank", formatNumber(result.rank)],
+      ["Pivot columns", result.pivots.map((index) => String(index + 1)).join(", ") || "none"],
+      ["Basis", result.basis.length ? formatVectorList(result.basis) : "{0}"],
+    ];
+    children = result.basis.length
+      ? [matrixNode("A", matrices[0]), matrixNode("RREF", result.rref), matrixNode("BASIS", result.basis)]
+      : [matrixNode("A", matrices[0]), matrixNode("RREF", result.rref), statsMetricNode("dim", 0)];
+    steps = [
+      {
+        title: "Row reduce matrix",
+        expression: formatMatrix(result.rref),
+        detail: "The pivot positions in RREF identify which original columns are independent.",
+      },
+      {
+        title: "Select original pivot columns",
+        expression: result.basis.length ? formatVectorList(result.basis) : "{0}",
+        detail: "Column-space basis vectors must come from the original matrix columns.",
+      },
+      {
+        title: "Report dimension",
+        expression: `dim col(A) = ${formatNumber(result.rank)}`,
+        detail: "The column-space dimension equals the rank.",
+      },
+    ];
+  } else if (lower.includes("nullspace") || lower.includes("null space") || lower.includes("kernel")) {
     const result = nullSpaceBasis(matrices[0]);
     answer = result.basis.length ? `basis = ${formatVectorList(result.basis)}` : "null space = {0}";
     summary = "matrix null space";
@@ -10170,6 +10232,30 @@ function nullSpaceBasis(matrix) {
   };
 }
 
+function rowSpaceBasis(matrix) {
+  const reduced = rowReduceMatrix(matrix);
+  const basis = reduced.rref
+    .filter((row) => row.some((value) => !nearlyEqual(value, 0)))
+    .map((row) => row.map(normalizeNumber));
+
+  return {
+    ...reduced,
+    basis,
+  };
+}
+
+function columnSpaceBasis(matrix) {
+  const reduced = rowReduceMatrix(matrix);
+  const basis = reduced.pivots.map((columnIndex) =>
+    matrix.map((row) => normalizeNumber(row[columnIndex])),
+  );
+
+  return {
+    ...reduced,
+    basis,
+  };
+}
+
 function eigenvalues2x2(matrix) {
   if (matrix.length !== 2 || matrix[0].length !== 2) {
     throw new Error("Eigenvalue mode currently supports 2x2 matrices.");
@@ -15812,6 +15898,14 @@ function isMatrixQuestion(lower) {
     lower.includes("qr decomposition") ||
     lower.includes("gram-schmidt") ||
     lower.includes("gram schmidt") ||
+    lower.startsWith("rowspace ") ||
+    lower.startsWith("row space ") ||
+    lower.includes("row-space") ||
+    lower.startsWith("columnspace ") ||
+    lower.startsWith("column space ") ||
+    lower.includes("column-space") ||
+    lower.startsWith("colspace ") ||
+    lower.startsWith("col space ") ||
     lower.startsWith("det ") ||
     lower.includes(" det ") ||
     lower.startsWith("rref ") ||
