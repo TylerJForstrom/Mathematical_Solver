@@ -881,6 +881,14 @@ runTest("matrix mode computes 2x2 eigenvalues", () => {
   assert.equal(result.answer, "lambda = 3, 1");
 });
 
+runTest("matrix mode computes complex 2x2 eigenvalues", () => {
+  const result = analyzeMatrix("eigen [[0,-1],[1,0]]");
+
+  assert.equal(result.summary, "2x2 eigenvalues");
+  assert.equal(result.answer, "lambda = i, -i");
+  assert.equal(artifactValue(result, "Eigenvalues"), "i, -i");
+});
+
 runTest("matrix mode approximates symmetric matrix eigenvalues", () => {
   const result = analyzeMatrix("eigenvalues [[4,1,0],[1,3,0],[0,0,2]]");
 
@@ -923,6 +931,14 @@ runTest("matrix mode computes 2x2 eigenvectors", () => {
 
   assert.equal(result.summary, "2x2 eigenvectors");
   assert.equal(result.answer, "lambda 3: [[1, 1]]; lambda 1: [[1, -1]]");
+});
+
+runTest("matrix mode computes complex 2x2 eigenvectors", () => {
+  const result = analyzeMatrix("eigenvectors [[0,-1],[1,0]]");
+
+  assert.equal(result.summary, "2x2 eigenvectors");
+  assert.equal(result.answer, "lambda i: [[1, -i]]; lambda -i: [[1, i]]");
+  assert.equal(artifactValue(result, "Eigenvectors"), "lambda i: [[1, -i]]; lambda -i: [[1, i]]");
 });
 
 runTest("integral mode applies polynomial power rules", () => {
@@ -1180,6 +1196,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("power iteration [[4,1,0],[1,3,0],[0,0,2]]").summary, "dominant eigenpair");
   assert.equal(analyzeUniversal("nullspace [[1,2,1],[2,4,2],[1,1,0]]").summary, "matrix null space");
   assert.equal(analyzeUniversal("eigenvectors [[2,1],[1,2]]").summary, "2x2 eigenvectors");
+  assert.equal(analyzeUniversal("eigenvectors [[0,-1],[1,0]]").answer, "lambda i: [[1, -i]]; lambda -i: [[1, i]]");
   assert.equal(analyzeUniversal("dot [1,2,3] [4,5,6]").summary, "dot product");
   assert.equal(analyzeUniversal("angle between [1,0] [0,1]").summary, "vector angle");
   assert.equal(analyzeUniversal("arithmetic sequence a1=3 d=5 n=10").summary, "arithmetic sequence");

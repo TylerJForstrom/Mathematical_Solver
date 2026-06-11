@@ -24,8 +24,9 @@ The frontend currently supports:
 - Systems of linear equations through Universal Ask mode
 - Matrix determinants, inverses, multiplication, row reduction, rank, row-space
   bases, column-space bases, null spaces, QR decomposition, reduced SVD,
-  2x2 eigenvalues/eigenvectors, symmetric eigenvalue/eigenvector approximation
-  for larger matrices, and dominant eigenpair approximation
+  real and complex 2x2 eigenvalues/eigenvectors, symmetric
+  eigenvalue/eigenvector approximation for larger matrices, and dominant
+  eigenpair approximation
 - Vector geometry: dot products, cross products, magnitudes, angles,
   projections, and point distances
 - Geometry formulas: circles, rectangles, triangles, Pythagorean theorem,
@@ -204,6 +205,8 @@ The same idea works for algebra and calculus:
 - `nullspace [[1,2,1],[2,4,2],[1,1,0]]` extracts a basis from the RREF free variables.
 - `eigenvectors [[2,1],[1,2]]` solves the 2x2 characteristic polynomial and then
   finds each eigenspace.
+- `eigenvectors [[0,-1],[1,0]]` returns complex eigenvectors for a 2x2
+  rotation matrix.
 - `eigenvalues [[4,1,0],[1,3,0],[0,0,2]]` approximates all eigenvalues of
   a larger symmetric matrix.
 - `eigenvectors [[4,1,0],[1,3,0],[0,0,2]]` approximates orthonormal
@@ -412,8 +415,9 @@ The demo includes:
   Cox proportional hazards regression, power/sample-size analysis, effect sizes
   with approximate confidence intervals for t tests, and pairwise follow-up
   summaries in Stats mode
-- Systems of equations, matrices with fundamental subspace bases, symmetric
-  eigenvalue/eigenvector approximation, and dominant eigenpair approximation,
+- Systems of equations, matrices with fundamental subspace bases, complex 2x2
+  eigenvectors, symmetric eigenvalue/eigenvector approximation, and dominant
+  eigenpair approximation,
   polynomial/elementary integrals, optimization, linear programming,
   vector geometry, geometry formulas, sequences/series, graphing, differential
   equations, numerical roots, numerical integration, and numerical ODEs
@@ -445,7 +449,7 @@ These are good ways to make the project more impressive mathematically:
 3. Add trigonometric simplification identities.
 4. Add substitution, integration by parts, and partial-fraction decomposition.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
-6. Add complex eigenvalue handling and nonsymmetric eigenvector approximations.
+6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
 7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
 8. Add systems of differential equations and phase-plane direction fields.
 9. Add multi-step natural-language explanations for word problems.

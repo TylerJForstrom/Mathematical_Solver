@@ -1667,7 +1667,7 @@ export function analyzeMatrix(statement) {
     ];
   } else if (lower.includes("eigenvector") && is2x2Matrix(matrices[0]) && !wantsDominantEigenpair(lower)) {
     const result = eigenvectors2x2(matrices[0]);
-    answer = result.map((entry) => `lambda ${entry.lambda}: ${formatVectorList(entry.basis)}`).join("; ");
+    answer = result.map((entry) => `lambda ${entry.lambda}: ${formatEigenvectorBasis(entry)}`).join("; ");
     summary = "2x2 eigenvectors";
     artifacts = [
       ["Matrix", formatMatrix(matrices[0])],
@@ -1675,7 +1675,7 @@ export function analyzeMatrix(statement) {
     ];
     children = [
       matrixNode("A", matrices[0]),
-      ...result.map((entry) => matrixNode(`L${entry.lambda}`, entry.basis)),
+      ...result.map(eigenvectorBasisNode),
     ];
     steps = [
       {
@@ -10591,12 +10591,28 @@ function eigenvalues2x2(matrix) {
   const real = trace / 2;
   const imaginary = Math.sqrt(-discriminant) / 2;
   return [
-    `${formatNumber(real)} + ${formatNumber(imaginary)}i`,
-    `${formatNumber(real)} - ${formatNumber(imaginary)}i`,
+    formatComplex(complex(real, imaginary)),
+    formatComplex(complex(real, -imaginary)),
   ];
 }
 
 function eigenvectors2x2(matrix) {
+  const trace = matrix[0][0] + matrix[1][1];
+  const det = determinant(matrix);
+  const discriminant = trace ** 2 - 4 * det;
+  if (discriminant < -EPSILON) {
+    const real = trace / 2;
+    const imaginary = Math.sqrt(-discriminant) / 2;
+    return [
+      complex(real, imaginary),
+      complex(real, -imaginary),
+    ].map((lambda) => ({
+      lambda: formatComplex(lambda),
+      basis: [complexEigenvector2x2(matrix, lambda)],
+      isComplex: true,
+    }));
+  }
+
   const eigenvalues = realEigenvalues2x2(matrix);
   return eigenvalues.map((lambda) => {
     const shifted = matrix.map((row, rowIndex) =>
@@ -10629,6 +10645,59 @@ function realEigenvalues2x2(matrix) {
     normalizeNumber((trace + root) / 2),
     normalizeNumber((trace - root) / 2),
   ]).sort((left, right) => right - left);
+}
+
+function complexEigenvector2x2(matrix, lambda) {
+  const rows = [
+    [complexSub(complex(matrix[0][0]), lambda), complex(matrix[0][1])],
+    [complex(matrix[1][0]), complexSub(complex(matrix[1][1]), lambda)],
+  ];
+  const row = complexRowNorm(rows[0]) >= complexRowNorm(rows[1]) ? rows[0] : rows[1];
+  const vector = [row[1], complexNeg(row[0])];
+  if (vector.every((value) => nearlyEqual(complexAbs(value), 0))) {
+    throw new Error("Could not find a nonzero complex eigenvector.");
+  }
+  return normalizeComplexVector(vector);
+}
+
+function complexRowNorm(row) {
+  return Math.hypot(...row.map(complexAbs));
+}
+
+function normalizeComplexVector(vector) {
+  const pivot = vector.find((value) => !nearlyEqual(complexAbs(value), 0));
+  if (!pivot) {
+    throw new Error("Could not normalize the complex eigenvector.");
+  }
+  return vector.map((value) => complexDiv(value, pivot));
+}
+
+function formatEigenvectorBasis(entry) {
+  return entry.isComplex ? formatComplexVectorList(entry.basis) : formatVectorList(entry.basis);
+}
+
+function eigenvectorBasisNode(entry) {
+  if (!entry.isComplex) {
+    return matrixNode(`L${entry.lambda}`, entry.basis);
+  }
+
+  return {
+    kind: "matrixRow",
+    label: `L${entry.lambda}`,
+    children: entry.basis[0].map((value, index) => ({
+      kind: "statsMetric",
+      label: `v${index + 1}=${formatComplex(value)}`,
+      value: formatComplex(value),
+    })),
+  };
+}
+
+function formatComplexVector(vector) {
+  return `[${vector.map(formatComplex).join(", ")}]`;
+}
+
+function formatComplexVectorList(vectors) {
+  return `[${vectors.map(formatComplexVector).join(", ")}]`;
 }
 
 function normalizeVector(vector) {
