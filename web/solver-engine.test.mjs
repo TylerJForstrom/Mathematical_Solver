@@ -686,6 +686,16 @@ runTest("statistics mode computes Welch one-way ANOVA", () => {
   assert.equal(artifactValue(result, "Pairwise comparisons"), "1 vs 2: diff=-6.666667, p_adj=0.015604; 1 vs 3: diff=-15.333333, p_adj=0.069755; 2 vs 3: diff=-8.666667, p_adj=0.201282");
 });
 
+runTest("statistics mode computes repeated-measures ANOVA", () => {
+  const result = analyzeStatistics("repeated measures anova baseline: 10,12,11,13; week1: 12,13,12,15; week2: 14,15,13,17");
+
+  assert.equal(result.summary, "repeated-measures ANOVA");
+  assert.equal(result.answer, "F = 42.333333, p = 0.00029");
+  assert.equal(artifactValue(result, "Condition means"), "[11.5, 13, 14.75]");
+  assert.equal(artifactValue(result, "Pairwise comparisons"), "baseline vs week1: diff=-1.5, p_adj=0.04154; baseline vs week2: diff=-3.25, p_adj=0.0196; week1 vs week2: diff=-1.75, p_adj=0.017959");
+  assert.deepEqual(result.table.rows[0], ["Conditions", "21.166667", "2", "10.583333", "42.333333", "0.00029"]);
+});
+
 runTest("statistics mode computes two-way ANOVA", () => {
   const result = analyzeStatistics("two-way anova y: 6,7,8,9,10,11,15,16; A: low,low,low,low,high,high,high,high; B: control,control,treatment,treatment,control,control,treatment,treatment");
 
@@ -1189,6 +1199,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("fisher exact [[1,9],[11,3]]").summary, "Fisher exact test");
   assert.equal(analyzeUniversal("paired t-test before: 10,12,9; after: 11,14,10").summary, "paired t test");
   assert.equal(analyzeUniversal("ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10").summary, "one-way ANOVA");
+  assert.equal(analyzeUniversal("repeated measures anova baseline: 10,12,11,13; week1: 12,13,12,15; week2: 14,15,13,17").summary, "repeated-measures ANOVA");
   assert.equal(analyzeUniversal("two-way anova y: 6,7,8,9,10,11,15,16; A: low,low,low,low,high,high,high,high; B: control,control,treatment,treatment,control,control,treatment,treatment").summary, "two-way ANOVA");
   assert.equal(analyzeUniversal("poisson lambda=3 k=2").summary, "Poisson probability");
   assert.equal(analyzeUniversal("geometric p=0.25 k=3").summary, "geometric probability");

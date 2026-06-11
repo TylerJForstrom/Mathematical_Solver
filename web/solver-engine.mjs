@@ -91,6 +91,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       examples: [
         ["ANOVA", "statistics", "anova group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
         ["Welch ANOVA", "statistics", "welch anova group1: 8,9,10; group2: 14,16,17; group3: 20,24,29"],
+        ["Repeated-measures ANOVA", "statistics", "repeated measures anova baseline: 10,12,11,13; week1: 12,13,12,15; week2: 14,15,13,17"],
         ["Two-way ANOVA", "statistics", "two-way anova y: 6,7,8,9,10,11,15,16; A: low,low,low,low,high,high,high,high; B: control,control,treatment,treatment,control,control,treatment,treatment"],
         ["Kruskal", "statistics", "kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
       ],
@@ -1187,6 +1188,10 @@ export function analyzeStatistics(statement) {
 
   if (lower.includes("wilcoxon") || lower.includes("signed-rank") || lower.includes("signed rank")) {
     return analyzeWilcoxonSignedRank(statement);
+  }
+
+  if (isRepeatedMeasuresAnovaQuestion(lower)) {
+    return analyzeRepeatedMeasuresAnova(statement);
   }
 
   if (isTwoWayAnovaQuestion(lower)) {
@@ -3989,6 +3994,106 @@ function analyzePairedTTest(statement) {
       ["Cohen's dz", formatNumber(cohenDz)],
       [`Cohen's dz ${effectIntervalLabel}`, formatEffectSizeInterval(cohenDzInterval)],
       ["Effect size CI method", "approximate t interval"],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeRepeatedMeasuresAnova(statement) {
+  const { conditions, alpha } = parseRepeatedMeasuresAnovaInput(statement);
+  const conditionCount = conditions.length;
+  const subjectCount = conditions[0].values.length;
+  const allValues = conditions.flatMap((condition) => condition.values);
+  const grandMean = mean(allValues);
+  const conditionMeans = conditions.map((condition) => mean(condition.values));
+  const subjectMeans = Array.from({ length: subjectCount }, (_, subjectIndex) =>
+    mean(conditions.map((condition) => condition.values[subjectIndex])),
+  );
+
+  const ssTotal = allValues.reduce((sum, value) => sum + (value - grandMean) ** 2, 0);
+  const ssConditions = subjectCount * conditionMeans.reduce((sum, value) => sum + (value - grandMean) ** 2, 0);
+  const ssSubjects = conditionCount * subjectMeans.reduce((sum, value) => sum + (value - grandMean) ** 2, 0);
+  const ssError = ssTotal - ssConditions - ssSubjects;
+  if (!(ssError > EPSILON)) {
+    throw new Error("Repeated-measures ANOVA needs residual variation after removing subject and condition means.");
+  }
+
+  const dfConditions = conditionCount - 1;
+  const dfSubjects = subjectCount - 1;
+  const dfError = dfConditions * dfSubjects;
+  const msConditions = ssConditions / dfConditions;
+  const msSubjects = ssSubjects / dfSubjects;
+  const msError = ssError / dfError;
+  const fStatistic = msConditions / msError;
+  const pValue = fRightTail(fStatistic, dfConditions, dfError);
+  const partialEtaSquared = ssConditions / (ssConditions + ssError);
+  const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const pairwiseComparisons = pairwiseRepeatedMeasuresComparisons(conditions);
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(allValues, [
+      statsMetricNode("F", fStatistic),
+      statsMetricNode("DF1", dfConditions),
+      statsMetricNode("DF2", dfError),
+      statsMetricNode("P", pValue),
+      statsMetricNode("PETA2", partialEtaSquared),
+    ], "RMANOVA"),
+    answer: `F = ${formatNumber(fStatistic)}, p = ${formatNumber(pValue)}`,
+    summary: "repeated-measures ANOVA",
+    details: `${subjectCount} subjects across ${conditionCount} conditions`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(allValues)),
+    steps: [
+      {
+        title: "Read within-subject conditions",
+        expression: conditions.map((condition) => `${condition.name}: n=${condition.values.length}`).join("; "),
+        detail: "Repeated-measures ANOVA compares condition means for the same subjects.",
+      },
+      {
+        title: "Remove subject baselines",
+        expression: subjectMeans.map((value, index) => `S${index + 1}=${formatNumber(value)}`).join(", "),
+        detail: "Subject means model stable differences between people before testing condition effects.",
+      },
+      {
+        title: "Partition variation",
+        expression: `SScond = ${formatNumber(ssConditions)}, SSsubj = ${formatNumber(ssSubjects)}, SSE = ${formatNumber(ssError)}`,
+        detail: "Total variation is split into conditions, subjects, and residual error.",
+      },
+      {
+        title: "Compute F statistic",
+        expression: `F = ${formatNumber(fStatistic)} with df ${formatNumber(dfConditions)}, ${formatNumber(dfError)}`,
+        detail: "The condition mean square is compared with the residual mean square.",
+      },
+      {
+        title: "Compare conditions pairwise",
+        expression: formatPairwiseComparisons(pairwiseComparisons),
+        detail: "Pairwise rows use paired t tests with Bonferroni-adjusted p-values.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest at least one condition mean differs.",
+      },
+    ],
+    table: {
+      headers: ["Source", "SS", "df", "MS", "F", "p"],
+      rows: [
+        ["Conditions", formatNumber(ssConditions), formatNumber(dfConditions), formatNumber(msConditions), formatNumber(fStatistic), formatNumber(pValue)],
+        ["Subjects", formatNumber(ssSubjects), formatNumber(dfSubjects), formatNumber(msSubjects), "", ""],
+        ["Error", formatNumber(ssError), formatNumber(dfError), formatNumber(msError), "", ""],
+        ["Total", formatNumber(ssTotal), formatNumber(allValues.length - 1), "", "", ""],
+      ],
+    },
+    artifacts: [
+      ["Subjects", formatNumber(subjectCount)],
+      ["Conditions", formatNumber(conditionCount)],
+      ["Condition means", formatVector(conditionMeans)],
+      ["Subject means", formatVector(subjectMeans)],
+      ["F statistic", formatNumber(fStatistic)],
+      ["p-value", formatNumber(pValue)],
+      ["Partial eta squared", formatNumber(partialEtaSquared)],
+      ["Pairwise comparisons", formatPairwiseComparisons(pairwiseComparisons)],
       ["Decision", decision],
     ],
   };
@@ -13660,6 +13765,32 @@ function parsePairedInput(text) {
   throw new Error("Use paired t-test before: 10, 12, 9; after: 11, 14, 10.");
 }
 
+function parseRepeatedMeasuresAnovaInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const conditionText = cleaned
+    .replace(/\brepeated[-\s]?measures?\b/gi, "")
+    .replace(/\bwithin[-\s]?subjects?\b/gi, "")
+    .replace(/\brm[-\s]?anova\b/gi, "")
+    .replace(/\banova\b/gi, "")
+    .replace(/\banalysis of variance\b/gi, "");
+  const conditions = [...conditionText.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)]
+    .map((match) => ({
+      name: match[1],
+      values: parseNumbers(match[2]),
+    }))
+    .filter((condition) => condition.values.length > 0);
+
+  if (conditions.length < 3) {
+    throw new Error("Use repeated-measures ANOVA baseline: 10,12,11; week1: 12,13,12; week2: 14,15,13.");
+  }
+  const subjectCount = conditions[0].values.length;
+  if (subjectCount < 2 || conditions.some((condition) => condition.values.length !== subjectCount)) {
+    throw new Error("Repeated-measures ANOVA needs each condition list to have the same number of subjects.");
+  }
+
+  return { alpha, conditions };
+}
+
 function parseAnovaInput(text) {
   const { alpha, cleaned } = extractAlpha(text);
   const groups = cleaned
@@ -14732,6 +14863,35 @@ function formatPairwiseComparisons(comparisons) {
       `${comparison.label}: ${comparison.estimateLabel}=${formatNumber(comparison.estimate)}, p_adj=${formatNumber(comparison.adjustedP)}`,
     )
     .join("; ");
+}
+
+function pairwiseRepeatedMeasuresComparisons(conditions) {
+  const comparisons = [];
+  const pairCount = (conditions.length * (conditions.length - 1)) / 2;
+  for (let left = 0; left < conditions.length; left += 1) {
+    for (let right = left + 1; right < conditions.length; right += 1) {
+      const differences = conditions[left].values.map((value, index) => value - conditions[right].values[index]);
+      const summary = descriptiveSummary(differences);
+      const standardError = summary.sampleStdDev / Math.sqrt(summary.count);
+      let statistic = 0;
+      let pValue = 1;
+      if (standardError > EPSILON) {
+        statistic = summary.mean / standardError;
+        pValue = pValueForT(statistic, summary.count - 1, "two-sided");
+      } else if (!nearlyEqual(summary.mean, 0)) {
+        statistic = summary.mean > 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+        pValue = 0;
+      }
+      comparisons.push({
+        label: `${conditions[left].name} vs ${conditions[right].name}`,
+        statistic,
+        adjustedP: bonferroniAdjust(pValue, pairCount),
+        estimateLabel: "diff",
+        estimate: summary.mean,
+      });
+    }
+  }
+  return comparisons;
 }
 
 function pairwiseWelchComparisons(groupSummaries) {
@@ -17018,6 +17178,16 @@ function isTwoWayAnovaQuestion(lower) {
     /\btwo[-\s]?way\b/.test(lower) ||
     /\btwo[-\s]?factor\b/.test(lower) ||
     lower.includes("factorial anova")
+  ) && (lower.includes("anova") || lower.includes("analysis of variance"));
+}
+
+function isRepeatedMeasuresAnovaQuestion(lower) {
+  return (
+    lower.includes("repeated measures") ||
+    lower.includes("repeated-measures") ||
+    lower.includes("within-subject") ||
+    lower.includes("within subject") ||
+    /\brm[-\s]?anova\b/.test(lower)
   ) && (lower.includes("anova") || lower.includes("analysis of variance"));
 }
 
