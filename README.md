@@ -102,7 +102,7 @@ The frontend currently supports:
   two-sample variance F tests and Levene equal-variance tests,
   one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
-  permutation tests, one-way MANOVA, one-way ANOVA, Welch ANOVA, repeated-measures ANOVA,
+  permutation tests, ANCOVA with covariate-adjusted means, one-way MANOVA, one-way ANOVA, Welch ANOVA, repeated-measures ANOVA,
   two-way ANOVA with interaction, Mann-Whitney U with exact small-sample p-values when there are no ties,
   Wilcoxon signed-rank with exact
   small-sample p-values when absolute differences are untied,

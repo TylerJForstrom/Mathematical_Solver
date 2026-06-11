@@ -92,6 +92,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
         ["ANOVA", "statistics", "anova group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
         ["Welch ANOVA", "statistics", "welch anova group1: 8,9,10; group2: 14,16,17; group3: 20,24,29"],
         ["MANOVA", "statistics", "manova control: (1,2), (2,1), (1.5,1.8), (2.2,2.5); treatment: (4,5), (5,4.5), (4.2,5.2), (5.1,5.4); followup: (6,7), (7,6.5), (6.5,7.2), (7.1,7.4)"],
+        ["ANCOVA", "statistics", "ancova y: 10,12,13,15,14,17,18,21; group: control,control,control,control,treatment,treatment,treatment,treatment; x: 1,2,3,4,1,2,3,4"],
         ["Repeated-measures ANOVA", "statistics", "repeated measures anova baseline: 10,12,11,13; week1: 12,13,12,15; week2: 14,15,13,17"],
         ["Two-way ANOVA", "statistics", "two-way anova y: 6,7,8,9,10,11,15,16; A: low,low,low,low,high,high,high,high; B: control,control,treatment,treatment,control,control,treatment,treatment"],
         ["Kruskal", "statistics", "kruskal-wallis group1: 8,9,10; group2: 12,13,14; group3: 9,11,10"],
@@ -1193,6 +1194,10 @@ export function analyzeStatistics(statement) {
 
   if (isManovaQuestion(lower)) {
     return analyzeManova(statement);
+  }
+
+  if (isAncovaQuestion(lower)) {
+    return analyzeAncova(statement);
   }
 
   if (isRepeatedMeasuresAnovaQuestion(lower)) {
@@ -4102,6 +4107,191 @@ function analyzeRepeatedMeasuresAnova(statement) {
       ["Decision", decision],
     ],
   };
+}
+
+function analyzeAncova(statement) {
+  const request = parseAncovaInput(statement);
+  const result = computeAncova(request);
+  const decision = result.group.pValue < request.alpha
+    ? `reject H0 at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject H0 at alpha=${formatNumber(request.alpha)}`;
+  const tree = {
+    kind: "statsRegression",
+    label: "ANCOVA",
+    children: [
+      statsDatasetNode(request.y, [], "Y"),
+      statsDatasetNode(request.x, [], "X"),
+      statsMetricNode("GROUPF", result.group.fStatistic),
+      statsMetricNode("COVF", result.covariate.fStatistic),
+      statsMetricNode("P", result.group.pValue),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `group F = ${formatNumber(result.group.fStatistic)}, p = ${formatNumber(result.group.pValue)}; covariate F = ${formatNumber(result.covariate.fStatistic)}, p = ${formatNumber(result.covariate.pValue)}`,
+    summary: "ANCOVA",
+    details: `${request.y.length} observations, ${result.levels.length} groups, adjusted for covariate x`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read response, groups, and covariate",
+        expression: `n = ${request.y.length}, groups = ${result.levels.join(", ")}`,
+        detail: "ANCOVA compares group means while adjusting for a continuous covariate.",
+      },
+      {
+        title: "Build adjusted linear model",
+        expression: result.equation,
+        detail: "The design matrix contains an intercept, the covariate, and group indicator columns.",
+      },
+      {
+        title: "Test adjusted group effect",
+        expression: `F = ${formatNumber(result.group.fStatistic)}, p = ${formatNumber(result.group.pValue)}`,
+        detail: "The full model is compared with a reduced model that keeps the covariate but removes group indicators.",
+      },
+      {
+        title: "Test covariate effect",
+        expression: `F = ${formatNumber(result.covariate.fStatistic)}, p = ${formatNumber(result.covariate.pValue)}`,
+        detail: "A second reduced model keeps groups but removes the covariate.",
+      },
+      {
+        title: "Compute adjusted means",
+        expression: result.adjustedMeans.map((item) => `${item.level}=${formatNumber(item.mean)}`).join("; "),
+        detail: "Each group mean is estimated at the common covariate value xbar.",
+      },
+      {
+        title: "Compare adjusted group means",
+        expression: result.pairwiseComparisons.length ? formatPairwiseComparisons(result.pairwiseComparisons) : "not enough group comparisons",
+        detail: "Pairwise comparisons use adjusted mean contrasts and Bonferroni-adjusted p-values.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small group p-values suggest the adjusted means differ after controlling for the covariate.",
+      },
+    ],
+    table: {
+      headers: ["Source", "SS", "df", "MS", "F", "p", "Partial eta^2"],
+      rows: [
+        ["Group", formatNumber(result.group.sumSquares), formatNumber(result.group.degreesFreedom), formatNumber(result.group.meanSquare), formatNumber(result.group.fStatistic), formatNumber(result.group.pValue), formatNumber(result.group.partialEtaSquared)],
+        ["Covariate x", formatNumber(result.covariate.sumSquares), formatNumber(result.covariate.degreesFreedom), formatNumber(result.covariate.meanSquare), formatNumber(result.covariate.fStatistic), formatNumber(result.covariate.pValue), formatNumber(result.covariate.partialEtaSquared)],
+        ["Error", formatNumber(result.sse), formatNumber(result.errorDegreesFreedom), formatNumber(result.mse), "", "", ""],
+        ["Total", formatNumber(result.totalSS), formatNumber(request.y.length - 1), "", "", "", ""],
+      ],
+    },
+    artifacts: [
+      ["Equation", result.equation],
+      ["Reference group", result.levels[0]],
+      ["Covariate mean", formatNumber(result.covariateMean)],
+      ["Covariate slope", formatNumber(result.covariateSlope)],
+      ["Adjusted means", result.adjustedMeans.map((item) => `${item.level}=${formatNumber(item.mean)}`).join("; ")],
+      ["Group F", formatNumber(result.group.fStatistic)],
+      ["Group p-value", formatNumber(result.group.pValue)],
+      ["Covariate F", formatNumber(result.covariate.fStatistic)],
+      ["Covariate p-value", formatNumber(result.covariate.pValue)],
+      ["Pairwise adjusted comparisons", result.pairwiseComparisons.length ? formatPairwiseComparisons(result.pairwiseComparisons) : "not available"],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function computeAncova(request) {
+  const levels = uniqueOrdered(request.group);
+  const dummyLevels = levels.slice(1);
+  const predictorNames = [
+    "x",
+    ...dummyLevels.map((level) => `G_${sanitizePredictorLabel(level)}`),
+  ];
+  const design = request.y.map((_, row) => [
+    1,
+    request.x[row],
+    ...dummyLevels.map((level) => (request.group[row] === level ? 1 : 0)),
+  ]);
+  const fullModel = fitLinearModelFromDesign(request.y, design);
+  const reducedGroupDesign = request.y.map((_, row) => [1, request.x[row]]);
+  const reducedGroupModel = fitLinearModelFromDesign(request.y, reducedGroupDesign);
+  const reducedCovariateDesign = request.y.map((_, row) => [
+    1,
+    ...dummyLevels.map((level) => (request.group[row] === level ? 1 : 0)),
+  ]);
+  const reducedCovariateModel = fitLinearModelFromDesign(request.y, reducedCovariateDesign);
+  const groupEffect = ancovaEffect(reducedGroupModel.sse - fullModel.sse, dummyLevels.length, fullModel.mse, fullModel.sse);
+  const covariateEffect = ancovaEffect(reducedCovariateModel.sse - fullModel.sse, 1, fullModel.mse, fullModel.sse);
+  const covariateMean = mean(request.x);
+  const adjustedMeans = levels.map((level) => ({
+    level,
+    mean: normalizeNumber(predictAncovaMean(fullModel.coefficients, dummyLevels, level, covariateMean)),
+  }));
+  const pairwiseComparisons = pairwiseAncovaComparisons(levels, dummyLevels, adjustedMeans, fullModel);
+  const totalMean = mean(request.y);
+  const totalSS = request.y.reduce((sum, value) => sum + (value - totalMean) ** 2, 0);
+
+  return {
+    levels,
+    equation: formatMultipleRegressionEquation(fullModel.coefficients, predictorNames),
+    sse: fullModel.sse,
+    mse: fullModel.mse,
+    errorDegreesFreedom: fullModel.degreesFreedom,
+    totalSS,
+    group: groupEffect,
+    covariate: covariateEffect,
+    covariateMean,
+    covariateSlope: fullModel.coefficients[1],
+    adjustedMeans,
+    pairwiseComparisons,
+  };
+}
+
+function ancovaEffect(sumSquares, degreesFreedom, mse, sse) {
+  const safeSumSquares = Math.max(0, sumSquares);
+  const meanSquare = safeSumSquares / degreesFreedom;
+  const fStatistic = meanSquare / mse;
+  const pValue = fRightTail(fStatistic, degreesFreedom, sse / mse);
+  return {
+    sumSquares: normalizeNumber(safeSumSquares),
+    degreesFreedom,
+    meanSquare: normalizeNumber(meanSquare),
+    fStatistic: normalizeNumber(fStatistic),
+    pValue: normalizeNumber(pValue),
+    partialEtaSquared: normalizeNumber(safeSumSquares / (safeSumSquares + sse)),
+  };
+}
+
+function predictAncovaMean(coefficients, dummyLevels, level, covariateValue) {
+  let value = coefficients[0] + coefficients[1] * covariateValue;
+  const dummyIndex = dummyLevels.indexOf(level);
+  if (dummyIndex >= 0) {
+    value += coefficients[dummyIndex + 2];
+  }
+  return value;
+}
+
+function pairwiseAncovaComparisons(levels, dummyLevels, adjustedMeans, model) {
+  const comparisons = [];
+  const pairCount = (levels.length * (levels.length - 1)) / 2;
+  for (let left = 0; left < levels.length; left += 1) {
+    for (let right = left + 1; right < levels.length; right += 1) {
+      const contrast = Array(model.coefficients.length).fill(0);
+      const leftDummy = dummyLevels.indexOf(levels[left]);
+      const rightDummy = dummyLevels.indexOf(levels[right]);
+      if (leftDummy >= 0) contrast[leftDummy + 2] += 1;
+      if (rightDummy >= 0) contrast[rightDummy + 2] -= 1;
+      const standardError = Math.sqrt(Math.max(0, model.mse * dotProduct(contrast, multiplyMatrixVector(model.normalMatrixInverse, contrast))));
+      const difference = adjustedMeans[left].mean - adjustedMeans[right].mean;
+      const statistic = standardError > EPSILON ? difference / standardError : Number.NaN;
+      const pValue = Number.isFinite(statistic) ? pValueForT(statistic, model.degreesFreedom, "two-sided") : Number.NaN;
+      comparisons.push({
+        label: `${levels[left]} vs ${levels[right]}`,
+        statistic,
+        adjustedP: bonferroniAdjust(pValue, pairCount),
+        estimateLabel: "adj diff",
+        estimate: difference,
+      });
+    }
+  }
+  return comparisons;
 }
 
 function analyzeManova(statement) {
@@ -7045,6 +7235,34 @@ function fitOlsDiagnostics(yValues, predictors) {
     jarqueBera,
     breuschPagan,
     equation: formatMultipleRegressionEquation(coefficients, predictorNames),
+  };
+}
+
+function fitLinearModelFromDesign(yValues, design) {
+  const transposed = transposeMatrix(design);
+  const normalMatrix = multiplyMatrices(transposed, design);
+  const normalMatrixInverse = invertMatrix(normalMatrix);
+  const normalVector = multiplyMatrixVector(transposed, yValues);
+  const coefficients = solveLinearSystem(normalMatrix, normalVector);
+  const fitted = design.map((row) => dotProduct(row, coefficients));
+  const residuals = yValues.map((value, index) => value - fitted[index]);
+  const degreesFreedom = yValues.length - coefficients.length;
+  if (!(degreesFreedom > 0)) {
+    throw new Error("Linear model needs more observations than model parameters.");
+  }
+  const sse = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  if (!(sse > EPSILON)) {
+    throw new Error("Linear model needs nonzero residual variation.");
+  }
+
+  return {
+    coefficients: coefficients.map(normalizeNumber),
+    fitted: fitted.map(normalizeNumber),
+    residuals: residuals.map(normalizeNumber),
+    sse: normalizeNumber(sse),
+    mse: normalizeNumber(sse / degreesFreedom),
+    degreesFreedom,
+    normalMatrixInverse,
   };
 }
 
@@ -13954,6 +14172,51 @@ function parsePairedInput(text) {
   throw new Error("Use paired t-test before: 10, 12, 9; after: 11, 14, 10.");
 }
 
+function parseAncovaInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const lists = new Map();
+  for (const match of cleaned.matchAll(/\b([A-Za-z_]\w*)\s*[:=]\s*([^;]+)/g)) {
+    lists.set(match[1].toLowerCase(), {
+      name: match[1],
+      raw: match[2],
+    });
+  }
+
+  const response = lists.get("y") ?? lists.get("response") ?? lists.get("outcome");
+  const covariate = lists.get("x") ?? lists.get("covariate") ?? lists.get("pretest") ?? lists.get("baseline");
+  const group = lists.get("group") ?? lists.get("groups") ?? lists.get("treatment") ?? lists.get("factor");
+  if (!response || !covariate || !group) {
+    throw new Error("Use ANCOVA y: 10,12,...; group: control,control,...; x: 1,2,...");
+  }
+
+  const y = parseNumberList(response.raw);
+  const x = parseNumberList(covariate.raw);
+  const groupValues = parseCategoryList(group.raw);
+  if (y.length < 5 || x.length !== y.length || groupValues.length !== y.length) {
+    throw new Error("ANCOVA needs equal-length y, group, and x lists with at least five observations.");
+  }
+  const levels = uniqueOrdered(groupValues);
+  if (levels.length < 2) {
+    throw new Error("ANCOVA needs at least two groups.");
+  }
+  if (levels.some((level) => groupValues.filter((value) => value === level).length < 2)) {
+    throw new Error("ANCOVA needs at least two observations in every group.");
+  }
+  if (y.length <= levels.length + 1) {
+    throw new Error("ANCOVA needs more observations than groups plus the covariate.");
+  }
+  if (x.every((value) => nearlyEqual(value, x[0]))) {
+    throw new Error("ANCOVA covariate x needs nonzero variation.");
+  }
+
+  return {
+    alpha,
+    y,
+    x,
+    group: groupValues,
+  };
+}
+
 function parseManovaInput(text) {
   const { alpha, cleaned } = extractAlpha(text);
   const groupText = cleaned
@@ -16077,6 +16340,11 @@ function naturalLabelNumber(label) {
   return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
 }
 
+function sanitizePredictorLabel(label) {
+  const cleaned = String(label).replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+  return cleaned || "level";
+}
+
 function zipPairs(xValues, yValues) {
   return xValues.map((x, index) => ({ x, y: yValues[index] }));
 }
@@ -17034,6 +17302,13 @@ function isManovaQuestion(lower) {
     lower.includes("lawley-hotelling");
 }
 
+function isAncovaQuestion(lower) {
+  return /\bancova\b/.test(lower) ||
+    lower.includes("analysis of covariance") ||
+    lower.includes("adjusted means") ||
+    lower.includes("covariate-adjusted");
+}
+
 function isKMeansQuestion(lower) {
   return lower.includes("k-means") ||
     lower.includes("k means") ||
@@ -17466,6 +17741,9 @@ function isStatisticsQuestion(lower) {
     "multivariate analysis of variance",
     "wilks",
     "pillai",
+    "ancova",
+    "analysis of covariance",
+    "adjusted means",
     "anova",
     "analysis of variance",
     "mann-whitney",
