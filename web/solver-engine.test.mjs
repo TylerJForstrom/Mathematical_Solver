@@ -794,6 +794,17 @@ runTest("statistics mode applies Bayes theorem", () => {
   assert.equal(artifactValue(result, "False positive rate"), "0.05");
 });
 
+runTest("statistics mode computes Bayesian normal mean posteriors", () => {
+  const result = analyzeStatistics("bayesian normal mean data: 10, 12, 14, 15; priorMean=11 priorSd=3 sigma=2 threshold=13");
+
+  assert.equal(result.summary, "Bayesian normal mean");
+  assert.equal(result.answer, "posterior mean = 12.575, 95% credible interval = [10.715615, 14.434385]");
+  assert.equal(artifactValue(result, "Posterior SD"), "0.948683");
+  assert.equal(artifactValue(result, "95% predictive interval"), "[8.236435, 16.913565]");
+  assert.equal(artifactValue(result, "P(mu > 13)"), "0.32708");
+  assert.deepEqual(result.table.rows[7], ["95% credible interval", "[10.715615, 14.434385]"]);
+});
+
 runTest("statistics mode computes Markov chains", () => {
   const distribution = analyzeMarkovChain("markov [[0.7,0.3],[0.2,0.8]] start [1,0] steps=3");
   const stationary = analyzeStatistics("stationary markov [[0.7,0.3],[0.2,0.8]]");
@@ -1242,6 +1253,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("hypergeometric population=50 successes=5 draws=10 k=2").summary, "hypergeometric probability");
   assert.equal(analyzeUniversal("expected value values: 0, 1, 2 probabilities: 0.2, 0.5, 0.3").summary, "discrete expected value");
   assert.equal(analyzeUniversal("bayes prior=0.01 sensitivity=0.99 specificity=0.95").summary, "Bayes theorem");
+  assert.equal(analyzeUniversal("bayesian normal mean data: 10, 12, 14, 15; priorMean=11 priorSd=3 sigma=2 threshold=13").summary, "Bayesian normal mean");
   assert.equal(analyzeUniversal("markov [[0.7,0.3],[0.2,0.8]] start [1,0] steps=3").answer, "after 3 steps = [0.475, 0.525]");
   assert.equal(analyzeUniversal("stationary markov [[0.7,0.3],[0.2,0.8]]").summary, "Markov stationary distribution");
   assert.equal(analyzeUniversal("beta posterior successes=12 n=20 alpha=2 beta=2 confidence=95").summary, "Bayesian proportion posterior");

@@ -138,6 +138,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
     },
     {
+      title: "Bayesian normal mean",
+      when: () => wantsStats && /\b(bayesian normal|bayesian mean|normal-normal|posterior mean|credible interval)\b/.test(lower),
+      reason: "I detected a Bayesian mean-estimation question.",
+      needs: [
+        "A data list",
+        "Prior mean and prior standard deviation",
+        "Known observation sigma",
+      ],
+      examples: [
+        ["Bayesian normal", "statistics", "bayesian normal mean data: 10, 12, 14, 15; priorMean=11 priorSd=3 sigma=2 threshold=13"],
+      ],
+    },
+    {
       title: "Probability distribution",
       when: () => wantsStats && /\b(binomial|normal|poisson|geometric|hypergeometric|probability|cdf|percentile)\b/.test(lower),
       reason: "I detected a probability distribution question.",
@@ -1146,6 +1159,10 @@ export function analyzeStatistics(statement) {
 
   if (isBayesianProportionQuestion(lower)) {
     return analyzeBayesianProportion(statement);
+  }
+
+  if (isBayesianNormalQuestion(lower)) {
+    return analyzeBayesianNormalMean(statement);
   }
 
   if (isMetaAnalysisQuestion(lower)) {
@@ -9069,6 +9086,109 @@ function analyzeBayes(statement) {
   };
 }
 
+function analyzeBayesianNormalMean(statement) {
+  const request = parseBayesianNormalInput(statement);
+  const summary = descriptiveSummary(request.values);
+  const priorVariance = request.priorSd ** 2;
+  const observationVariance = request.sigma ** 2;
+  const posteriorVariance = 1 / ((1 / priorVariance) + (summary.count / observationVariance));
+  const posteriorSd = Math.sqrt(posteriorVariance);
+  const posteriorMean = posteriorVariance *
+    ((request.priorMean / priorVariance) + (summary.count * summary.mean / observationVariance));
+  const dataWeight = (summary.count / observationVariance) /
+    ((1 / priorVariance) + (summary.count / observationVariance));
+  const critical = zCriticalForLevel(request.level);
+  const lower = posteriorMean - critical * posteriorSd;
+  const upper = posteriorMean + critical * posteriorSd;
+  const predictiveSd = Math.sqrt(observationVariance + posteriorVariance);
+  const predictiveLower = posteriorMean - critical * predictiveSd;
+  const predictiveUpper = posteriorMean + critical * predictiveSd;
+  const thresholdProbability = Number.isFinite(request.threshold)
+    ? 1 - normalCdf((request.threshold - posteriorMean) / posteriorSd)
+    : Number.NaN;
+  const percent = formatNumber(request.level * 100);
+  const tree = {
+    kind: "statsDistribution",
+    label: "NORMAL-POST",
+    children: [
+      statsMetricNode("prior", request.priorMean),
+      statsMetricNode("xbar", summary.mean),
+      statsMetricNode("post", posteriorMean),
+      statsMetricNode("sd", posteriorSd),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `posterior mean = ${formatNumber(posteriorMean)}, ${percent}% credible interval = [${formatNumber(lower)}, ${formatNumber(upper)}]`,
+    summary: "Bayesian normal mean",
+    details: "Normal-normal conjugate update with known observation standard deviation",
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read prior and normal data",
+        expression: `prior N(${formatNumber(request.priorMean)}, ${formatNumber(request.priorSd)}^2), sigma=${formatNumber(request.sigma)}, n=${formatNumber(summary.count)}`,
+        detail: "A normal prior is conjugate to normal observations when the observation standard deviation is known.",
+      },
+      {
+        title: "Summarize sample",
+        expression: `xbar = ${formatNumber(summary.mean)}, sample sd = ${formatNumber(summary.sampleStdDev)}`,
+        detail: "The likelihood contributes information through the sample mean and known sigma.",
+      },
+      {
+        title: "Update posterior precision",
+        expression: `posterior SD = ${formatNumber(posteriorSd)}, data weight = ${formatNumber(dataWeight)}`,
+        detail: "Prior precision and data precision add together; more precise data receives more weight.",
+      },
+      {
+        title: "Build credible interval",
+        expression: `[${formatNumber(lower)}, ${formatNumber(upper)}]`,
+        detail: "The posterior interval is centered on the posterior mean.",
+      },
+      {
+        title: "Build predictive interval",
+        expression: `[${formatNumber(predictiveLower)}, ${formatNumber(predictiveUpper)}]`,
+        detail: "The posterior predictive interval includes uncertainty in the mean and future observation noise.",
+      },
+      ...(Number.isFinite(thresholdProbability)
+        ? [{
+            title: "Compute posterior tail probability",
+            expression: `P(mu > ${formatNumber(request.threshold)}) = ${formatNumber(thresholdProbability)}`,
+            detail: "The posterior normal distribution gives direct probability statements about the unknown mean.",
+          }]
+        : []),
+    ],
+    table: {
+      headers: ["Quantity", "Value"],
+      rows: [
+        ["Sample size", formatNumber(summary.count)],
+        ["Sample mean", formatNumber(summary.mean)],
+        ["Known sigma", formatNumber(request.sigma)],
+        ["Prior mean", formatNumber(request.priorMean)],
+        ["Prior SD", formatNumber(request.priorSd)],
+        ["Posterior mean", formatNumber(posteriorMean)],
+        ["Posterior SD", formatNumber(posteriorSd)],
+        [`${percent}% credible interval`, `[${formatNumber(lower)}, ${formatNumber(upper)}]`],
+        [`${percent}% predictive interval`, `[${formatNumber(predictiveLower)}, ${formatNumber(predictiveUpper)}]`],
+        ...(Number.isFinite(thresholdProbability) ? [[`P(mu > ${formatNumber(request.threshold)})`, formatNumber(thresholdProbability)]] : []),
+      ],
+    },
+    artifacts: [
+      ["Prior", `N(${formatNumber(request.priorMean)}, ${formatNumber(request.priorSd)}^2)`],
+      ["Known sigma", formatNumber(request.sigma)],
+      ["Sample mean", formatNumber(summary.mean)],
+      ["Posterior mean", formatNumber(posteriorMean)],
+      ["Posterior SD", formatNumber(posteriorSd)],
+      [`${percent}% credible interval`, `[${formatNumber(lower)}, ${formatNumber(upper)}]`],
+      [`${percent}% predictive interval`, `[${formatNumber(predictiveLower)}, ${formatNumber(predictiveUpper)}]`],
+      ["Data weight", formatNumber(dataWeight)],
+      ...(Number.isFinite(thresholdProbability) ? [[`P(mu > ${formatNumber(request.threshold)})`, formatNumber(thresholdProbability)]] : []),
+    ],
+  };
+}
+
 function analyzeBayesianProportion(statement) {
   const request = parseBayesianProportionInput(statement);
   const posteriorAlpha = request.priorAlpha + request.successes;
@@ -16902,6 +17022,46 @@ function parseBayesInput(text) {
   return { prior, sensitivity, falsePositiveRate, specificity };
 }
 
+function parseBayesianNormalInput(text) {
+  const dataMatch = text.match(/\b(?:data|sample|values|observations?)\s*[:=]\s*([^;]+)/i);
+  const values = dataMatch
+    ? parseNumberList(dataMatch[1])
+    : parseNumberList(text
+        .replace(/\b(?:bayesian|normal|mean|posterior|prior|known|sigma|sd|data|sample|values|observations?)\b/gi, "")
+        .replace(/\b[A-Za-z_]\w*\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, ""));
+  const priorMean = readNamedNumber(text, ["priorMean", "priormean", "prior mean", "mu0", "priorMu", "priormu"], Number.NaN);
+  const priorSd = readNamedNumber(text, ["priorSd", "priorsd", "priorSD", "prior sd", "tau", "tau0"], Number.NaN);
+  const priorVariance = readNamedNumber(text, ["priorVariance", "priorvariance", "priorVar", "priorvar", "tau2"], Number.NaN);
+  const sigma = readNamedNumber(text, ["sigma", "knownSigma", "knownsigma", "sd", "obsSd", "obssd"], Number.NaN);
+  const sigmaSquared = readNamedNumber(text, ["sigma2", "variance", "knownVariance", "knownvariance"], Number.NaN);
+  const threshold = readNamedNumber(text, ["threshold", "greaterThan", "greaterthan", "above", "mu"], Number.NaN);
+  const level = parseCredibleLevel(text, 0.95);
+  const resolvedPriorSd = Number.isFinite(priorSd) ? priorSd : Math.sqrt(priorVariance);
+  const resolvedSigma = Number.isFinite(sigma) ? sigma : Math.sqrt(sigmaSquared);
+
+  if (values.length < 1) {
+    throw new Error("Bayesian normal mean needs data values, such as data: 10, 12, 14.");
+  }
+  if (!Number.isFinite(priorMean)) {
+    throw new Error("Bayesian normal mean needs priorMean, such as priorMean=11.");
+  }
+  if (!(resolvedPriorSd > 0)) {
+    throw new Error("Bayesian normal mean needs a positive priorSd or priorVariance.");
+  }
+  if (!(resolvedSigma > 0)) {
+    throw new Error("Bayesian normal mean needs a positive known sigma or variance.");
+  }
+
+  return {
+    values,
+    priorMean,
+    priorSd: resolvedPriorSd,
+    sigma: resolvedSigma,
+    threshold,
+    level,
+  };
+}
+
 function parseBayesianProportionInput(text) {
   const successes = readNamedNumber(text, ["successes", "success", "x", "count"], Number.NaN);
   const trials = readNamedNumber(text, ["n", "trials", "total", "sample"], Number.NaN);
@@ -17332,6 +17492,14 @@ function isBayesianProportionQuestion(lower) {
     lower.includes("beta binomial") ||
     lower.includes("bayesian proportion") ||
     (lower.includes("posterior") && lower.includes("success"));
+}
+
+function isBayesianNormalQuestion(lower) {
+  return lower.includes("bayesian normal") ||
+    lower.includes("normal-normal") ||
+    lower.includes("normal normal") ||
+    lower.includes("bayesian mean") ||
+    (lower.includes("posterior") && lower.includes("normal") && lower.includes("mean"));
 }
 
 function isMetaAnalysisQuestion(lower) {
@@ -17904,6 +18072,9 @@ function isStatisticsQuestion(lower) {
     "beta-binomial",
     "beta binomial",
     "bayesian proportion",
+    "bayesian normal",
+    "bayesian mean",
+    "normal-normal",
     "credible interval",
     "naive bayes",
     "naïve bayes",

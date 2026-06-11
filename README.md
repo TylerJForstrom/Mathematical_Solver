@@ -119,6 +119,9 @@ The frontend currently supports:
   two-group survival comparisons, hazard ratios, and Wald p-values
 - Markov chains: n-step state distributions and stationary distributions from
   row-stochastic transition matrices
+- Bayesian normal-mean inference with normal-normal conjugate updates,
+  posterior credible intervals, posterior-predictive intervals, and posterior
+  tail probabilities
 - Bayesian beta-binomial proportion updates with posterior means, credible
   intervals, and posterior predictive probabilities
 - Statistical power and sample-size planning for one-sample means,
