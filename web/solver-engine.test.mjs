@@ -779,6 +779,7 @@ runTest("statistics mode computes multivariate statistics and PCA", () => {
   const covariance = analyzeStatistics("covariance matrix x: 1,2,3,4; y: 2,3,5,8");
   const correlation = analyzeStatistics("correlation matrix x: 1,2,3,4; y: 2,3,5,8");
   const pca = analyzeStatistics("pca x: 1,2,3,4; y: 2,3,5,8");
+  const pca3d = analyzeStatistics("pca x: 1,2,3,4,5; y: 2,3,5,8,13; z: 5,4,3,2,1");
 
   assert.equal(covariance.summary, "covariance matrix");
   assert.equal(covariance.answer, "covariance matrix = [[1.666667, 3.333333], [3.333333, 7]]");
@@ -786,6 +787,10 @@ runTest("statistics mode computes multivariate statistics and PCA", () => {
   assert.equal(pca.summary, "principal component analysis");
   assert.equal(pca.answer, "PC1 variance = 8.602083, explained = 99.254802%; direction = [0.433189, 0.901303]");
   assert.equal(artifactValue(pca, "PC2 direction"), "[0.901303, -0.433189]");
+  assert.equal(pca3d.answer, "PC1 variance = 24.397718, explained = 98.776185%; direction = [0.31222, 0.897239, -0.31222]");
+  assert.equal(artifactValue(pca3d, "PC3 direction"), "[0.707107, 0, 0.707107]");
+  assert.equal(artifactValue(pca3d, "PC2 cumulative variance"), "100%");
+  assert.deepEqual(pca3d.table.rows[4], ["5", "5", "13", "1"]);
 });
 
 runTest("statistics mode computes k-means clustering", () => {
@@ -1265,6 +1270,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("roc actual: 1, 1, 0, 1, 0, 0; scores: 0.9, 0.75, 0.6, 0.55, 0.3, 0.1").summary, "ROC/AUC analysis");
   assert.equal(analyzeUniversal("poisson regression y: 1, 2, 1, 3, 4, 5; x: 0, 1, 2, 3, 4, 5; predict x=6").summary, "Poisson regression");
   assert.equal(analyzeUniversal("pca x: 1,2,3,4; y: 2,3,5,8").summary, "principal component analysis");
+  assert.equal(analyzeUniversal("pca x: 1,2,3,4,5; y: 2,3,5,8,13; z: 5,4,3,2,1").summary, "principal component analysis");
   assert.equal(analyzeUniversal("correlation matrix x: 1,2,3,4; y: 2,3,5,8").answer, "correlation matrix = [[1, 0.9759], [0.9759, 1]]");
   assert.equal(analyzeUniversal("k-means k=3 points (1,1), (1,2), (5,5), (6,5), (10,10), (10,11)").summary, "k-means clustering");
   assert.equal(analyzeUniversal("one-proportion z-test successes=56 n=100 p0=0.5").summary, "one-proportion z test");

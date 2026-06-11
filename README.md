@@ -96,8 +96,8 @@ The frontend currently supports:
   residual error, and multi-step predictions
 - Multivariate statistics: covariance matrices, correlation matrices,
   one-way MANOVA with Wilks' lambda, Pillai trace, Lawley-Hotelling trace, and
-  pairwise Hotelling T-squared follow-ups, and 2D principal component analysis
-  with explained variance and component directions
+  pairwise Hotelling T-squared follow-ups, and multi-variable principal
+  component analysis with explained variance, component directions, and scores
 - K-means clustering for coordinate points with deterministic centroid
   initialization, assignments, cluster sizes, and within-cluster SSE
 - Confidence intervals, bootstrap percentile intervals, fixed-effect and
@@ -292,8 +292,8 @@ The same idea works for algebra and calculus:
   autoregressive model and forecasts future values.
 - `covariance matrix x: 1,2,3,4; y: 2,3,5,8` returns a sample covariance
   matrix, and `correlation matrix ...` scales it to pairwise correlations.
-- `pca x: 1,2,3,4; y: 2,3,5,8` finds the covariance eigenvectors and reports
-  the first principal component's explained variance.
+- `pca x: 1,2,3,4,5; y: 2,3,5,8,13; z: 5,4,3,2,1` finds covariance
+  eigenvectors, explained variance, cumulative variance, and PC scores.
 - `k-means k=3 points (1,1), (1,2), (5,5), (6,5), (10,10), (10,11)`
   clusters coordinate data and reports centroids plus within-cluster SSE.
 - `mann-whitney group1: 10,12,9; group2: 8,7,11` ranks combined samples
@@ -424,7 +424,7 @@ The demo includes:
   ROC/AUC classifier evaluation,
   Poisson regression,
   AR(1) time-series forecasting,
-  covariance/correlation matrices, 2D PCA, k-means clustering,
+  covariance/correlation matrices, multi-variable PCA, k-means clustering,
   binomial probability,
   Poisson probability, geometric probability, exponential probability, uniform
   probability, hypergeometric probability, normal probability, inverse-normal

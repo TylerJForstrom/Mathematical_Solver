@@ -8587,10 +8587,8 @@ function analyzeMultivariateStatistics(statement) {
   };
 
   if (wantsPca) {
-    if (dataset.columns.length !== 2) {
-      throw new Error("PCA currently supports exactly two variables, such as pca x: ...; y: ....");
-    }
-    const components = principalComponents2d(covariance);
+    const components = principalComponents(covariance);
+    const scores = principalComponentScores(dataset, components);
     const pcTree = {
       ...tree,
       children: [
@@ -8604,7 +8602,7 @@ function analyzeMultivariateStatistics(statement) {
       tree: pcTree,
       answer: `PC1 variance = ${formatNumber(components[0].eigenvalue)}, explained = ${formatNumber(components[0].explained * 100)}%; direction = ${formatVector(components[0].vector)}`,
       summary: "principal component analysis",
-      details: `${dataset.n} observations, 2 variables`,
+      details: `${dataset.n} observations, ${dataset.columns.length} variables`,
       variables: [],
       metrics: treeMetrics(pcTree),
       steps: [
@@ -8625,8 +8623,13 @@ function analyzeMultivariateStatistics(statement) {
         },
         {
           title: "Find principal components",
-          expression: `lambda1 = ${formatNumber(components[0].eigenvalue)}, lambda2 = ${formatNumber(components[1].eigenvalue)}`,
+          expression: `lambda = ${formatVector(components.map((component) => component.eigenvalue))}`,
           detail: "The eigenvectors of the covariance matrix are the principal component directions.",
+        },
+        {
+          title: "Project observations",
+          expression: `PC scores for row 1 = ${formatVector(scores[0])}`,
+          detail: "Each centered observation is projected onto the component directions.",
         },
       ],
       table: multivariateObservationTable(dataset),
@@ -8635,12 +8638,13 @@ function analyzeMultivariateStatistics(statement) {
         ["Observations", formatNumber(dataset.n)],
         ["Covariance matrix", formatMatrix(covariance)],
         ["Correlation matrix", correlation ? formatMatrix(correlation) : "undefined"],
-        ["PC1 eigenvalue", formatNumber(components[0].eigenvalue)],
-        ["PC1 explained variance", `${formatNumber(components[0].explained * 100)}%`],
-        ["PC1 direction", formatVector(components[0].vector)],
-        ["PC2 eigenvalue", formatNumber(components[1].eigenvalue)],
-        ["PC2 explained variance", `${formatNumber(components[1].explained * 100)}%`],
-        ["PC2 direction", formatVector(components[1].vector)],
+        ...components.flatMap((component, index) => [
+          [`PC${index + 1} eigenvalue`, formatNumber(component.eigenvalue)],
+          [`PC${index + 1} explained variance`, `${formatNumber(component.explained * 100)}%`],
+          [`PC${index + 1} cumulative variance`, `${formatNumber(component.cumulative * 100)}%`],
+          [`PC${index + 1} direction`, formatVector(component.vector)],
+        ]),
+        ["PC score matrix", formatMatrix(scores)],
       ],
     };
   }
@@ -11688,6 +11692,33 @@ function correlationMatrixFromCovariance(covariance) {
   );
 }
 
+function principalComponents(covariance) {
+  const totalVariance = traceMatrix(covariance);
+  if (totalVariance <= EPSILON) {
+    throw new Error("PCA needs data with positive total variance.");
+  }
+
+  const eigenpairs = covariance.length === 2
+    ? principalComponents2d(covariance)
+    : symmetricEigenvaluesJacobi(covariance).eigenpairs.map((entry) => ({
+        eigenvalue: Math.max(0, entry.eigenvalue),
+        vector: entry.vector,
+      }));
+
+  let cumulative = 0;
+  return eigenpairs.map((entry) => {
+    const eigenvalue = normalizeNumber(entry.eigenvalue);
+    const explained = normalizeNumber(eigenvalue / totalVariance);
+    cumulative = normalizeNumber(cumulative + explained);
+    return {
+      eigenvalue,
+      vector: entry.vector,
+      explained,
+      cumulative: Math.min(1, cumulative),
+    };
+  });
+}
+
 function principalComponents2d(covariance) {
   const a = covariance[0][0];
   const b = covariance[0][1];
@@ -11711,6 +11742,13 @@ function principalComponents2d(covariance) {
     vector: vectors[index],
     explained: normalizeNumber(eigenvalue / totalVariance),
   }));
+}
+
+function principalComponentScores(dataset, components) {
+  return Array.from({ length: dataset.n }, (_, rowIndex) => {
+    const centered = dataset.columns.map((column) => column.values[rowIndex] - column.mean);
+    return components.map((component) => normalizeNumber(dotProduct(centered, component.vector)));
+  });
 }
 
 function normalizeUnitVector(vector) {
