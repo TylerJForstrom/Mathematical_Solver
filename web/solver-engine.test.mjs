@@ -1185,6 +1185,25 @@ runTest("integral mode handles reciprocal antiderivatives", () => {
   assert.equal(result.answer, "ln(abs(x)) + C");
 });
 
+runTest("integral mode handles partial fractions", () => {
+  assert.equal(
+    analyzeIntegral("integrate (2x + 3)/(x^2 + 3x + 2)").answer,
+    "ln(abs(x + 1)) + ln(abs(x + 2)) + C",
+  );
+  assert.equal(
+    analyzeIntegral("integrate 1/(x^2 - 1)").answer,
+    "-0.5ln(abs(x + 1)) + 0.5ln(abs(x - 1)) + C",
+  );
+  assert.equal(
+    analyzeIntegral("integrate (x^2 + 1)/(x + 1)").answer,
+    "0.5x^2 - x + 2ln(abs(x + 1)) + C",
+  );
+  assert.equal(
+    analyzeIntegral("integrate (2x+3)/(x^2+3x+2) from 0 to 1").answer,
+    "integral = 1.098612",
+  );
+});
+
 runTest("integral mode handles logarithmic and square-root antiderivatives", () => {
   assert.equal(analyzeIntegral("integrate ln(x)").answer, "xln(abs(x)) - x + C");
   assert.equal(analyzeIntegral("integrate sqrt(x)").answer, "0.666667x^(3/2) + C");

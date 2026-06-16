@@ -3154,7 +3154,7 @@ export function analyzeIntegral(statement, variableHint = "x") {
   const simplifiedExpression = simplifyNode(expression, steps);
   const integral = integrateSymbolic(simplifiedExpression, request.variable);
   if (!integral) {
-    throw new Error("Integral mode supports polynomials, scalar multiples, sin, cos, tan, exp, ln, sqrt, and 1/x forms.");
+    throw new Error("Integral mode supports polynomials, scalar multiples, elementary functions, reciprocal forms, and distinct-linear-factor partial fractions.");
   }
 
   const antiderivative = integral.antiderivative;
@@ -12865,7 +12865,8 @@ function integrateSymbolic(node, variable) {
       return numerator ? scaleIntegral(numerator, 1 / denominatorConstant) : null;
     }
 
-    return integrateReciprocal(node.left, node.right, variable);
+    return integrateReciprocal(node.left, node.right, variable) ??
+      integrateRationalPartialFractions(node.left, node.right, variable);
   }
 
   if (node.operator === "^" && isMinusOnePowerOfVariable(node, variable)) {
@@ -12947,6 +12948,184 @@ function integrateReciprocal(numeratorNode, denominatorNode, variable) {
     (x) => scale * Math.log(Math.abs(denominator.slope * x + denominator.intercept)),
     reciprocalBoundsValidator(denominator.singularity, "Definite reciprocal integrals cannot cross a zero denominator."),
   );
+}
+
+function integrateRationalPartialFractions(numeratorNode, denominatorNode, variable) {
+  const numeratorPoly = polynomialFrom(numeratorNode);
+  const denominatorPoly = polynomialFrom(denominatorNode);
+  if (!numeratorPoly || !denominatorPoly) {
+    return null;
+  }
+
+  const numeratorCoefficients = polynomialCoefficients(numeratorPoly, variable);
+  const denominatorCoefficients = polynomialCoefficients(denominatorPoly, variable);
+  if (!numeratorCoefficients.length || !denominatorCoefficients.length) {
+    return null;
+  }
+
+  const denominatorDegree = polynomialDegree(denominatorCoefficients);
+  if (denominatorDegree < 1 || nearlyEqual(denominatorCoefficients[denominatorDegree] ?? 0, 0)) {
+    return null;
+  }
+
+  const divided = dividePolynomialCoefficients(numeratorCoefficients, denominatorCoefficients);
+  if (!divided) {
+    return null;
+  }
+
+  const partial = integrateProperPartialFractions(divided.remainder, denominatorCoefficients, variable);
+  if (!partial) {
+    return null;
+  }
+
+  const hasQuotient = polynomialDegree(divided.quotient) > 0 || !nearlyEqual(divided.quotient[0] ?? 0, 0);
+  if (!hasQuotient) {
+    return partial;
+  }
+
+  const quotientIntegral = integratePolynomialSymbolic(coefficientsToPolynomial(divided.quotient, variable), variable);
+  return {
+    antiderivative: formatAntiderivativeSum(quotientIntegral.antiderivative, partial.antiderivative, "+"),
+    evaluate: (x) => quotientIntegral.evaluate(x) + partial.evaluate(x),
+    validateBounds: partial.validateBounds,
+    title: "Use polynomial division and partial fractions",
+    detail: "Divide the rational function into a polynomial quotient plus a proper fraction, then decompose the proper fraction.",
+  };
+}
+
+function integrateProperPartialFractions(numeratorCoefficients, denominatorCoefficients, variable) {
+  const roots = distinctRationalLinearRoots(denominatorCoefficients);
+  if (!roots) {
+    return null;
+  }
+
+  const derivative = derivativeCoefficients(denominatorCoefficients);
+  const terms = roots
+    .map((root) => {
+      const derivativeAtRoot = evaluatePolynomialCoefficients(derivative, root);
+      if (nearlyEqual(derivativeAtRoot, 0)) {
+        return null;
+      }
+      return {
+        coefficient: normalizeNumber(evaluatePolynomialCoefficients(numeratorCoefficients, root) / derivativeAtRoot),
+        root,
+        factorText: formatLinearRootExpression(variable, root),
+      };
+    })
+    .filter((term) => term && !nearlyEqual(term.coefficient, 0));
+
+  if (terms.length === 0) {
+    return integratePolynomialSymbolic(new Map([["", 0]]), variable);
+  }
+
+  return {
+    antiderivative: formatPartialFractionAntiderivative(terms),
+    evaluate: (x) => terms.reduce((sum, term) =>
+      sum + term.coefficient * Math.log(Math.abs(x - term.root)), 0),
+    validateBounds: (lower, upper) => {
+      for (const term of terms) {
+        if (isBetweenInclusive(term.root, lower, upper)) {
+          throw new Error("Definite partial-fraction integrals cannot cross a zero denominator.");
+        }
+      }
+    },
+    title: "Apply partial fractions",
+    detail: "Factor the denominator into distinct linear terms and integrate each reciprocal term.",
+  };
+}
+
+function dividePolynomialCoefficients(numerator, denominator) {
+  const denominatorDegree = polynomialDegree(denominator);
+  const denominatorLeading = denominator[denominatorDegree] ?? 0;
+  if (nearlyEqual(denominatorLeading, 0)) {
+    return null;
+  }
+
+  const remainder = trimPolynomialCoefficients(numerator);
+  const quotient = Array(Math.max(0, polynomialDegree(remainder) - denominatorDegree + 1)).fill(0);
+  while (polynomialDegree(remainder) >= denominatorDegree && !isZeroCoefficientList(remainder)) {
+    const remainderDegree = polynomialDegree(remainder);
+    const degreeDelta = remainderDegree - denominatorDegree;
+    const coefficient = (remainder[remainderDegree] ?? 0) / denominatorLeading;
+    quotient[degreeDelta] = normalizeNumber((quotient[degreeDelta] ?? 0) + coefficient);
+    for (let index = 0; index <= denominatorDegree; index += 1) {
+      remainder[index + degreeDelta] = normalizeNumber((remainder[index + degreeDelta] ?? 0) - coefficient * (denominator[index] ?? 0));
+    }
+    trimPolynomialCoefficientsInPlace(remainder);
+  }
+
+  return {
+    quotient: trimPolynomialCoefficients(quotient),
+    remainder: trimPolynomialCoefficients(remainder),
+  };
+}
+
+function distinctRationalLinearRoots(coefficients) {
+  let remaining = trimPolynomialCoefficients(coefficients);
+  const roots = [];
+  while (polynomialDegree(remaining) > 0) {
+    const root = findRationalRoot(remaining);
+    if (!root) {
+      return null;
+    }
+    if (roots.some((existing) => nearlyEqual(existing, root.value))) {
+      return null;
+    }
+    const divided = syntheticDivide(remaining, root.value);
+    if (nearlyEqual(evaluatePolynomialCoefficients(divided, root.value), 0)) {
+      return null;
+    }
+    roots.push(normalizeNumber(root.value));
+    remaining = divided;
+  }
+  return roots.length === polynomialDegree(coefficients) ? roots : null;
+}
+
+function derivativeCoefficients(coefficients) {
+  return trimPolynomialCoefficients(coefficients.slice(1).map((coefficient, index) =>
+    (coefficient ?? 0) * (index + 1),
+  ));
+}
+
+function coefficientsToPolynomial(coefficients, variable) {
+  const poly = new Map();
+  coefficients.forEach((coefficient, power) => {
+    if (!nearlyEqual(coefficient ?? 0, 0)) {
+      poly.set(power === 0 ? "" : monomialKey({ [variable]: power }), coefficient);
+    }
+  });
+  return cleanPolynomial(poly);
+}
+
+function isZeroCoefficientList(coefficients) {
+  return coefficients.every((coefficient) => nearlyEqual(coefficient ?? 0, 0));
+}
+
+function trimPolynomialCoefficientsInPlace(coefficients) {
+  while (coefficients.length > 1 && nearlyEqual(coefficients[coefficients.length - 1] ?? 0, 0)) {
+    coefficients.pop();
+  }
+}
+
+function formatLinearRootExpression(variable, root) {
+  const normalized = normalizeNumber(root);
+  if (nearlyEqual(normalized, 0)) {
+    return variable;
+  }
+  const sign = normalized < 0 ? "+" : "-";
+  return `${variable} ${sign} ${formatNumber(Math.abs(normalized))}`;
+}
+
+function formatPartialFractionAntiderivative(terms) {
+  return terms.map((term, index) => {
+    const magnitude = Math.abs(term.coefficient);
+    const body = `ln(abs(${term.factorText}))`;
+    const text = nearlyEqual(magnitude, 1) ? body : `${formatNumber(magnitude)}${body}`;
+    if (index === 0) {
+      return term.coefficient < 0 ? `-${text}` : text;
+    }
+    return `${term.coefficient < 0 ? " - " : " + "}${text}`;
+  }).join("");
 }
 
 function elementaryIntegral(antiderivative, evaluate, validateBounds = null) {
