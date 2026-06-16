@@ -38,7 +38,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
   const errorLower = errorMessage.toLowerCase();
   const activeMode = mode.toLowerCase();
   const wantsStats = activeMode === "statistics" ||
-    /\b(mean|median|variance|standard deviation|regression|correlation|pearson|spearman|kendall|test|p-value|anova|chi-square|fisher|proportion|probability|binomial|normal|poisson|sample|group)\b/.test(lower);
+    /\b(mean|median|variance|standard deviation|regression|correlation|pearson|spearman|kendall|test|p-value|anova|chi-square|chi square|student t|f distribution|f critical|fisher|proportion|probability|binomial|normal|poisson|sample|group)\b/.test(lower);
 
   const suggestions = [
     {
@@ -203,7 +203,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
     },
     {
       title: "Probability distribution",
-      when: () => wantsStats && /\b(binomial|normal|poisson|geometric|hypergeometric|probability|cdf|percentile)\b/.test(lower),
+      when: () => wantsStats && /\b(binomial|normal|poisson|geometric|hypergeometric|student t|chi[-\s]?square distribution|f distribution|probability|cdf|percentile|quantile|critical)\b/.test(lower),
       reason: "I detected a probability distribution question.",
       needs: [
         "The distribution name",
@@ -213,6 +213,9 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       examples: [
         ["Binomial", "statistics", "binomial n=10 p=0.3 k=4"],
         ["Normal", "statistics", "normal mean=100 sd=15 x=130"],
+        ["Student t", "statistics", "student t df=10 x=2 greater"],
+        ["Chi-square", "statistics", "chi-square distribution df=5 x=10 greater"],
+        ["F", "statistics", "f distribution df1=5 df2=10 x=2 greater"],
       ],
     },
     {
@@ -1328,6 +1331,18 @@ export function analyzeStatistics(statement) {
 
   if (lower.includes("paired") || lower.includes("matched pairs")) {
     return analyzePairedTTest(statement);
+  }
+
+  if (isStudentTDistributionQuestion(lower)) {
+    return analyzeStudentTDistribution(statement);
+  }
+
+  if (isChiSquareDistributionQuestion(lower)) {
+    return analyzeChiSquareDistribution(statement);
+  }
+
+  if (isFDistributionQuestion(lower)) {
+    return analyzeFDistribution(statement);
   }
 
   if (isFisherExactQuestion(lower)) {
@@ -10060,6 +10075,179 @@ function analyzeNormalDistribution(statement) {
   };
 }
 
+function analyzeStudentTDistribution(statement) {
+  const request = parseStudentTDistributionInput(statement);
+  const cdf = studentTCdf(request.x, request.df);
+  const pdf = studentTPdf(request.x, request.df);
+  const probability = continuousDistributionProbability(cdf, request, (value) => studentTCdf(value, request.df));
+  const label = continuousProbabilityLabel("T", request);
+  const inverse = Number.isFinite(request.probability)
+    ? inverseStudentTCdf(request.probability, request.df)
+    : Number.NaN;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "STUDENT T",
+      children: [
+        statsMetricNode("df", request.df),
+        statsMetricNode("x", request.x),
+        statsMetricNode("P", probability),
+      ],
+    },
+    answer: `${label} = ${formatNumber(probability)}`,
+    summary: "Student t distribution",
+    details: "Continuous t probability distribution",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("df", request.df), statsMetricNode("x", request.x)],
+    }),
+    steps: [
+      {
+        title: "Read t-distribution parameters",
+        expression: `df = ${formatNumber(request.df)}, x = ${formatNumber(request.x)}`,
+        detail: "Student's t distribution uses degrees of freedom and is centered at zero.",
+      },
+      {
+        title: "Evaluate t CDF",
+        expression: `P(T <= ${formatNumber(request.x)}) = ${formatNumber(cdf)}`,
+        detail: "The CDF is computed from the regularized beta function.",
+      },
+      {
+        title: "Report requested probability",
+        expression: `${label} = ${formatNumber(probability)}`,
+        detail: request.between ? "Between probabilities subtract two CDF values." : "Tail probabilities come from the CDF or survival function.",
+      },
+    ],
+    artifacts: [
+      ["Degrees of freedom", formatNumber(request.df)],
+      ["Density", formatNumber(pdf)],
+      [`P(T <= ${formatNumber(request.x)})`, formatNumber(cdf)],
+      [`P(T > ${formatNumber(request.x)})`, formatNumber(1 - cdf)],
+      ...(request.between ? [[label, formatNumber(probability)]] : []),
+      ...(Number.isFinite(inverse) ? [[`t quantile p=${formatNumber(request.probability)}`, formatNumber(inverse)]] : []),
+    ],
+  };
+}
+
+function analyzeChiSquareDistribution(statement) {
+  const request = parseChiSquareDistributionInput(statement);
+  const cdf = chiSquareCdf(request.x, request.df);
+  const pdf = chiSquarePdf(request.x, request.df);
+  const probability = continuousDistributionProbability(cdf, request, (value) => chiSquareCdf(value, request.df));
+  const label = continuousProbabilityLabel("X^2", request);
+  const inverse = Number.isFinite(request.probability)
+    ? inverseMonotoneCdf((value) => chiSquareCdf(value, request.df), request.probability, 0)
+    : Number.NaN;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "CHI-SQUARE",
+      children: [
+        statsMetricNode("df", request.df),
+        statsMetricNode("x", request.x),
+        statsMetricNode("P", probability),
+      ],
+    },
+    answer: `${label} = ${formatNumber(probability)}`,
+    summary: "chi-square distribution",
+    details: "Continuous chi-square probability distribution",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("df", request.df), statsMetricNode("x", request.x)],
+    }),
+    steps: [
+      {
+        title: "Read chi-square parameters",
+        expression: `df = ${formatNumber(request.df)}, x = ${formatNumber(request.x)}`,
+        detail: "A chi-square distribution is determined by its degrees of freedom.",
+      },
+      {
+        title: "Evaluate gamma CDF",
+        expression: `P(X^2 <= ${formatNumber(request.x)}) = ${formatNumber(cdf)}`,
+        detail: "The chi-square CDF is a regularized incomplete gamma function.",
+      },
+      {
+        title: "Report requested probability",
+        expression: `${label} = ${formatNumber(probability)}`,
+        detail: request.between ? "Between probabilities subtract two CDF values." : "Tail probabilities come from the CDF or survival function.",
+      },
+    ],
+    artifacts: [
+      ["Degrees of freedom", formatNumber(request.df)],
+      ["Density", formatNumber(pdf)],
+      [`P(X^2 <= ${formatNumber(request.x)})`, formatNumber(cdf)],
+      [`P(X^2 > ${formatNumber(request.x)})`, formatNumber(1 - cdf)],
+      ...(request.between ? [[label, formatNumber(probability)]] : []),
+      ...(Number.isFinite(inverse) ? [[`chi-square quantile p=${formatNumber(request.probability)}`, formatNumber(inverse)]] : []),
+    ],
+  };
+}
+
+function analyzeFDistribution(statement) {
+  const request = parseFDistributionInput(statement);
+  const cdf = fCdf(request.x, request.df1, request.df2);
+  const pdf = fPdf(request.x, request.df1, request.df2);
+  const probability = continuousDistributionProbability(cdf, request, (value) => fCdf(value, request.df1, request.df2));
+  const label = continuousProbabilityLabel("F", request);
+  const inverse = Number.isFinite(request.probability)
+    ? inverseMonotoneCdf((value) => fCdf(value, request.df1, request.df2), request.probability, 0)
+    : Number.NaN;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsDistribution",
+      label: "F",
+      children: [
+        statsMetricNode("df1", request.df1),
+        statsMetricNode("df2", request.df2),
+        statsMetricNode("x", request.x),
+        statsMetricNode("P", probability),
+      ],
+    },
+    answer: `${label} = ${formatNumber(probability)}`,
+    summary: "F distribution",
+    details: "Continuous F probability distribution",
+    variables: [],
+    metrics: treeMetrics({
+      kind: "statsDistribution",
+      children: [statsMetricNode("df1", request.df1), statsMetricNode("df2", request.df2), statsMetricNode("x", request.x)],
+    }),
+    steps: [
+      {
+        title: "Read F-distribution parameters",
+        expression: `df1 = ${formatNumber(request.df1)}, df2 = ${formatNumber(request.df2)}, x = ${formatNumber(request.x)}`,
+        detail: "An F distribution is determined by numerator and denominator degrees of freedom.",
+      },
+      {
+        title: "Evaluate beta CDF",
+        expression: `P(F <= ${formatNumber(request.x)}) = ${formatNumber(cdf)}`,
+        detail: "The F CDF is computed using the regularized beta function.",
+      },
+      {
+        title: "Report requested probability",
+        expression: `${label} = ${formatNumber(probability)}`,
+        detail: request.between ? "Between probabilities subtract two CDF values." : "Tail probabilities come from the CDF or survival function.",
+      },
+    ],
+    artifacts: [
+      ["Numerator df", formatNumber(request.df1)],
+      ["Denominator df", formatNumber(request.df2)],
+      ["Density", formatNumber(pdf)],
+      [`P(F <= ${formatNumber(request.x)})`, formatNumber(cdf)],
+      [`P(F > ${formatNumber(request.x)})`, formatNumber(1 - cdf)],
+      ...(request.between ? [[label, formatNumber(probability)]] : []),
+      ...(Number.isFinite(inverse) ? [[`F quantile p=${formatNumber(request.probability)}`, formatNumber(inverse)]] : []),
+    ],
+  };
+}
+
 function analyzeInverseNormal(statement) {
   const request = parseInverseNormalInput(statement);
   const z = inverseNormalCdf(request.probability);
@@ -16717,6 +16905,40 @@ function studentTCdf(tStatistic, degreesFreedom) {
   return tStatistic > 0 ? 1 - beta / 2 : beta / 2;
 }
 
+function studentTPdf(tStatistic, degreesFreedom) {
+  if (!(degreesFreedom > 0) || !Number.isFinite(tStatistic)) {
+    return Number.NaN;
+  }
+  const logDensity =
+    logGamma((degreesFreedom + 1) / 2) -
+    logGamma(degreesFreedom / 2) -
+    0.5 * Math.log(degreesFreedom * Math.PI) -
+    ((degreesFreedom + 1) / 2) * Math.log(1 + tStatistic ** 2 / degreesFreedom);
+  return Math.exp(logDensity);
+}
+
+function chiSquareCdf(statistic, degreesFreedom) {
+  if (!(degreesFreedom > 0) || !Number.isFinite(statistic)) {
+    return Number.NaN;
+  }
+  if (statistic <= 0) {
+    return 0;
+  }
+  return regularizedGammaP(degreesFreedom / 2, statistic / 2);
+}
+
+function chiSquarePdf(statistic, degreesFreedom) {
+  if (!(degreesFreedom > 0) || !Number.isFinite(statistic)) {
+    return Number.NaN;
+  }
+  if (statistic <= 0) {
+    return degreesFreedom === 2 ? 0.5 : 0;
+  }
+  const shape = degreesFreedom / 2;
+  const logDensity = (shape - 1) * Math.log(statistic) - statistic / 2 - shape * Math.log(2) - logGamma(shape);
+  return Math.exp(logDensity);
+}
+
 function chiSquareRightTailApprox(statistic, degreesFreedom) {
   if (!(degreesFreedom > 0)) {
     return Number.NaN;
@@ -16739,6 +16961,21 @@ function fRightTail(statistic, dfNumerator, dfDenominator) {
 
 function fCdf(statistic, dfNumerator, dfDenominator) {
   return clampProbability(1 - fRightTail(statistic, dfNumerator, dfDenominator));
+}
+
+function fPdf(statistic, dfNumerator, dfDenominator) {
+  if (!(statistic > 0) || !(dfNumerator > 0) || !(dfDenominator > 0)) {
+    return statistic === 0 ? 0 : Number.NaN;
+  }
+  const alpha = dfNumerator / 2;
+  const beta = dfDenominator / 2;
+  const scale = dfNumerator / dfDenominator;
+  const logDensity =
+    alpha * Math.log(scale) +
+    (alpha - 1) * Math.log(statistic) -
+    (alpha + beta) * Math.log(1 + scale * statistic) -
+    logBeta(alpha, beta);
+  return Math.exp(logDensity);
 }
 
 function regularizedBeta(x, a, b) {
@@ -16784,6 +17021,96 @@ function betaBinomialProbability(trials, successes, alpha, beta) {
 
 function logBeta(alpha, beta) {
   return logGamma(alpha) + logGamma(beta) - logGamma(alpha + beta);
+}
+
+function regularizedGammaP(shape, x) {
+  if (!(shape > 0) || !(x >= 0)) {
+    return Number.NaN;
+  }
+  if (x === 0) {
+    return 0;
+  }
+  if (x < shape + 1) {
+    return regularizedGammaSeries(shape, x);
+  }
+  return clampProbability(1 - regularizedGammaContinuedFraction(shape, x));
+}
+
+function regularizedGammaSeries(shape, x) {
+  const maxIterations = 200;
+  const epsilon = 1e-12;
+  let term = 1 / shape;
+  let sum = term;
+  let denominator = shape;
+
+  for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+    denominator += 1;
+    term *= x / denominator;
+    sum += term;
+    if (Math.abs(term) < Math.abs(sum) * epsilon) {
+      break;
+    }
+  }
+
+  const logFront = -x + shape * Math.log(x) - logGamma(shape);
+  return clampProbability(sum * Math.exp(logFront));
+}
+
+function regularizedGammaContinuedFraction(shape, x) {
+  const maxIterations = 200;
+  const epsilon = 1e-12;
+  const tiny = 1e-30;
+  let b = x + 1 - shape;
+  let c = 1 / tiny;
+  if (Math.abs(b) < tiny) b = tiny;
+  let d = 1 / b;
+  let h = d;
+
+  for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+    const an = -iteration * (iteration - shape);
+    b += 2;
+    d = an * d + b;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = b + an / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    const delta = d * c;
+    h *= delta;
+    if (Math.abs(delta - 1) < epsilon) {
+      break;
+    }
+  }
+
+  const logFront = -x + shape * Math.log(x) - logGamma(shape);
+  return clampProbability(Math.exp(logFront) * h);
+}
+
+function inverseMonotoneCdf(cdf, probability, lower = 0) {
+  if (!(probability > 0 && probability < 1)) {
+    throw new Error("Quantile probability must be between 0 and 1.");
+  }
+
+  let low = lower;
+  let high = Math.max(1, lower + 1);
+  let highProbability = cdf(high);
+  for (let iteration = 0; iteration < 120 && highProbability < probability; iteration += 1) {
+    low = high;
+    high *= 2;
+    highProbability = cdf(high);
+  }
+  if (!(highProbability >= probability)) {
+    return Number.NaN;
+  }
+
+  for (let iteration = 0; iteration < 100; iteration += 1) {
+    const mid = (low + high) / 2;
+    if (cdf(mid) < probability) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return (low + high) / 2;
 }
 
 function betaContinuedFraction(x, a, b) {
@@ -17896,13 +18223,13 @@ function parseProbabilityTail(text) {
   if (lower.includes("at most") || lower.includes("<=") || lower.includes("no more than")) {
     return "at-most";
   }
-  if (lower.includes("less than") || lower.includes("<")) {
+  if (lower.includes("less than") || /\bless\b/.test(lower) || lower.includes("<")) {
     return "less";
   }
   if (lower.includes("at least") || lower.includes(">=")) {
     return "at-least";
   }
-  if (lower.includes("greater than") || lower.includes("more than") || lower.includes(">")) {
+  if (lower.includes("greater than") || lower.includes("more than") || /\bgreater\b/.test(lower) || lower.includes(">")) {
     return "greater";
   }
   return "exact";
@@ -17917,6 +18244,148 @@ function parseBetweenInterval(text) {
     left: Number(match[1]),
     right: Number(match[2]),
   };
+}
+
+function parseContinuousDistributionRequest(text, xFallback) {
+  const between = parseBetweenInterval(text);
+  const tail = parseProbabilityTail(text);
+  const namedX = readNamedNumber(text, ["x", "value", "statistic", "critical"], Number.NaN);
+  const wantsQuantile = isContinuousQuantileRequest(text);
+  const x = between
+    ? Math.max(between.left, between.right)
+    : Number.isFinite(namedX)
+      ? namedX
+      : wantsQuantile
+        ? Number.NaN
+        : xFallback;
+  const probabilityRaw = readNamedNumber(text, ["probability", "prob", "area", "p"], Number.NaN);
+  const alpha = readNamedNumber(text, ["alpha"], Number.NaN);
+  const normalizedAlpha = Number.isFinite(alpha) ? normalizeProbability(alpha) : Number.NaN;
+  const probability = Number.isFinite(probabilityRaw)
+    ? normalizeProbability(probabilityRaw)
+    : Number.isFinite(normalizedAlpha)
+      ? 1 - normalizedAlpha
+      : Number.NaN;
+
+  return {
+    x,
+    between,
+    tail,
+    probability,
+  };
+}
+
+function isContinuousQuantileRequest(text) {
+  const lower = text.toLowerCase();
+  return lower.includes("inverse") ||
+    lower.includes("quantile") ||
+    lower.includes("percentile") ||
+    /\bcritical\b/.test(lower);
+}
+
+function parseStudentTDistributionInput(text) {
+  const numbers = parseNumbers(text);
+  const df = readNamedNumber(text, ["df", "degreesFreedom", "degreesfreedom", "nu", "v"], numbers[0]);
+  const request = parseContinuousDistributionRequest(text, numbers.length >= 2 ? numbers[1] : Number.NaN);
+
+  if (!(df > 0)) {
+    throw new Error("Student t distribution needs positive degrees of freedom, such as student t df=10 x=2.");
+  }
+  if (!Number.isFinite(request.x)) {
+    if (Number.isFinite(request.probability)) {
+      request.x = inverseStudentTCdf(request.probability, df);
+    } else {
+      throw new Error("Student t distribution needs x or p, such as student t df=10 x=2 greater.");
+    }
+  }
+
+  return {
+    ...request,
+    df,
+  };
+}
+
+function parseChiSquareDistributionInput(text) {
+  const numbers = parseNumbers(text);
+  const df = readNamedNumber(text, ["df", "degreesFreedom", "degreesfreedom", "k"], numbers[0]);
+  const request = parseContinuousDistributionRequest(text, numbers.length >= 2 ? numbers[1] : Number.NaN);
+
+  if (!(df > 0)) {
+    throw new Error("Chi-square distribution needs positive degrees of freedom, such as chi-square distribution df=5 x=10.");
+  }
+  if (!Number.isFinite(request.x)) {
+    if (Number.isFinite(request.probability)) {
+      request.x = inverseMonotoneCdf((value) => chiSquareCdf(value, df), request.probability, 0);
+    } else {
+      throw new Error("Chi-square distribution needs x or p, such as chi-square distribution df=5 x=10 greater.");
+    }
+  }
+  if (request.x < 0 || (request.between && (request.between.left < 0 || request.between.right < 0))) {
+    throw new Error("Chi-square distribution values must be nonnegative.");
+  }
+
+  return {
+    ...request,
+    df,
+  };
+}
+
+function parseFDistributionInput(text) {
+  const numbers = parseNumbers(text);
+  const df1 = readNamedNumber(text, ["df1", "dfn", "numeratorDf", "numeratordf"], numbers[0]);
+  const df2 = readNamedNumber(text, ["df2", "dfd", "denominatorDf", "denominatordf"], numbers[1]);
+  const request = parseContinuousDistributionRequest(text, numbers.length >= 3 ? numbers[2] : Number.NaN);
+
+  if (!(df1 > 0) || !(df2 > 0)) {
+    throw new Error("F distribution needs positive df1 and df2, such as f distribution df1=5 df2=10 x=2.");
+  }
+  if (!Number.isFinite(request.x)) {
+    if (Number.isFinite(request.probability)) {
+      request.x = inverseMonotoneCdf((value) => fCdf(value, df1, df2), request.probability, 0);
+    } else {
+      throw new Error("F distribution needs x or p, such as f distribution df1=5 df2=10 x=2 greater.");
+    }
+  }
+  if (request.x < 0 || (request.between && (request.between.left < 0 || request.between.right < 0))) {
+    throw new Error("F distribution values must be nonnegative.");
+  }
+
+  return {
+    ...request,
+    df1,
+    df2,
+  };
+}
+
+function continuousDistributionProbability(cdfAtX, request, cdfFunction = null) {
+  if (request.between) {
+    if (!cdfFunction) {
+      return Number.NaN;
+    }
+    const lower = Math.min(request.between.left, request.between.right);
+    const upper = Math.max(request.between.left, request.between.right);
+    return clampProbability(cdfFunction(upper) - cdfFunction(lower));
+  }
+  if (request.tail === "greater" || request.tail === "at-least") {
+    return clampProbability(1 - cdfAtX);
+  }
+  return clampProbability(cdfAtX);
+}
+
+function continuousProbabilityLabel(symbol, request) {
+  if (request.between) {
+    const lower = Math.min(request.between.left, request.between.right);
+    const upper = Math.max(request.between.left, request.between.right);
+    return `P(${formatNumber(lower)} <= ${symbol} <= ${formatNumber(upper)})`;
+  }
+  if (request.tail === "greater" || request.tail === "at-least") {
+    return `P(${symbol} > ${formatNumber(request.x)})`;
+  }
+  return `P(${symbol} <= ${formatNumber(request.x)})`;
+}
+
+function normalizeProbability(probability) {
+  return probability > 1 && probability <= 100 ? probability / 100 : probability;
 }
 
 function parseDiscreteDistributionInput(text) {
@@ -19124,6 +19593,53 @@ function isSystemQuestion(lower) {
     lower.includes("nonlinear equations");
 }
 
+function isStudentTDistributionQuestion(lower) {
+  if (/\bt[-\s]?test\b/.test(lower)) {
+    return false;
+  }
+  return lower.includes("student t") ||
+    lower.includes("student's t") ||
+    /\bt\s+distribution\b/.test(lower) ||
+    /\bt[-\s]?dist\b/.test(lower) ||
+    /\binverse\s+t\b/.test(lower) ||
+    /\bt\s+critical\b/.test(lower);
+}
+
+function isChiSquareDistributionQuestion(lower) {
+  const isChiSquare = lower.includes("chi-square") ||
+    lower.includes("chi square") ||
+    lower.includes("chisquare");
+  if (!isChiSquare) {
+    return false;
+  }
+  if (lower.includes("observed") ||
+      lower.includes("expected") ||
+      lower.includes("independence") ||
+      lower.includes("contingency") ||
+      lower.includes("goodness") ||
+      lower.includes("table") ||
+      lower.includes("[[")) {
+    return false;
+  }
+  return lower.includes("distribution") ||
+    lower.includes("dist") ||
+    lower.includes("critical") ||
+    lower.includes("quantile") ||
+    lower.includes("percentile") ||
+    /\bdf\s*=/.test(lower);
+}
+
+function isFDistributionQuestion(lower) {
+  if (lower.includes("fisher")) {
+    return false;
+  }
+  return /\bf\s+distribution\b/.test(lower) ||
+    /\bf[-\s]?dist\b/.test(lower) ||
+    /\bf\s+critical\b/.test(lower) ||
+    /\binverse\s+f\b/.test(lower) ||
+    (/\bdf1\s*=/.test(lower) && /\bdf2\s*=/.test(lower) && /\b(?:x|p|prob|alpha)\s*=/.test(lower));
+}
+
 function isStatisticsQuestion(lower) {
   if (
     isRocQuestion(lower) ||
@@ -19246,6 +19762,13 @@ function isStatisticsQuestion(lower) {
     "uniform",
     "hypergeometric",
     "normal",
+    "student t",
+    "student's t",
+    "t distribution",
+    "chi-square distribution",
+    "chi square distribution",
+    "f distribution",
+    "f critical",
     "percentile",
     "quantile",
     "critical value",

@@ -115,7 +115,8 @@ The frontend currently supports:
   small-sample p-values when absolute differences are untied,
   Kruskal-Wallis, chi-square goodness-of-fit, chi-square independence tests
   for contingency tables, Fisher exact tests for 2x2 tables, binomial
-  probability, Poisson probability, normal probability, inverse-normal percentiles, geometric
+  probability, Poisson probability, normal probability, inverse-normal percentiles,
+  Student t, chi-square, and F distribution probabilities/critical values, geometric
   probability, exponential probability, uniform probability, hypergeometric
   probability, discrete expected value/variance, Bayes theorem, and z-score
   calculations
@@ -315,6 +316,9 @@ The same idea works for algebra and calculus:
   without replacement and returns `P(X = 2) = 0.20984`.
 - `inverse normal p=0.975 mean=0 sd=1` inverts the normal CDF and returns
   `x = 1.959963`.
+- `student t df=10 x=2 greater`, `chi-square distribution df=5 x=10 greater`,
+  and `f distribution df1=5 df2=10 x=2 greater` evaluate right-tail
+  probabilities, densities, and matching critical values when a probability is supplied.
 - `geometric p=0.25 k=3`, `exponential lambda=2 x=1`, and
   `uniform min=2 max=10 between 4 and 7` evaluate additional probability
   distribution trees.
@@ -434,7 +438,8 @@ The demo includes:
   binomial probability,
   Poisson probability, geometric probability, exponential probability, uniform
   probability, hypergeometric probability, normal probability, inverse-normal
-  percentiles, z-scores, discrete expected value, Bayes theorem,
+  percentiles, Student t, chi-square, and F distribution probabilities and
+  critical values, z-scores, discrete expected value, Bayes theorem,
   Markov chains, Bayesian beta-binomial updates,
   Jarque-Bera normality tests, equal-variance tests,
   one-sample/two-sample/paired t tests,

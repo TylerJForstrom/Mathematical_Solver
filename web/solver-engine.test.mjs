@@ -510,6 +510,25 @@ runTest("statistics mode computes inverse normal percentiles", () => {
   assert.equal(result.answer, "x = 1.959963");
 });
 
+runTest("statistics mode computes continuous reference distributions", () => {
+  const tResult = analyzeStatistics("student t df=10 x=2 greater");
+  const chiResult = analyzeStatistics("chi-square distribution df=5 x=10 greater");
+  const fResult = analyzeStatistics("f distribution df1=5 df2=10 x=2 greater");
+  const criticalResult = analyzeStatistics("f distribution df1=5 df2=10 p=0.95 critical");
+
+  assert.equal(tResult.summary, "Student t distribution");
+  assert.equal(tResult.answer, "P(T > 2) = 0.036694");
+  assert.equal(artifactValue(tResult, "Density"), "0.061146");
+  assert.equal(chiResult.summary, "chi-square distribution");
+  assert.equal(chiResult.answer, "P(X^2 > 10) = 0.075235");
+  assert.equal(artifactValue(chiResult, "P(X^2 <= 10)"), "0.924765");
+  assert.equal(fResult.summary, "F distribution");
+  assert.equal(fResult.answer, "P(F > 2) = 0.164195");
+  assert.equal(artifactValue(fResult, "Density"), "0.162006");
+  assert.equal(criticalResult.answer, "P(F <= 3.325835) = 0.95");
+  assert.equal(artifactValue(criticalResult, "F quantile p=0.95"), "3.325835");
+});
+
 runTest("statistics mode computes z-scores", () => {
   const result = analyzeStatistics("zscore value=85 mean=70 sd=10");
 
@@ -1323,6 +1342,9 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("exponential lambda=2 x=1").summary, "exponential probability");
   assert.equal(analyzeUniversal("uniform min=2 max=10 between 4 and 7").summary, "uniform probability");
   assert.equal(analyzeUniversal("inverse normal p=0.975 mean=0 sd=1").summary, "inverse normal");
+  assert.equal(analyzeUniversal("student t df=10 x=2 greater").summary, "Student t distribution");
+  assert.equal(analyzeUniversal("chi-square distribution df=5 x=10 greater").summary, "chi-square distribution");
+  assert.equal(analyzeUniversal("f distribution df1=5 df2=10 x=2 greater").summary, "F distribution");
   assert.equal(analyzeUniversal("hypergeometric population=50 successes=5 draws=10 k=2").summary, "hypergeometric probability");
   assert.equal(analyzeUniversal("expected value values: 0, 1, 2 probabilities: 0.2, 0.5, 0.3").summary, "discrete expected value");
   assert.equal(analyzeUniversal("bayes prior=0.01 sensitivity=0.99 specificity=0.95").summary, "Bayes theorem");
