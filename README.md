@@ -118,8 +118,8 @@ The frontend currently supports:
   probability, Poisson probability, normal probability, inverse-normal percentiles,
   Student t, chi-square, and F distribution probabilities/critical values, geometric
   probability, exponential probability, uniform probability, hypergeometric
-  probability, discrete expected value/variance, Bayes theorem, and z-score
-  calculations
+  probability, shaded density plots for continuous reference distributions,
+  discrete expected value/variance, Bayes theorem, and z-score calculations
 - Kaplan-Meier survival analysis, log-rank tests, and one-covariate Cox
   proportional hazards regression for right-censored data with risk sets,
   censoring counts, standard errors, median survival, survival curves,
@@ -318,7 +318,8 @@ The same idea works for algebra and calculus:
   `x = 1.959963`.
 - `student t df=10 x=2 greater`, `chi-square distribution df=5 x=10 greater`,
   and `f distribution df1=5 df2=10 x=2 greater` evaluate right-tail
-  probabilities, densities, and matching critical values when a probability is supplied.
+  probabilities, densities, shaded distribution plots, and matching critical
+  values when a probability is supplied.
 - `geometric p=0.25 k=3`, `exponential lambda=2 x=1`, and
   `uniform min=2 max=10 between 4 and 7` evaluate additional probability
   distribution trees.
@@ -439,7 +440,7 @@ The demo includes:
   Poisson probability, geometric probability, exponential probability, uniform
   probability, hypergeometric probability, normal probability, inverse-normal
   percentiles, Student t, chi-square, and F distribution probabilities and
-  critical values, z-scores, discrete expected value, Bayes theorem,
+  critical values with shaded density plots, z-scores, discrete expected value, Bayes theorem,
   Markov chains, Bayesian beta-binomial updates,
   Jarque-Bera normality tests, equal-variance tests,
   one-sample/two-sample/paired t tests,
@@ -486,7 +487,7 @@ These are good ways to make the project more impressive mathematically:
 4. Add substitution, integration by parts, and partial-fraction decomposition.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
-7. Add graphing for distributions, regression lines, tangent lines, and root-finding iterations.
+7. Add graphing for tangent lines, root-finding iterations, and more regression diagnostics.
 8. Add systems of differential equations and phase-plane direction fields.
 9. Add multi-step natural-language explanations for word problems.
 10. Add exact symbolic roots for cubic and quartic equations when possible.

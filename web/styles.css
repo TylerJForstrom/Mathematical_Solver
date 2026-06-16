@@ -561,6 +561,11 @@ input {
   stroke-width: 4;
 }
 
+.graph-area {
+  fill: rgba(98, 87, 165, 0.24);
+  stroke: none;
+}
+
 .graph-point {
   fill: var(--violet);
   stroke: #ffffff;

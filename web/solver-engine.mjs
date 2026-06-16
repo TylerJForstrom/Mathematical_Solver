@@ -10026,9 +10026,16 @@ function analyzeNormalDistribution(statement) {
     throw new Error("Normal distribution needs a positive standard deviation.");
   }
 
-  const z = (xValue - meanValue) / sdValue;
+  const request = parseContinuousDistributionRequest(statement, xValue);
+  const z = (request.x - meanValue) / sdValue;
   const leftTail = normalCdf(z);
   const rightTail = 1 - leftTail;
+  const probability = continuousDistributionProbability(
+    leftTail,
+    request,
+    (value) => normalCdf((value - meanValue) / sdValue),
+  );
+  const label = continuousProbabilityLabel("X", request);
 
   return {
     mode: "statistics",
@@ -10038,22 +10045,22 @@ function analyzeNormalDistribution(statement) {
       children: [
         statsMetricNode("mu", meanValue),
         statsMetricNode("sd", sdValue),
-        statsMetricNode("x", xValue),
+        statsMetricNode("x", request.x),
         statsMetricNode("z", z),
       ],
     },
-    answer: `P(X <= ${formatNumber(xValue)}) = ${formatNumber(leftTail)}`,
+    answer: `${label} = ${formatNumber(probability)}`,
     summary: "normal probability",
     details: "Continuous probability distribution",
     variables: [],
     metrics: treeMetrics({
       kind: "statsDistribution",
-      children: [statsMetricNode("mu", meanValue), statsMetricNode("sd", sdValue), statsMetricNode("x", xValue)],
+      children: [statsMetricNode("mu", meanValue), statsMetricNode("sd", sdValue), statsMetricNode("x", request.x)],
     }),
     steps: [
       {
         title: "Read normal parameters",
-        expression: `mean = ${formatNumber(meanValue)}, sd = ${formatNumber(sdValue)}, x = ${formatNumber(xValue)}`,
+        expression: `mean = ${formatNumber(meanValue)}, sd = ${formatNumber(sdValue)}, x = ${formatNumber(request.x)}`,
         detail: "A normal model uses a mean and standard deviation.",
       },
       {
@@ -10063,15 +10070,24 @@ function analyzeNormalDistribution(statement) {
       },
       {
         title: "Evaluate normal CDF",
-        expression: `P(X <= ${formatNumber(xValue)}) = ${formatNumber(leftTail)}`,
+        expression: `P(X <= ${formatNumber(request.x)}) = ${formatNumber(leftTail)}`,
         detail: "The cumulative distribution function gives left-tail probability.",
       },
     ],
     artifacts: [
       ["z-score", formatNumber(z)],
-      [`P(X <= ${formatNumber(xValue)})`, formatNumber(leftTail)],
-      [`P(X > ${formatNumber(xValue)})`, formatNumber(rightTail)],
+      [`P(X <= ${formatNumber(request.x)})`, formatNumber(leftTail)],
+      [`P(X > ${formatNumber(request.x)})`, formatNumber(rightTail)],
+      ...(request.between ? [[label, formatNumber(probability)]] : []),
     ],
+    graph: buildContinuousDistributionGraph({
+      expression: `Normal(mu=${formatNumber(meanValue)}, sd=${formatNumber(sdValue)})`,
+      request,
+      pdf: (value) => normalPdf((value - meanValue) / sdValue) / sdValue,
+      baseXMin: meanValue - 4 * sdValue,
+      baseXMax: meanValue + 4 * sdValue,
+      areaLabel: label,
+    }),
   };
 }
 
@@ -10129,6 +10145,14 @@ function analyzeStudentTDistribution(statement) {
       ...(request.between ? [[label, formatNumber(probability)]] : []),
       ...(Number.isFinite(inverse) ? [[`t quantile p=${formatNumber(request.probability)}`, formatNumber(inverse)]] : []),
     ],
+    graph: buildContinuousDistributionGraph({
+      expression: `Student t(df=${formatNumber(request.df)})`,
+      request,
+      pdf: (value) => studentTPdf(value, request.df),
+      baseXMin: inverseStudentTCdf(0.005, request.df),
+      baseXMax: inverseStudentTCdf(0.995, request.df),
+      areaLabel: label,
+    }),
   };
 }
 
@@ -10186,6 +10210,14 @@ function analyzeChiSquareDistribution(statement) {
       ...(request.between ? [[label, formatNumber(probability)]] : []),
       ...(Number.isFinite(inverse) ? [[`chi-square quantile p=${formatNumber(request.probability)}`, formatNumber(inverse)]] : []),
     ],
+    graph: buildContinuousDistributionGraph({
+      expression: `Chi-square(df=${formatNumber(request.df)})`,
+      request,
+      pdf: (value) => chiSquarePdf(value, request.df),
+      baseXMin: 0,
+      baseXMax: inverseMonotoneCdf((value) => chiSquareCdf(value, request.df), 0.995, 0),
+      areaLabel: label,
+    }),
   };
 }
 
@@ -10245,6 +10277,14 @@ function analyzeFDistribution(statement) {
       ...(request.between ? [[label, formatNumber(probability)]] : []),
       ...(Number.isFinite(inverse) ? [[`F quantile p=${formatNumber(request.probability)}`, formatNumber(inverse)]] : []),
     ],
+    graph: buildContinuousDistributionGraph({
+      expression: `F(df1=${formatNumber(request.df1)}, df2=${formatNumber(request.df2)})`,
+      request,
+      pdf: (value) => fPdf(value, request.df1, request.df2),
+      baseXMin: 0,
+      baseXMax: inverseMonotoneCdf((value) => fCdf(value, request.df1, request.df2), 0.995, 0),
+      areaLabel: label,
+    }),
   };
 }
 
@@ -13666,6 +13706,112 @@ function buildScatterFitGraph(xValues, yValues, slope, intercept, fitLabel) {
       },
     ],
   };
+}
+
+function buildContinuousDistributionGraph({ expression, request, pdf, baseXMin, baseXMax, areaLabel }) {
+  const targets = distributionGraphTargets(request);
+  const domain = expandDistributionDomain(baseXMin, baseXMax, targets);
+  const points = sampleContinuousCurve(pdf, domain.xMin, domain.xMax, 181);
+  const yMax = Math.max(1e-6, ...points.map((point) => point.y));
+  const shade = distributionShadeInterval(request, domain.xMin, domain.xMax);
+  const areas = shade
+    ? [
+        {
+          label: areaLabel,
+          points: distributionAreaPoints(pdf, shade.left, shade.right, 81),
+        },
+      ]
+    : [];
+
+  return {
+    expression,
+    kind: "distribution",
+    xMin: normalizeNumber(domain.xMin),
+    xMax: normalizeNumber(domain.xMax),
+    yMin: 0,
+    yMax: normalizeNumber(yMax),
+    points,
+    areas,
+  };
+}
+
+function distributionGraphTargets(request) {
+  if (request.between) {
+    return [request.between.left, request.between.right].filter(Number.isFinite);
+  }
+  return Number.isFinite(request.x) ? [request.x] : [];
+}
+
+function expandDistributionDomain(baseXMin, baseXMax, targets) {
+  let xMin = Number.isFinite(baseXMin) ? baseXMin : -1;
+  let xMax = Number.isFinite(baseXMax) ? baseXMax : 1;
+  if (xMin === xMax) {
+    xMax = xMin + 1;
+  }
+  if (xMin > xMax) {
+    [xMin, xMax] = [xMax, xMin];
+  }
+
+  for (const target of targets) {
+    const span = xMax - xMin || 1;
+    if (target < xMin) {
+      xMin = target - span * 0.08;
+    }
+    if (target > xMax) {
+      xMax = target + span * 0.08;
+    }
+  }
+
+  return { xMin, xMax };
+}
+
+function sampleContinuousCurve(fn, xMin, xMax, count) {
+  const points = [];
+  for (let index = 0; index < count; index += 1) {
+    const x = xMin + ((xMax - xMin) * index) / (count - 1);
+    const y = fn(x);
+    if (Number.isFinite(y) && y >= 0) {
+      points.push({ x: normalizeNumber(x), y: normalizeNumber(y) });
+    }
+  }
+  if (points.length >= 2) {
+    return points;
+  }
+  return [
+    { x: normalizeNumber(xMin), y: 0 },
+    { x: normalizeNumber(xMax), y: 0 },
+  ];
+}
+
+function distributionShadeInterval(request, xMin, xMax) {
+  let left;
+  let right;
+  if (request.between) {
+    left = Math.min(request.between.left, request.between.right);
+    right = Math.max(request.between.left, request.between.right);
+  } else if (request.tail === "greater" || request.tail === "at-least") {
+    left = request.x;
+    right = xMax;
+  } else {
+    left = xMin;
+    right = request.x;
+  }
+
+  left = Math.max(xMin, Math.min(xMax, left));
+  right = Math.max(xMin, Math.min(xMax, right));
+  if (!(right > left)) {
+    return null;
+  }
+  return { left, right };
+}
+
+function distributionAreaPoints(fn, left, right, count) {
+  const top = sampleContinuousCurve(fn, left, right, count);
+  return [
+    { x: normalizeNumber(left), y: 0 },
+    ...top,
+    { x: normalizeNumber(right), y: 0 },
+  ];
 }
 
 function computeFourierSeries(request, expression) {
@@ -19046,6 +19192,10 @@ function inverseNormalCdf(probability) {
 
 function normalCdf(z) {
   return 0.5 * (1 + erf(z / Math.SQRT2));
+}
+
+function normalPdf(z) {
+  return Math.exp(-0.5 * z ** 2) / Math.sqrt(2 * Math.PI);
 }
 
 function erf(value) {

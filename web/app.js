@@ -293,8 +293,13 @@ function renderGraph(graph) {
   const height = 260;
   const pad = 30;
   const lineSeries = graph.lines ?? (graph.points ? [{ label: graph.expression, points: graph.points }] : []);
+  const areaSeries = graph.areas ?? [];
   const scatterPoints = graph.scatter ?? [];
-  const allPoints = [...lineSeries.flatMap((series) => series.points), ...scatterPoints];
+  const allPoints = [
+    ...lineSeries.flatMap((series) => series.points),
+    ...areaSeries.flatMap((series) => series.points),
+    ...scatterPoints,
+  ];
   const baseXMin = Number.isFinite(graph.xMin) ? graph.xMin : Math.min(...allPoints.map((point) => point.x));
   const baseXMax = Number.isFinite(graph.xMax) ? graph.xMax : Math.max(...allPoints.map((point) => point.x));
   const baseYMin = Number.isFinite(graph.yMin) ? graph.yMin : Math.min(...allPoints.map((point) => point.y));
@@ -314,11 +319,18 @@ function renderGraph(graph) {
       return `<polyline class="graph-line" points="${points}"></polyline>`;
     })
     .join("");
+  const areaMarkup = areaSeries
+    .map((series) => {
+      const points = series.points.map((point) => `${mapX(point.x).toFixed(2)},${mapY(point.y).toFixed(2)}`).join(" ");
+      return `<polygon class="graph-area" points="${points}"></polygon>`;
+    })
+    .join("");
   const scatterMarkup = scatterPoints
     .map((point) => `<circle class="graph-point" cx="${mapX(point.x).toFixed(2)}" cy="${mapY(point.y).toFixed(2)}" r="4.6"></circle>`)
     .join("");
   const legendItems = [
     ...(scatterPoints.length ? ["Data"] : []),
+    ...areaSeries.map((series) => series.label).filter(Boolean),
     ...lineSeries.map((series) => series.label).filter(Boolean),
   ];
   const legend = legendItems.length > 1
@@ -326,7 +338,11 @@ function renderGraph(graph) {
     : "";
   const xAxis = yMin <= 0 && yMax >= 0 ? `<line class="graph-axis" x1="${pad}" y1="${mapY(0)}" x2="${width - pad}" y2="${mapY(0)}"></line>` : "";
   const yAxis = xMin <= 0 && xMax >= 0 ? `<line class="graph-axis" x1="${mapX(0)}" y1="${pad}" x2="${mapX(0)}" y2="${height - pad}"></line>` : "";
-  const graphLabel = graph.kind === "scatter-fit" ? "Statistical graph" : "Function graph";
+  const graphLabel = graph.kind === "scatter-fit"
+    ? "Statistical graph"
+    : graph.kind === "distribution"
+      ? "Probability distribution graph"
+      : "Function graph";
 
   return `
     <div class="graph-card" aria-label="${graphLabel}">
@@ -337,6 +353,7 @@ function renderGraph(graph) {
       ${legend}
       <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(graph.expression)}">
         <rect x="0" y="0" width="${width}" height="${height}"></rect>
+        ${areaMarkup}
         ${xAxis}
         ${yAxis}
         ${lineMarkup}

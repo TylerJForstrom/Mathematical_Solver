@@ -498,9 +498,14 @@ runTest("statistics mode computes binomial probability", () => {
 
 runTest("statistics mode computes normal probabilities", () => {
   const result = analyzeStatistics("normal mean=0 sd=1 x=1.96");
+  const rightTail = analyzeStatistics("normal mean=0 sd=1 x=1.96 greater");
 
   assert.equal(result.summary, "normal probability");
   assert.equal(result.answer, "P(X <= 1.96) = 0.975002");
+  assert.equal(result.graph.kind, "distribution");
+  assert.equal(result.graph.points.length, 181);
+  assert.equal(rightTail.answer, "P(X > 1.96) = 0.024998");
+  assert.equal(rightTail.graph.areas[0].label, "P(X > 1.96)");
 });
 
 runTest("statistics mode computes inverse normal percentiles", () => {
@@ -519,12 +524,16 @@ runTest("statistics mode computes continuous reference distributions", () => {
   assert.equal(tResult.summary, "Student t distribution");
   assert.equal(tResult.answer, "P(T > 2) = 0.036694");
   assert.equal(artifactValue(tResult, "Density"), "0.061146");
+  assert.equal(tResult.graph.kind, "distribution");
+  assert.equal(tResult.graph.areas[0].label, "P(T > 2)");
   assert.equal(chiResult.summary, "chi-square distribution");
   assert.equal(chiResult.answer, "P(X^2 > 10) = 0.075235");
   assert.equal(artifactValue(chiResult, "P(X^2 <= 10)"), "0.924765");
+  assert.equal(chiResult.graph.areas[0].label, "P(X^2 > 10)");
   assert.equal(fResult.summary, "F distribution");
   assert.equal(fResult.answer, "P(F > 2) = 0.164195");
   assert.equal(artifactValue(fResult, "Density"), "0.162006");
+  assert.equal(fResult.graph.points.length, 181);
   assert.equal(criticalResult.answer, "P(F <= 3.325835) = 0.95");
   assert.equal(artifactValue(criticalResult, "F quantile p=0.95"), "3.325835");
 });
