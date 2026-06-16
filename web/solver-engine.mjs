@@ -21568,7 +21568,7 @@ function simplifyNode(node, steps = []) {
     }
     const trigIdentity = simplifyTrigFunctionIdentity(node.name, argument, steps);
     if (trigIdentity) {
-      return simplifyNode(trigIdentity, steps);
+      return trigIdentity;
     }
     return { ...node, argument };
   }
@@ -21612,6 +21612,8 @@ function simplifyNode(node, steps = []) {
   if (node.operator === "+") {
     const pythagorean = simplifyTrigPythagoreanSum(left, right, steps);
     if (pythagorean) return pythagorean;
+    const sumToProduct = simplifyTrigSumToProduct(left, right, "+", steps);
+    if (sumToProduct) return sumToProduct;
     if (isZero(left)) return right;
     if (isZero(right)) return left;
   }
@@ -21619,6 +21621,8 @@ function simplifyNode(node, steps = []) {
   if (node.operator === "-") {
     const pythagoreanDifference = simplifyTrigPythagoreanDifference(left, right, steps);
     if (pythagoreanDifference) return pythagoreanDifference;
+    const sumToProduct = simplifyTrigSumToProduct(left, right, "-", steps);
+    if (sumToProduct) return sumToProduct;
     if (isZero(right)) return left;
     if (isZero(left)) return { kind: "mathUnary", operator: "-", operand: right };
   }
@@ -21836,6 +21840,10 @@ function trigNode(name, argument) {
   return { kind: "mathFunction", name, argument };
 }
 
+function halfAngleCombination(left, operator, right) {
+  return mathBinary("/", mathBinary(operator, left, right), mathNumber(2));
+}
+
 function formatIdentityArgument(argument) {
   const text = formatMath(argument);
   return ["mathNumber", "mathSymbol", "mathFunction"].includes(argument.kind) ? text : `(${text})`;
@@ -21888,6 +21896,48 @@ function simplifyTrigPythagoreanDifference(left, right, steps) {
     });
     return result;
   }
+  return null;
+}
+
+function simplifyTrigSumToProduct(left, right, operator, steps) {
+  const leftSin = trigFunctionArgument(left, "sin");
+  const rightSin = trigFunctionArgument(right, "sin");
+  const leftCos = trigFunctionArgument(left, "cos");
+  const rightCos = trigFunctionArgument(right, "cos");
+
+  if (leftSin && rightSin && !sameMathTree(leftSin, rightSin)) {
+    const sumArgument = halfAngleCombination(leftSin, "+", rightSin);
+    const differenceArgument = halfAngleCombination(leftSin, "-", rightSin);
+    const result = operator === "+"
+      ? mathBinary("*", mathBinary("*", mathNumber(2), trigNode("sin", sumArgument)), trigNode("cos", differenceArgument))
+      : mathBinary("*", mathBinary("*", mathNumber(2), trigNode("cos", sumArgument)), trigNode("sin", differenceArgument));
+    steps.push({
+      title: "Apply sum-to-product identity",
+      expression: operator === "+"
+        ? `sin(${formatMath(leftSin)}) + sin(${formatMath(rightSin)}) = 2sin((a + b)/2)cos((a - b)/2)`
+        : `sin(${formatMath(leftSin)}) - sin(${formatMath(rightSin)}) = 2cos((a + b)/2)sin((a - b)/2)`,
+      detail: "A sum or difference of sine terms can be rewritten as a product.",
+    });
+    return result;
+  }
+
+  if (leftCos && rightCos && !sameMathTree(leftCos, rightCos)) {
+    const sumArgument = halfAngleCombination(leftCos, "+", rightCos);
+    const differenceArgument = halfAngleCombination(leftCos, "-", rightCos);
+    const product = mathBinary("*", trigNode("sin", sumArgument), trigNode("sin", differenceArgument));
+    const result = operator === "+"
+      ? mathBinary("*", mathBinary("*", mathNumber(2), trigNode("cos", sumArgument)), trigNode("cos", differenceArgument))
+      : mathBinary("*", mathNumber(-2), product);
+    steps.push({
+      title: "Apply sum-to-product identity",
+      expression: operator === "+"
+        ? `cos(${formatMath(leftCos)}) + cos(${formatMath(rightCos)}) = 2cos((a + b)/2)cos((a - b)/2)`
+        : `cos(${formatMath(leftCos)}) - cos(${formatMath(rightCos)}) = -2sin((a + b)/2)sin((a - b)/2)`,
+      detail: "A sum or difference of cosine terms can be rewritten as a product.",
+    });
+    return result;
+  }
+
   return null;
 }
 
@@ -21947,6 +21997,65 @@ function simplifyTrigProduct(left, right, steps) {
       detail: "Reciprocal trigonometric functions multiply to one when their arguments match.",
     });
     return mathNumber(1);
+  }
+
+  return simplifyTrigProductToSum(leftSin, leftCos, rightSin, rightCos, steps);
+}
+
+function simplifyTrigProductToSum(leftSin, leftCos, rightSin, rightCos, steps) {
+  const sinCosArgument = leftSin && rightCos && !sameMathTree(leftSin, rightCos)
+    ? { sinArgument: leftSin, cosArgument: rightCos, orientation: "sin-cos" }
+    : leftCos && rightSin && !sameMathTree(leftCos, rightSin)
+      ? { sinArgument: rightSin, cosArgument: leftCos, orientation: "cos-sin" }
+      : null;
+  if (sinCosArgument) {
+    const firstArgument = sinCosArgument.orientation === "sin-cos" ? sinCosArgument.sinArgument : sinCosArgument.cosArgument;
+    const secondArgument = sinCosArgument.orientation === "sin-cos" ? sinCosArgument.cosArgument : sinCosArgument.sinArgument;
+    const sumTerm = trigNode("sin", mathBinary("+", firstArgument, secondArgument));
+    const differenceTerm = trigNode("sin", mathBinary("-", firstArgument, secondArgument));
+    const body = sinCosArgument.orientation === "sin-cos"
+      ? mathBinary("+", sumTerm, differenceTerm)
+      : mathBinary("-", sumTerm, differenceTerm);
+    steps.push({
+      title: "Apply product-to-sum identity",
+      expression: `${sinCosArgument.orientation === "sin-cos" ? "sin(a)cos(b)" : "cos(a)sin(b)"} = 0.5[sin(a + b) ${sinCosArgument.orientation === "sin-cos" ? "+" : "-"} sin(a - b)]`,
+      detail: "A sine-cosine product can be rewritten as a sum of sine terms.",
+    });
+    return mathBinary("*", mathNumber(0.5), body);
+  }
+
+  if (leftCos && rightCos && !sameMathTree(leftCos, rightCos)) {
+    steps.push({
+      title: "Apply product-to-sum identity",
+      expression: "cos(a)cos(b) = 0.5[cos(a + b) + cos(a - b)]",
+      detail: "A cosine-cosine product can be rewritten as a sum of cosine terms.",
+    });
+    return mathBinary(
+      "*",
+      mathNumber(0.5),
+      mathBinary(
+        "+",
+        trigNode("cos", mathBinary("+", leftCos, rightCos)),
+        trigNode("cos", mathBinary("-", leftCos, rightCos)),
+      ),
+    );
+  }
+
+  if (leftSin && rightSin && !sameMathTree(leftSin, rightSin)) {
+    steps.push({
+      title: "Apply product-to-sum identity",
+      expression: "sin(a)sin(b) = 0.5[cos(a - b) - cos(a + b)]",
+      detail: "A sine-sine product can be rewritten as a difference of cosine terms.",
+    });
+    return mathBinary(
+      "*",
+      mathNumber(0.5),
+      mathBinary(
+        "-",
+        trigNode("cos", mathBinary("-", leftSin, rightSin)),
+        trigNode("cos", mathBinary("+", leftSin, rightSin)),
+      ),
+    );
   }
 
   return null;

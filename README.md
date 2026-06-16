@@ -13,7 +13,7 @@ The frontend currently supports:
 - Propositional logic evaluation and truth tables
 - Algebra simplification with constants, like terms, Pythagorean identities,
   reciprocal trig functions, cofunction identities, double-angle rules, and
-  angle-sum rules
+  angle-sum/product-to-sum/sum-to-product rules
 - Rational-root polynomial factoring for quadratics, cubics, and higher-degree
   one-variable polynomials with rational roots
 - Exact combinatorics for factorials, permutations, and combinations
@@ -201,6 +201,8 @@ The same idea works for algebra and calculus:
   `2 * sin(x) * cos(x)`.
 - `1/cos(x)` uses the reciprocal identity and simplifies to `sec(x)`.
 - `sin(pi/2 - x)` uses a cofunction identity and simplifies to `cos(x)`.
+- `sin(x)*cos(y)` uses a product-to-sum identity and rewrites to
+  `0.5 * (sin(x + y) + sin(x - y))`.
 - `factor x^3 - 6x^2 + 11x - 6` uses rational roots and synthetic division
   to produce `(x - 1)(x - 2)(x - 3)`.
 - `10 choose 3` uses exact integer combinatorics and returns `C(10, 3) = 120`.
@@ -509,8 +511,8 @@ These are good ways to make the project more impressive mathematically:
 
 1. Add a formal problem-router grammar for more natural-language questions.
 2. Add broader exact symbolic root output for selected cubic and quartic equations.
-3. Add more trigonometric identities, including product-to-sum and sum-to-product
-   rules.
+3. Add more trigonometric identities, including power-reduction and
+   half-angle rules.
 4. Add broader substitution, broader integration by parts, and repeated
    irreducible quadratic partial fractions.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.

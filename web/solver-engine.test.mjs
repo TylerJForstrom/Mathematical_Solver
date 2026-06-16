@@ -94,6 +94,16 @@ runTest("simplify mode applies trigonometric identities", () => {
   assert.equal(analyzeSimplification("sin(x + y)").answer, "sin(x) * cos(y) + cos(x) * sin(y)");
   assert.equal(analyzeSimplification("cos(x - y)").answer, "cos(x) * cos(y) + sin(x) * sin(y)");
   assert.equal(analyzeSimplification("tan(x - y)").answer, "(tan(x) - tan(y)) / (1 + tan(x) * tan(y))");
+  assert.equal(analyzeSimplification("sin(x)*cos(y)").answer, "0.5 * (sin(x + y) + sin(x - y))");
+  assert.equal(analyzeSimplification("cos(x)*sin(y)").answer, "0.5 * (sin(x + y) - sin(x - y))");
+  assert.equal(analyzeSimplification("cos(x)*cos(y)").answer, "0.5 * (cos(x + y) + cos(x - y))");
+  assert.equal(analyzeSimplification("sin(x)*sin(y)").answer, "0.5 * (cos(x - y) - cos(x + y))");
+  assert.equal(analyzeSimplification("sin(x)+sin(y)").answer, "2 * sin((x + y) / 2) * cos((x - y) / 2)");
+  assert.equal(analyzeSimplification("sin(x)-sin(y)").answer, "2 * cos((x + y) / 2) * sin((x - y) / 2)");
+  assert.equal(analyzeSimplification("cos(x)+cos(y)").answer, "2 * cos((x + y) / 2) * cos((x - y) / 2)");
+  assert.equal(analyzeSimplification("cos(x)-cos(y)").answer, "-2 * sin((x + y) / 2) * sin((x - y) / 2)");
+  assert.equal(analyzeSimplification("sin(x)*cos(x)").answer, "sin(x) * cos(x)");
+  assert.equal(analyzeSimplification("sin(x)+sin(x)").answer, "sin(x) + sin(x)");
 });
 
 runTest("factoring mode factors quadratics over rationals", () => {
