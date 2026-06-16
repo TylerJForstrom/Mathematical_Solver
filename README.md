@@ -18,7 +18,8 @@ The frontend currently supports:
 - Number theory tools: gcd, lcm, prime factorization, modular powers,
   modular inverses, and Chinese remainder theorem systems
 - One-variable polynomial inequalities with sign charts and interval notation
-- Linear and quadratic equation solving, including complex roots
+- Linear and quadratic equation solving, including exact radical roots and
+  complex roots
 - Complex-number arithmetic and elementary complex functions through Ask mode
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations and Newton-style nonlinear systems through
@@ -202,6 +203,8 @@ The same idea works for algebra and calculus:
   `directional derivative x^2 + x*y + y^2 at x=1 y=2 direction [3,4]`
   evaluate multivariable calculus trees.
 - `x^2 - 5x + 6 = 0` becomes an equation node with left and right expression trees.
+- `x^2 - 2 = 0` keeps irrational quadratic roots exact and returns
+  `x = sqrt(2), x = -sqrt(2)`.
 - `x^2 + 1 = 0` keeps the quadratic formula in the complex plane and returns
   `x = i, x = -i`.
 - `complex (3+4i)*(2-i)` evaluates the same math tree with complex pairs and
@@ -415,7 +418,7 @@ The demo includes:
 - Numeric limits through Ask mode
 - Partial derivatives, gradients, and directional derivatives through Ask mode
 - Taylor/Maclaurin approximations through Ask mode
-- Complex arithmetic and complex quadratic roots through Ask mode
+- Complex arithmetic plus exact radical and complex quadratic roots through Ask mode
 - Dataset summaries, confidence intervals, bootstrap intervals,
   regression/correlation, polynomial regression,
   Pearson correlation,
@@ -482,7 +485,7 @@ node web/solver-engine.test.mjs
 These are good ways to make the project more impressive mathematically:
 
 1. Add a formal problem-router grammar for more natural-language questions.
-2. Add exact radical output for quadratic equations with irrational roots.
+2. Add broader exact symbolic root output for selected cubic and quartic equations.
 3. Add trigonometric simplification identities.
 4. Add substitution, integration by parts, and partial-fraction decomposition.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
@@ -490,7 +493,7 @@ These are good ways to make the project more impressive mathematically:
 7. Add graphing for tangent lines, root-finding iterations, and more regression diagnostics.
 8. Add systems of differential equations and phase-plane direction fields.
 9. Add multi-step natural-language explanations for word problems.
-10. Add exact symbolic roots for cubic and quartic equations when possible.
+10. Add exact symbolic roots for more higher-degree equations when possible.
 11. Convert logic statements to negation normal form, conjunctive normal form, and
    disjunctive normal form.
 12. Add Boolean algebra simplification rules, such as idempotent laws,

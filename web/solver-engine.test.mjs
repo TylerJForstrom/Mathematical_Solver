@@ -178,6 +178,15 @@ runTest("equation mode solves quadratics", () => {
   assert.equal(result.answer, "x = 3, x = 2");
 });
 
+runTest("equation mode formats irrational quadratic roots exactly", () => {
+  const simple = analyzeEquation("x^2 - 2 = 0", "x");
+  const scaled = analyzeEquation("2x^2 + 2x - 1 = 0", "x");
+
+  assert.equal(simple.answer, "x = sqrt(2), x = -sqrt(2)");
+  assert.equal(artifactValue(simple, "Numeric approximations"), "1.414214, -1.414214");
+  assert.equal(scaled.answer, "x = (-1 + sqrt(3)) / 2, x = (-1 - sqrt(3)) / 2");
+});
+
 runTest("equation mode reports complex quadratic roots", () => {
   assert.equal(analyzeEquation("x^2 + 1 = 0", "x").answer, "x = i, x = -i");
   assert.equal(analyzeEquation("x^2 + 2x + 5 = 0", "x").answer, "x = -1 + 2i, x = -1 - 2i");

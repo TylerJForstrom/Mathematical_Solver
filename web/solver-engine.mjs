@@ -572,6 +572,7 @@ export function analyzeEquation(statement, variableHint = "x") {
     artifacts: [
       ["Normalized", `${polynomialText} = 0`],
       ["Solution", solution.answer],
+      ...(solution.artifacts ?? []),
     ],
   };
 }
@@ -21479,9 +21480,9 @@ function solvePolynomial(poly, variable) {
     const b = coefficients[1] ?? 0;
     const a = coefficients[2] ?? 0;
     const discriminant = b * b - 4 * a * c;
-    const roots = quadraticRoots(a, b, c, discriminant);
+    const result = quadraticRootResult(a, b, c, discriminant);
     return {
-      answer: roots.map((root) => `${variable} = ${root}`).join(", "),
+      answer: result.roots.map((root) => `${variable} = ${root}`).join(", "),
       summary: "quadratic solution",
       steps: [
         {
@@ -21492,8 +21493,12 @@ function solvePolynomial(poly, variable) {
         {
           title: "Apply quadratic formula",
           expression: `${variable} = (-b +/- sqrt(b^2 - 4ac)) / 2a`,
-          detail: `Solutions: ${roots.join(", ")}.`,
+          detail: `Solutions: ${result.roots.join(", ")}.`,
         },
+      ],
+      artifacts: [
+        ["Discriminant", formatNumber(discriminant)],
+        ...(result.exactRadicals ? [["Numeric approximations", result.numericRoots.join(", ")]] : []),
       ],
     };
   }
@@ -22022,6 +22027,23 @@ function uniqueSortedNumbers(values) {
   return unique;
 }
 
+function quadraticRootResult(a, b, c, discriminant) {
+  const numericRoots = quadraticRoots(a, b, c, discriminant);
+  const exactRoots = exactQuadraticRadicalRoots(a, b, c, discriminant);
+  if (!exactRoots) {
+    return {
+      roots: numericRoots,
+      numericRoots,
+      exactRadicals: false,
+    };
+  }
+  return {
+    roots: exactRoots,
+    numericRoots,
+    exactRadicals: true,
+  };
+}
+
 function quadraticRoots(a, b, c, discriminant) {
   const denominator = 2 * a;
   if (nearlyEqual(discriminant, 0)) {
@@ -22041,6 +22063,98 @@ function quadraticRoots(a, b, c, discriminant) {
     formatComplex(complex(real, imaginary)),
     formatComplex(complex(real, -imaginary)),
   ];
+}
+
+function exactQuadraticRadicalRoots(a, b, c, discriminant) {
+  if (![a, b, c, discriminant].every(isIntegerLike)) {
+    return null;
+  }
+  const integerDiscriminant = Math.round(discriminant);
+  if (integerDiscriminant <= 0) {
+    return null;
+  }
+
+  const { outside, radicand } = simplifySquareRootInteger(integerDiscriminant);
+  if (radicand === 1) {
+    return null;
+  }
+
+  const constant = -Math.round(b);
+  const denominator = 2 * Math.round(a);
+  return [
+    formatQuadraticRadicalRoot(constant, outside, radicand, denominator),
+    formatQuadraticRadicalRoot(constant, -outside, radicand, denominator),
+  ];
+}
+
+function isIntegerLike(value) {
+  return Number.isFinite(value) &&
+    Number.isSafeInteger(Math.round(value)) &&
+    Math.abs(value - Math.round(value)) < 1e-9;
+}
+
+function simplifySquareRootInteger(value) {
+  let radicand = Math.abs(Math.round(value));
+  let outside = 1;
+  for (let factor = 2; factor * factor <= radicand; factor += 1) {
+    const square = factor * factor;
+    while (radicand % square === 0) {
+      outside *= factor;
+      radicand /= square;
+    }
+  }
+  return { outside, radicand };
+}
+
+function formatQuadraticRadicalRoot(constantInput, radicalInput, radicand, denominatorInput) {
+  let constant = constantInput;
+  let radical = radicalInput;
+  let denominator = denominatorInput;
+
+  if (denominator < 0) {
+    constant *= -1;
+    radical *= -1;
+    denominator *= -1;
+  }
+
+  const common = gcdManyIntegers([constant, radical, denominator]);
+  if (common > 1) {
+    constant /= common;
+    radical /= common;
+    denominator /= common;
+  }
+
+  const numerator = formatRadicalNumerator(constant, radical, radicand);
+  if (denominator === 1) {
+    return numerator;
+  }
+  return numerator.includes(" + ") || numerator.includes(" - ")
+    ? `(${numerator}) / ${denominator}`
+    : `${numerator} / ${denominator}`;
+}
+
+function gcdManyIntegers(values) {
+  const positives = values
+    .map((value) => Math.abs(Math.round(value)))
+    .filter((value) => value > 0);
+  if (positives.length === 0) {
+    return 1;
+  }
+  return positives.reduce((divisor, value) => gcdIntegers(divisor, value));
+}
+
+function formatRadicalNumerator(constant, radical, radicand) {
+  const radicalText = formatRadicalFactor(Math.abs(radical), radicand);
+  if (constant === 0) {
+    return radical < 0 ? `-${radicalText}` : radicalText;
+  }
+  const sign = radical < 0 ? "-" : "+";
+  return `${formatNumber(constant)} ${sign} ${radicalText}`;
+}
+
+function formatRadicalFactor(coefficient, radicand) {
+  const radical = `sqrt(${formatNumber(radicand)})`;
+  return coefficient === 1 ? radical : `${formatNumber(coefficient)}*${radical}`;
 }
 
 function unsupportedEquation(parsed, steps, detail) {
