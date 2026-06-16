@@ -150,6 +150,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
     },
     {
+      title: "ARIMA forecast",
+      when: () => wantsStats && /\b(arima|autoregressive integrated|time[-\s]?series forecast)\b/.test(lower),
+      reason: "I detected a time-series forecasting question.",
+      needs: [
+        "A numeric series",
+        "AR order p and differencing order d",
+        "A forecast horizon",
+      ],
+      examples: [
+        ["ARIMA", "statistics", "arima(2,1,0) series: 10, 13, 15, 18, 22, 27, 31, 38 forecast=3"],
+      ],
+    },
+    {
       title: "Bayesian normal mean",
       when: () => wantsStats && /\b(bayesian normal|bayesian mean|normal-normal|posterior mean|credible interval)\b/.test(lower),
       reason: "I detected a Bayesian mean-estimation question.",
@@ -7186,6 +7199,10 @@ function analyzeRegression(statement) {
 }
 
 function analyzeTimeSeries(statement) {
+  if (isArimaQuestion(statement.toLowerCase())) {
+    return analyzeArimaForecast(statement);
+  }
+
   const request = parseTimeSeriesInput(statement);
   const result = fitAr1TimeSeries(request.values, request.forecastSteps);
   const lastForecast = result.forecasts[result.forecasts.length - 1];
@@ -7245,6 +7262,73 @@ function analyzeTimeSeries(statement) {
   };
 }
 
+function analyzeArimaForecast(statement) {
+  const request = parseArimaInput(statement);
+  const result = fitArimaAutoregression(request.values, request.p, request.d, request.forecastSteps);
+  const lastForecast = result.forecasts.at(-1);
+  const modelLabel = `ARIMA(${request.p}, ${request.d}, 0)`;
+  const tree = statsDatasetNode(request.values, [
+    statsMetricNode("p", request.p),
+    statsMetricNode("d", request.d),
+    statsMetricNode("sigma", result.innovationSd),
+    statsMetricNode("FORECAST", lastForecast.value),
+  ], "ARIMA");
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `${modelLabel} ${request.forecastSteps}-step forecast = ${formatNumber(lastForecast.value)}`,
+    summary: "ARIMA forecast",
+    details: `${modelLabel} autoregression on ${request.d === 0 ? "original" : `${request.d}-times differenced`} series`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read ARIMA order and series",
+        expression: `${modelLabel}, n = ${formatNumber(request.values.length)}, horizon = ${formatNumber(request.forecastSteps)}`,
+        detail: "ARIMA(p,d,0) differences the series d times, then fits an autoregression with p lag terms.",
+      },
+      {
+        title: "Difference the series",
+        expression: formatVector(result.differenced),
+        detail: request.d === 0
+          ? "With d = 0, the original series is modeled directly."
+          : "Differencing removes trend before the autoregressive model is fit.",
+      },
+      {
+        title: "Fit autoregression",
+        expression: `w_t = ${formatNumber(result.intercept)}${result.phi.map((value, index) => ` ${formatSignedTerm(value, `w_(t-${index + 1})`)}`).join("")}`,
+        detail: "Least squares estimates the intercept and autoregressive lag coefficients.",
+      },
+      {
+        title: "Forecast and invert differencing",
+        expression: `${request.forecastSteps}-step forecast = ${formatNumber(lastForecast.value)}`,
+        detail: "Future differenced forecasts are cumulatively added back to the latest observed series levels.",
+      },
+    ],
+    table: {
+      headers: ["Step", "Differenced forecast", "Forecast"],
+      rows: result.forecasts.map((forecast) => [
+        formatNumber(forecast.step),
+        formatNumber(forecast.differencedValue),
+        formatNumber(forecast.value),
+      ]),
+    },
+    artifacts: [
+      ["Model", modelLabel],
+      ["Differenced series", formatVector(result.differenced)],
+      ["Intercept", formatNumber(result.intercept)],
+      ["AR coefficients", formatVector(result.phi)],
+      ["Fitted values", formatVector(result.fitted)],
+      ["Residuals", formatVector(result.residuals)],
+      ["Residual SSE", formatNumber(result.sse)],
+      ["Innovation SD", formatNumber(result.innovationSd)],
+      ["Last observed value", formatNumber(request.values.at(-1))],
+      [`${request.forecastSteps}-step forecast`, formatNumber(lastForecast.value)],
+    ],
+  };
+}
+
 function fitAr1TimeSeries(values, forecastSteps) {
   const lagged = values.slice(0, -1);
   const current = values.slice(1);
@@ -7291,6 +7375,111 @@ function fitAr1TimeSeries(values, forecastSteps) {
     innovationSd: normalizeNumber(innovationSd),
     forecasts,
   };
+}
+
+function fitArimaAutoregression(values, p, d, forecastSteps) {
+  const differenced = differenceSeries(values, d);
+  if (differenced.length <= p + 1) {
+    throw new Error("ARIMA needs enough observations after differencing to estimate lag coefficients.");
+  }
+
+  const design = [];
+  const response = [];
+  for (let index = p; index < differenced.length; index += 1) {
+    design.push([
+      1,
+      ...Array.from({ length: p }, (_, lag) => differenced[index - lag - 1]),
+    ]);
+    response.push(differenced[index]);
+  }
+
+  const fit = fitAutoregressionLeastSquares(response, design);
+  const intercept = fit.coefficients[0];
+  const phi = fit.coefficients.slice(1);
+  const history = [...differenced];
+  const states = differencingStates(values, d);
+  const forecasts = [];
+
+  for (let step = 1; step <= forecastSteps; step += 1) {
+    const lagValues = Array.from({ length: p }, (_, lag) => history[history.length - lag - 1]);
+    const differencedValue = intercept + dotProduct(phi, lagValues);
+    history.push(differencedValue);
+    const value = invertDifferencedForecast(states, differencedValue);
+    forecasts.push({
+      step,
+      differencedValue: normalizeNumber(differencedValue),
+      value: normalizeNumber(value),
+    });
+  }
+
+  return {
+    differenced: differenced.map(normalizeNumber),
+    intercept: normalizeNumber(intercept),
+    phi: phi.map(normalizeNumber),
+    fitted: fit.fitted,
+    residuals: fit.residuals,
+    sse: fit.sse,
+    innovationSd: normalizeNumber(Math.sqrt(fit.mse)),
+    forecasts,
+  };
+}
+
+function fitAutoregressionLeastSquares(response, design) {
+  const transposed = transposeMatrix(design);
+  const normalMatrix = multiplyMatrices(transposed, design);
+  const normalVector = multiplyMatrixVector(transposed, response);
+  let coefficients;
+  try {
+    coefficients = solveLinearSystem(normalMatrix, normalVector).map(normalizeNumber);
+  } catch {
+    const ridge = normalMatrix.map((row, rowIndex) =>
+      row.map((value, columnIndex) => value + (rowIndex === columnIndex ? 1e-8 : 0)),
+    );
+    coefficients = solveLinearSystem(ridge, normalVector).map(normalizeNumber);
+  }
+  const fitted = design.map((row) => normalizeNumber(dotProduct(row, coefficients)));
+  const residuals = response.map((value, index) => normalizeNumber(value - fitted[index]));
+  const sse = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const degreesFreedom = Math.max(1, response.length - coefficients.length);
+
+  return {
+    coefficients,
+    fitted,
+    residuals,
+    sse: normalizeNumber(sse),
+    mse: normalizeNumber(sse / degreesFreedom),
+  };
+}
+
+function differenceSeries(values, order) {
+  let current = [...values];
+  for (let level = 0; level < order; level += 1) {
+    current = current.slice(1).map((value, index) => value - current[index]);
+  }
+  return current;
+}
+
+function differencingStates(values, order) {
+  const states = [values.at(-1)];
+  let current = [...values];
+  for (let level = 1; level <= order; level += 1) {
+    current = current.slice(1).map((value, index) => value - current[index]);
+    states.push(current.at(-1));
+  }
+  return states;
+}
+
+function invertDifferencedForecast(states, differencedValue) {
+  if (states.length === 1) {
+    states[0] = differencedValue;
+    return states[0];
+  }
+
+  states[states.length - 1] = differencedValue;
+  for (let level = states.length - 2; level >= 0; level -= 1) {
+    states[level] += states[level + 1];
+  }
+  return states[0];
 }
 
 function analyzePolynomialRegression(statement) {
@@ -16781,6 +16970,49 @@ function parseTimeSeriesInput(text) {
   return { values, forecastSteps };
 }
 
+function parseArimaInput(text) {
+  const tupleMatch = text.match(/\barima\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+  const tupleP = tupleMatch ? Number(tupleMatch[1]) : 1;
+  const tupleD = tupleMatch ? Number(tupleMatch[2]) : 1;
+  const tupleQ = tupleMatch ? Number(tupleMatch[3]) : 0;
+  const p = readNamedInteger(text, ["p", "ar"], tupleP, "ARIMA p order");
+  const d = readNamedInteger(text, ["d", "diff", "difference"], tupleD, "ARIMA differencing order");
+  const q = readNamedInteger(text, ["q", "ma"], tupleQ, "ARIMA q order");
+  const forecastSteps = readNamedInteger(text, ["forecast", "steps", "horizon", "ahead"], 1, "ARIMA forecast steps");
+  const seriesMatch = text.match(/\b(?:series|data|values|observations?)\s*[:=]\s*([^;]+)/i);
+  const cleanSeriesText = (chunk) => chunk
+    .replace(/\b(?:p|ar|d|diff|difference|q|ma|forecast|steps|horizon|ahead)\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, "");
+  const values = seriesMatch
+    ? parseNumberList(cleanSeriesText(seriesMatch[1]))
+    : parseNumberList(text
+        .replace(/\barima\s*\(?\s*\d*\s*,?\s*\d*\s*,?\s*\d*\s*\)?/gi, "")
+        .replace(/\b(?:p|ar|d|diff|difference|q|ma|forecast|steps|horizon|ahead)\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, "")
+        .replace(/\b(?:series|data|values|observations?)\b/gi, ""));
+
+  if (!Number.isSafeInteger(p) || p < 1 || p > 5) {
+    throw new Error("ARIMA p must be an integer from 1 to 5.");
+  }
+  if (!Number.isSafeInteger(d) || d < 0 || d > 2) {
+    throw new Error("ARIMA d must be an integer from 0 to 2.");
+  }
+  if (!Number.isSafeInteger(q) || q !== 0) {
+    throw new Error("This ARIMA solver currently supports q=0, such as arima(2,1,0).");
+  }
+  if (!Number.isSafeInteger(forecastSteps) || forecastSteps < 1 || forecastSteps > 100) {
+    throw new Error("ARIMA forecast steps must be an integer from 1 to 100.");
+  }
+  if (values.length <= p + d + 2) {
+    throw new Error("ARIMA needs more observations than p + d + 2.");
+  }
+
+  return {
+    p,
+    d,
+    forecastSteps,
+    values,
+  };
+}
+
 function buildMultivariateDataset(columns) {
   if (columns.length < 2) {
     throw new Error("Multivariate statistics need at least two variables.");
@@ -18654,8 +18886,14 @@ function isCoxQuestion(lower) {
     lower.startsWith("cox ");
 }
 
+function isArimaQuestion(lower) {
+  return lower.includes("arima") ||
+    lower.includes("autoregressive integrated");
+}
+
 function isTimeSeriesQuestion(lower) {
-  return lower.includes("ar(1)") ||
+  return isArimaQuestion(lower) ||
+    lower.includes("ar(1)") ||
     lower.includes("ar1") ||
     lower.includes("autoregressive") ||
     lower.includes("time series") ||
@@ -18950,6 +19188,8 @@ function isStatisticsQuestion(lower) {
     "proportional hazards",
     "ar(1)",
     "ar1",
+    "arima",
+    "autoregressive integrated",
     "autoregressive",
     "time series",
     "time-series",

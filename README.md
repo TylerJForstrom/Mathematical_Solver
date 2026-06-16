@@ -93,8 +93,8 @@ The frontend currently supports:
   specificity, precision, accuracy, Youden's J, and confusion counts
 - Poisson regression for count outcomes with log-link coefficients, fitted
   rates, likelihood deviance, pseudo R squared, and expected-count prediction
-- Time-series AR(1) forecasting with lag coefficients, autocorrelation,
-  residual error, and multi-step predictions
+- Time-series AR(1) and ARIMA(p,d,0) forecasting with lag coefficients,
+  differencing, residual error, and multi-step predictions
 - Multivariate statistics: covariance matrices, correlation matrices,
   one-way MANOVA with Wilks' lambda, Pillai trace, Lawley-Hotelling trace, and
   pairwise Hotelling T-squared follow-ups, and multi-variable principal
@@ -293,6 +293,9 @@ The same idea works for algebra and calculus:
   fits a count-response GLM and predicts an expected count.
 - `ar(1) series: 10,12,13,15,16,18 forecast=3` fits a lag-1
   autoregressive model and forecasts future values.
+- `arima(2,1,0) series: 10,13,15,18,22,27,31,38 forecast=3`
+  differences the series, fits autoregressive lag terms, and reconstructs
+  multi-step forecasts on the original scale.
 - `covariance matrix x: 1,2,3,4; y: 2,3,5,8` returns a sample covariance
   matrix, and `correlation matrix ...` scales it to pairwise correlations.
 - `pca x: 1,2,3,4,5; y: 2,3,5,8,13; z: 5,4,3,2,1` finds covariance
@@ -426,7 +429,7 @@ The demo includes:
   random forest classification,
   ROC/AUC classifier evaluation,
   Poisson regression,
-  AR(1) time-series forecasting,
+  AR(1) and ARIMA(p,d,0) time-series forecasting,
   covariance/correlation matrices, multi-variable PCA, k-means clustering,
   binomial probability,
   Poisson probability, geometric probability, exponential probability, uniform

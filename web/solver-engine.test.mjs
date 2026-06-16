@@ -62,6 +62,10 @@ runTest("input assistant suggests structured problem formats", () => {
   const nonlinear = suggestProblemHelp("nonlinear system with a guess", "ask", "System solving needs a guess.");
   assert.equal(nonlinear.title, "Nonlinear system solver");
   assert.ok(nonlinear.examples[0][2].includes("guess x=3 y=2"));
+
+  const arima = suggestProblemHelp("arima forecast", "statistics", "Time-series forecast needs a series.");
+  assert.equal(arima.title, "ARIMA forecast");
+  assert.ok(arima.examples[0][2].startsWith("arima(2,1,0)"));
 });
 
 runTest("simplify mode combines like terms", () => {
@@ -472,6 +476,17 @@ runTest("statistics mode computes AR(1) time-series forecasts", () => {
   assert.equal(artifactValue(result, "Lag coefficient phi"), "0.973684");
   assert.equal(artifactValue(result, "Innovation SD"), "0.628281");
   assert.deepEqual(result.table.rows[2], ["3", "22.30573"]);
+});
+
+runTest("statistics mode computes ARIMA forecasts", () => {
+  const result = analyzeStatistics("arima(2,1,0) series: 10, 13, 15, 18, 22, 27, 31, 38 forecast=3");
+
+  assert.equal(result.summary, "ARIMA forecast");
+  assert.equal(result.answer, "ARIMA(2, 1, 0) 3-step forecast = 58.824074");
+  assert.equal(artifactValue(result, "Differenced series"), "[3, 2, 3, 4, 5, 4, 7]");
+  assert.equal(artifactValue(result, "AR coefficients"), "[0.166667, 0.833333]");
+  assert.equal(artifactValue(result, "Innovation SD"), "1.527525");
+  assert.deepEqual(result.table.rows[2], ["3", "7.212963", "58.824074"]);
 });
 
 runTest("statistics mode computes binomial probability", () => {
@@ -1269,6 +1284,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("log-rank group1 times: 5, 6, 6, 8, 10 events: 1, 1, 0, 1, 0; group2 times: 4, 6, 7, 9, 12 events: 1, 0, 1, 1, 0").summary, "log-rank test");
   assert.equal(analyzeUniversal("cox regression times: 5, 6, 6, 8, 10, 12; events: 1, 1, 0, 1, 0, 1; x: 0, 1, 0, 1, 1, 0").summary, "Cox proportional hazards");
   assert.equal(analyzeUniversal("ar(1) series: 10, 12, 13, 15, 16, 18 forecast=3").summary, "AR(1) time-series forecast");
+  assert.equal(analyzeUniversal("arima(2,1,0) series: 10, 13, 15, 18, 22, 27, 31, 38 forecast=3").summary, "ARIMA forecast");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("meta-analysis effects: 0.2, 0.5, 0.1, 0.7; se: 0.1, 0.2, 0.15, 0.25").summary, "meta-analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
