@@ -79,6 +79,11 @@ runTest("simplify mode applies trigonometric identities", () => {
   assert.equal(analyzeSimplification("1 - sin(x)^2").answer, "cos(x) ^ 2");
   assert.equal(analyzeSimplification("sin(x)/cos(x)").answer, "tan(x)");
   assert.equal(analyzeSimplification("tan(x)*cos(x)").answer, "sin(x)");
+  assert.equal(analyzeSimplification("1/cos(x)").answer, "sec(x)");
+  assert.equal(analyzeSimplification("1/sin(x)").answer, "csc(x)");
+  assert.equal(analyzeSimplification("cos(x)/sin(x)").answer, "cot(x)");
+  assert.equal(analyzeSimplification("sec(x)*cos(x)").answer, "1");
+  assert.equal(analyzeSimplification("cot(x)*sin(x)").answer, "cos(x)");
   assert.equal(analyzeSimplification("sin(2x)").answer, "2 * sin(x) * cos(x)");
   assert.equal(analyzeSimplification("cos(2x)").answer, "cos(x) ^ 2 - sin(x) ^ 2");
   assert.equal(analyzeSimplification("tan(2x)").answer, "2 * tan(x) / (1 - tan(x) ^ 2)");
@@ -223,6 +228,12 @@ runTest("derivative mode supports product rule", () => {
   assert.equal(result.answer, "2x + 1");
 });
 
+runTest("derivative mode supports reciprocal trig functions", () => {
+  assert.equal(analyzeDerivative("sec(x)", "x").answer, "sec(x) * tan(x)");
+  assert.equal(analyzeDerivative("csc(x)", "x").answer, "-(csc(x) * cot(x))");
+  assert.equal(analyzeDerivative("cot(x)", "x").answer, "-(csc(x) ^ 2)");
+});
+
 runTest("multivariable mode computes partials, gradients, and directional derivatives", () => {
   const partial = analyzeMultivariable("partial derivative of x^2*y + y^3 with respect to y");
   const partialAtPoint = analyzeMultivariable("partial derivative of x^2*y + y^3 with respect to y at x=2 y=3");
@@ -262,6 +273,7 @@ runTest("complex mode evaluates arithmetic and functions", () => {
   assert.equal(analyzeComplex("complex (3+4i)/(1-2i)").answer, "-1 + 2i");
   assert.equal(analyzeComplex("complex sqrt(-1)").answer, "i");
   assert.equal(analyzeComplex("complex (1+i)^2").answer, "2i");
+  assert.equal(analyzeComplex("complex sec(0)").answer, "1");
 });
 
 runTest("statistics mode computes descriptive summaries", () => {

@@ -31,7 +31,7 @@ const LOGIC_LABELS = {
   iff: "IFF",
 };
 
-const MATH_FUNCTIONS = new Set(["sin", "cos", "tan", "exp", "ln", "sqrt"]);
+const MATH_FUNCTIONS = new Set(["sin", "cos", "tan", "sec", "csc", "cot", "exp", "ln", "sqrt"]);
 
 export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
   const lower = statement.toLowerCase();
@@ -21185,38 +21185,122 @@ function simplifyTrigPythagoreanDifference(left, right, steps) {
 function simplifyTrigProduct(left, right, steps) {
   const leftTan = trigFunctionArgument(left, "tan");
   const leftCos = trigFunctionArgument(left, "cos");
+  const leftCot = trigFunctionArgument(left, "cot");
+  const leftSec = trigFunctionArgument(left, "sec");
+  const leftCsc = trigFunctionArgument(left, "csc");
+  const leftSin = trigFunctionArgument(left, "sin");
   const rightTan = trigFunctionArgument(right, "tan");
   const rightCos = trigFunctionArgument(right, "cos");
+  const rightCot = trigFunctionArgument(right, "cot");
+  const rightSec = trigFunctionArgument(right, "sec");
+  const rightCsc = trigFunctionArgument(right, "csc");
+  const rightSin = trigFunctionArgument(right, "sin");
   const argument = leftTan && rightCos && sameMathTree(leftTan, rightCos)
     ? leftTan
     : leftCos && rightTan && sameMathTree(leftCos, rightTan)
       ? leftCos
       : null;
-  if (!argument) {
-    return null;
+  if (argument) {
+    steps.push({
+      title: "Apply tangent identity",
+      expression: `tan(${formatMath(argument)}) * cos(${formatMath(argument)}) = sin(${formatMath(argument)})`,
+      detail: "Because tan(theta) = sin(theta) / cos(theta), multiplying by cos(theta) leaves sin(theta).",
+    });
+    return trigNode("sin", argument);
   }
 
-  steps.push({
-    title: "Apply tangent identity",
-    expression: `tan(${formatMath(argument)}) * cos(${formatMath(argument)}) = sin(${formatMath(argument)})`,
-    detail: "Because tan(theta) = sin(theta) / cos(theta), multiplying by cos(theta) leaves sin(theta).",
-  });
-  return { kind: "mathFunction", name: "sin", argument };
+  const cotArgument = leftCot && rightSin && sameMathTree(leftCot, rightSin)
+    ? leftCot
+    : leftSin && rightCot && sameMathTree(leftSin, rightCot)
+      ? leftSin
+      : null;
+  if (cotArgument) {
+    steps.push({
+      title: "Apply cotangent identity",
+      expression: `cot(${formatMath(cotArgument)}) * sin(${formatMath(cotArgument)}) = cos(${formatMath(cotArgument)})`,
+      detail: "Because cot(theta) = cos(theta) / sin(theta), multiplying by sin(theta) leaves cos(theta).",
+    });
+    return trigNode("cos", cotArgument);
+  }
+
+  const reciprocalPair = matchingTrigPair([
+    [leftSec, rightCos, "sec", "cos"],
+    [leftCos, rightSec, "cos", "sec"],
+    [leftCsc, rightSin, "csc", "sin"],
+    [leftSin, rightCsc, "sin", "csc"],
+    [leftCot, rightTan, "cot", "tan"],
+    [leftTan, rightCot, "tan", "cot"],
+  ]);
+  if (reciprocalPair) {
+    steps.push({
+      title: "Cancel reciprocal trig functions",
+      expression: `${reciprocalPair.leftName}(${formatMath(reciprocalPair.argument)}) * ${reciprocalPair.rightName}(${formatMath(reciprocalPair.argument)}) = 1`,
+      detail: "Reciprocal trigonometric functions multiply to one when their arguments match.",
+    });
+    return mathNumber(1);
+  }
+
+  return null;
 }
 
 function simplifyTrigQuotient(left, right, steps) {
   const sinArgument = trigFunctionArgument(left, "sin");
   const cosArgument = trigFunctionArgument(right, "cos");
-  if (!sinArgument || !cosArgument || !sameMathTree(sinArgument, cosArgument)) {
-    return null;
+  if (sinArgument && cosArgument && sameMathTree(sinArgument, cosArgument)) {
+    steps.push({
+      title: "Apply tangent identity",
+      expression: `sin(${formatMath(sinArgument)}) / cos(${formatMath(sinArgument)}) = tan(${formatMath(sinArgument)})`,
+      detail: "The quotient identity rewrites sine divided by cosine as tangent.",
+    });
+    return trigNode("tan", sinArgument);
   }
 
-  steps.push({
-    title: "Apply tangent identity",
-    expression: `sin(${formatMath(sinArgument)}) / cos(${formatMath(sinArgument)}) = tan(${formatMath(sinArgument)})`,
-    detail: "The quotient identity rewrites sine divided by cosine as tangent.",
-  });
-  return { kind: "mathFunction", name: "tan", argument: sinArgument };
+  const leftCos = trigFunctionArgument(left, "cos");
+  const rightSin = trigFunctionArgument(right, "sin");
+  if (leftCos && rightSin && sameMathTree(leftCos, rightSin)) {
+    steps.push({
+      title: "Apply cotangent identity",
+      expression: `cos(${formatMath(leftCos)}) / sin(${formatMath(leftCos)}) = cot(${formatMath(leftCos)})`,
+      detail: "The quotient identity rewrites cosine divided by sine as cotangent.",
+    });
+    return trigNode("cot", leftCos);
+  }
+
+  if (isOne(left)) {
+    const reciprocal = [
+      ["sin", "csc"],
+      ["cos", "sec"],
+      ["tan", "cot"],
+      ["sec", "cos"],
+      ["csc", "sin"],
+      ["cot", "tan"],
+    ].find(([source]) => trigFunctionArgument(right, source));
+    if (reciprocal) {
+      const [source, target] = reciprocal;
+      const argument = trigFunctionArgument(right, source);
+      steps.push({
+        title: "Apply reciprocal trig identity",
+        expression: `1 / ${source}(${formatMath(argument)}) = ${target}(${formatMath(argument)})`,
+        detail: "A reciprocal trigonometric function can replace one divided by its paired trig function.",
+      });
+      return trigNode(target, argument);
+    }
+  }
+
+  return null;
+}
+
+function matchingTrigPair(pairs) {
+  for (const [leftArgument, rightArgument, leftName, rightName] of pairs) {
+    if (leftArgument && rightArgument && sameMathTree(leftArgument, rightArgument)) {
+      return {
+        argument: leftArgument,
+        leftName,
+        rightName,
+      };
+    }
+  }
+  return null;
 }
 
 function trigFunctionArgument(node, name) {
@@ -21277,6 +21361,9 @@ function evaluateFunction(name, value) {
   if (name === "sin") return Math.sin(value);
   if (name === "cos") return Math.cos(value);
   if (name === "tan") return Math.tan(value);
+  if (name === "sec") return 1 / Math.cos(value);
+  if (name === "csc") return 1 / Math.sin(value);
+  if (name === "cot") return 1 / Math.tan(value);
   if (name === "exp") return Math.exp(value);
   if (name === "ln") return Math.log(value);
   if (name === "sqrt") return Math.sqrt(value);
@@ -21321,6 +21408,15 @@ function evaluateComplexFunction(name, value) {
   }
   if (name === "tan") {
     return complexDiv(evaluateComplexFunction("sin", value), evaluateComplexFunction("cos", value));
+  }
+  if (name === "sec") {
+    return complexDiv(complex(1), evaluateComplexFunction("cos", value));
+  }
+  if (name === "csc") {
+    return complexDiv(complex(1), evaluateComplexFunction("sin", value));
+  }
+  if (name === "cot") {
+    return complexDiv(evaluateComplexFunction("cos", value), evaluateComplexFunction("sin", value));
   }
   if (name === "exp") {
     const scale = Math.exp(value.re);
@@ -22624,6 +22720,27 @@ function functionDerivative(node, innerDerivative) {
     return mathBinary(
       "*",
       mathBinary("^", { kind: "mathFunction", name: "cos", argument: arg }, mathNumber(-2)),
+      innerDerivative,
+    );
+  }
+  if (node.name === "sec") {
+    return mathBinary(
+      "*",
+      mathBinary("*", trigNode("sec", arg), trigNode("tan", arg)),
+      innerDerivative,
+    );
+  }
+  if (node.name === "csc") {
+    return mathBinary(
+      "*",
+      { kind: "mathUnary", operator: "-", operand: mathBinary("*", trigNode("csc", arg), trigNode("cot", arg)) },
+      innerDerivative,
+    );
+  }
+  if (node.name === "cot") {
+    return mathBinary(
+      "*",
+      { kind: "mathUnary", operator: "-", operand: mathBinary("^", trigNode("csc", arg), mathNumber(2)) },
       innerDerivative,
     );
   }
