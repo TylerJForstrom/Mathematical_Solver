@@ -11,8 +11,8 @@ The frontend currently supports:
 
 - Universal Ask mode that routes common math questions to the right solver
 - Propositional logic evaluation and truth tables
-- Algebra simplification with constants, like terms, and common trigonometric
-  identities
+- Algebra simplification with constants, like terms, Pythagorean identities,
+  double-angle rules, and angle-sum rules
 - Rational-root polynomial factoring for quadratics, cubics, and higher-degree
   one-variable polynomials with rational roots
 - Exact combinatorics for factorials, permutations, and combinations
@@ -191,6 +191,8 @@ The same idea works for algebra and calculus:
 - `2x + 3x` becomes a tree with `+` at the root and multiplication below it.
 - `sin(x)^2 + cos(x)^2` recognizes the Pythagorean identity and simplifies to
   `1`.
+- `sin(2x)` applies a double-angle identity and rewrites to
+  `2 * sin(x) * cos(x)`.
 - `factor x^3 - 6x^2 + 11x - 6` uses rational roots and synthetic division
   to produce `(x - 1)(x - 2)(x - 3)`.
 - `10 choose 3` uses exact integer combinatorics and returns `C(10, 3) = 120`.
@@ -489,7 +491,8 @@ These are good ways to make the project more impressive mathematically:
 
 1. Add a formal problem-router grammar for more natural-language questions.
 2. Add broader exact symbolic root output for selected cubic and quartic equations.
-3. Add more trigonometric identities, including double-angle and angle-sum rules.
+3. Add more trigonometric identities, including reciprocal, cofunction, and
+   product-to-sum rules.
 4. Add substitution, integration by parts, and partial-fraction decomposition.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.

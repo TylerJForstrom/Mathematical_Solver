@@ -20915,6 +20915,10 @@ function simplifyNode(node, steps = []) {
         return mathNumber(value);
       }
     }
+    const trigIdentity = simplifyTrigFunctionIdentity(node.name, argument, steps);
+    if (trigIdentity) {
+      return simplifyNode(trigIdentity, steps);
+    }
     return { ...node, argument };
   }
 
@@ -20990,6 +20994,142 @@ function simplifyNode(node, steps = []) {
   }
 
   return { kind: "mathBinary", operator: node.operator, left, right };
+}
+
+function simplifyTrigFunctionIdentity(name, argument, steps) {
+  if (!["sin", "cos", "tan"].includes(name)) {
+    return null;
+  }
+
+  const doubleArgument = doubleAngleArgument(argument);
+  if (doubleArgument) {
+    return rewriteTrigDoubleAngle(name, doubleArgument, steps);
+  }
+
+  const angleParts = trigAngleParts(argument);
+  if (angleParts) {
+    return rewriteTrigAngleSum(name, angleParts.left, angleParts.right, angleParts.operator, steps);
+  }
+
+  return null;
+}
+
+function rewriteTrigDoubleAngle(name, argument, steps) {
+  const theta = formatIdentityArgument(argument);
+  if (name === "sin") {
+    steps.push({
+      title: "Apply double-angle identity",
+      expression: `sin(2 * ${theta}) = 2 * sin(${theta}) * cos(${theta})`,
+      detail: "The sine double-angle rule rewrites sin(2theta) as a product.",
+    });
+    return mathBinary(
+      "*",
+      mathBinary("*", mathNumber(2), trigNode("sin", argument)),
+      trigNode("cos", argument),
+    );
+  }
+
+  if (name === "cos") {
+    steps.push({
+      title: "Apply double-angle identity",
+      expression: `cos(2 * ${theta}) = cos(${theta})^2 - sin(${theta})^2`,
+      detail: "One standard cosine double-angle form subtracts sine-squared from cosine-squared.",
+    });
+    return mathBinary("-", squaredTrigNode("cos", argument), squaredTrigNode("sin", argument));
+  }
+
+  steps.push({
+    title: "Apply double-angle identity",
+    expression: `tan(2 * ${theta}) = (2 * tan(${theta})) / (1 - tan(${theta})^2)`,
+    detail: "The tangent double-angle rule uses a quotient with one minus tangent-squared.",
+  });
+  return mathBinary(
+    "/",
+    mathBinary("*", mathNumber(2), trigNode("tan", argument)),
+    mathBinary("-", mathNumber(1), squaredTrigNode("tan", argument)),
+  );
+}
+
+function rewriteTrigAngleSum(name, left, right, operator, steps) {
+  const leftText = formatIdentityArgument(left);
+  const rightText = formatIdentityArgument(right);
+  if (name === "sin") {
+    const secondOperator = operator === "+" ? "+" : "-";
+    steps.push({
+      title: "Apply angle-sum identity",
+      expression: `sin(${leftText} ${operator} ${rightText}) = sin(${leftText}) * cos(${rightText}) ${secondOperator} cos(${leftText}) * sin(${rightText})`,
+      detail: "Sine of a sum or difference distributes into matching sine-cosine products.",
+    });
+    return mathBinary(
+      secondOperator,
+      mathBinary("*", trigNode("sin", left), trigNode("cos", right)),
+      mathBinary("*", trigNode("cos", left), trigNode("sin", right)),
+    );
+  }
+
+  if (name === "cos") {
+    const secondOperator = operator === "+" ? "-" : "+";
+    steps.push({
+      title: "Apply angle-sum identity",
+      expression: `cos(${leftText} ${operator} ${rightText}) = cos(${leftText}) * cos(${rightText}) ${secondOperator} sin(${leftText}) * sin(${rightText})`,
+      detail: "Cosine changes the middle sign for sums and preserves it for differences.",
+    });
+    return mathBinary(
+      secondOperator,
+      mathBinary("*", trigNode("cos", left), trigNode("cos", right)),
+      mathBinary("*", trigNode("sin", left), trigNode("sin", right)),
+    );
+  }
+
+  const numeratorOperator = operator;
+  const denominatorOperator = operator === "+" ? "-" : "+";
+  steps.push({
+    title: "Apply angle-sum identity",
+    expression: `tan(${leftText} ${operator} ${rightText}) = (tan(${leftText}) ${numeratorOperator} tan(${rightText})) / (1 ${denominatorOperator} tan(${leftText}) * tan(${rightText}))`,
+    detail: "Tangent of a sum or difference becomes a quotient of tangent terms.",
+  });
+  return mathBinary(
+    "/",
+    mathBinary(numeratorOperator, trigNode("tan", left), trigNode("tan", right)),
+    mathBinary(
+      denominatorOperator,
+      mathNumber(1),
+      mathBinary("*", trigNode("tan", left), trigNode("tan", right)),
+    ),
+  );
+}
+
+function doubleAngleArgument(argument) {
+  if (argument.kind !== "mathBinary" || argument.operator !== "*") {
+    return null;
+  }
+  if (argument.left.kind === "mathNumber" && nearlyEqual(argument.left.value, 2)) {
+    return argument.right;
+  }
+  if (argument.right.kind === "mathNumber" && nearlyEqual(argument.right.value, 2)) {
+    return argument.left;
+  }
+  return null;
+}
+
+function trigAngleParts(argument) {
+  if (argument.kind !== "mathBinary" || (argument.operator !== "+" && argument.operator !== "-")) {
+    return null;
+  }
+  return {
+    left: argument.left,
+    right: argument.right,
+    operator: argument.operator,
+  };
+}
+
+function trigNode(name, argument) {
+  return { kind: "mathFunction", name, argument };
+}
+
+function formatIdentityArgument(argument) {
+  const text = formatMath(argument);
+  return ["mathNumber", "mathSymbol", "mathFunction"].includes(argument.kind) ? text : `(${text})`;
 }
 
 function simplifyTrigPythagoreanSum(left, right, steps) {

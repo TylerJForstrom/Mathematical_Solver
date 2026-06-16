@@ -79,6 +79,12 @@ runTest("simplify mode applies trigonometric identities", () => {
   assert.equal(analyzeSimplification("1 - sin(x)^2").answer, "cos(x) ^ 2");
   assert.equal(analyzeSimplification("sin(x)/cos(x)").answer, "tan(x)");
   assert.equal(analyzeSimplification("tan(x)*cos(x)").answer, "sin(x)");
+  assert.equal(analyzeSimplification("sin(2x)").answer, "2 * sin(x) * cos(x)");
+  assert.equal(analyzeSimplification("cos(2x)").answer, "cos(x) ^ 2 - sin(x) ^ 2");
+  assert.equal(analyzeSimplification("tan(2x)").answer, "2 * tan(x) / (1 - tan(x) ^ 2)");
+  assert.equal(analyzeSimplification("sin(x + y)").answer, "sin(x) * cos(y) + cos(x) * sin(y)");
+  assert.equal(analyzeSimplification("cos(x - y)").answer, "cos(x) * cos(y) + sin(x) * sin(y)");
+  assert.equal(analyzeSimplification("tan(x - y)").answer, "(tan(x) - tan(y)) / (1 + tan(x) * tan(y))");
 });
 
 runTest("factoring mode factors quadratics over rationals", () => {
