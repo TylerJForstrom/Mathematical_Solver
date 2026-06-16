@@ -15,6 +15,7 @@ import {
   analyzeLaplaceTransform,
   analyzeLimit,
   analyzeLogic,
+  analyzeLogicSimplification,
   analyzeMatrix,
   analyzeMarkovChain,
   analyzeMultivariable,
@@ -45,6 +46,19 @@ runTest("logic mode classifies tautologies", () => {
 
   assert.equal(result.summary, "tautology");
   assert.equal(result.answer, "true");
+});
+
+runTest("logic mode simplifies Boolean algebra", () => {
+  assert.equal(analyzeLogicSimplification("P and true").answer, "P");
+  assert.equal(analyzeLogicSimplification("P or false").answer, "P");
+  assert.equal(analyzeLogicSimplification("P and P").answer, "P");
+  assert.equal(analyzeLogicSimplification("P or not P").answer, "true");
+  assert.equal(analyzeLogicSimplification("not not P").answer, "P");
+  assert.equal(analyzeLogicSimplification("not (P and Q)").answer, "not P or not Q");
+  assert.equal(analyzeLogicSimplification("P and (not P)").answer, "false");
+  assert.equal(analyzeLogicSimplification("P -> false").answer, "not P");
+  assert.equal(analyzeLogicSimplification("P xor P").answer, "false");
+  assert.equal(analyzeUniversal("simplify logic not (P and Q)").answer, "not P or not Q");
 });
 
 runTest("input assistant suggests structured problem formats", () => {

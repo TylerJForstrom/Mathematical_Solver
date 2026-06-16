@@ -348,6 +348,45 @@ export function analyzeLogic(statement, values = {}, compareStatement = "") {
   };
 }
 
+export function analyzeLogicSimplification(statement) {
+  const tree = parseLogic(statement);
+  const steps = [
+    {
+      title: "Parse logic statement",
+      expression: logicToString(tree),
+      detail: "The statement becomes a propositional expression tree.",
+    },
+  ];
+  const simplified = simplifyLogicNode(tree, steps);
+  const answer = logicToString(simplified);
+  const counterexample = findLogicCounterexample(tree, simplified);
+  const classification = classifyLogic(logicTruthTable(simplified));
+  steps.push({
+    title: "Verify equivalence",
+    expression: counterexample === null ? "equivalent" : `counterexample: ${formatAssignment(counterexample)}`,
+    detail: counterexample === null
+      ? "The original and simplified trees match on every truth-table row."
+      : "The simplified statement does not match the original on every truth-table row.",
+  });
+
+  return {
+    mode: "logic",
+    tree: simplified,
+    answer,
+    summary: "Boolean simplification",
+    details: `${classification.name}; ${counterexample === null ? "equivalent to input" : "not equivalent"}`,
+    variables: logicVariables(simplified),
+    metrics: treeMetrics(simplified),
+    steps,
+    artifacts: [
+      ["Original", logicToString(tree)],
+      ["Simplified", answer],
+      ["Classification", classification.name],
+      ["Equivalent", counterexample === null ? "yes" : "no"],
+    ],
+  };
+}
+
 export function analyzeSimplification(statement) {
   const parsed = parseMath(statement);
   if (parsed.kind === "equation") {
@@ -1605,6 +1644,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isInequalityQuestion(question)) {
     routed = analyzeInequality(question);
     routedLabel = "Inequality";
+  } else if (isLogicSimplificationQuestion(lower)) {
+    routed = analyzeLogicSimplification(cleanLogicSimplificationQuestion(question));
+    routedLabel = "Logic simplification";
   } else if (isLogicQuestion(question)) {
     routed = analyzeLogic(cleanLogicQuestion(question), values);
     routedLabel = "Logic";
@@ -20696,6 +20738,15 @@ function isLogicQuestion(question) {
   return /\b(and|or|not|xor|implies|iff)\b|->|<->|=>|&&|\|\|/i.test(question);
 }
 
+function isLogicSimplificationQuestion(lower) {
+  return (
+    lower.startsWith("simplify logic ") ||
+    lower.startsWith("simplify boolean ") ||
+    lower.startsWith("boolean simplify ") ||
+    lower.startsWith("logic simplify ")
+  );
+}
+
 function isSimplifyQuestion(lower) {
   return lower.includes("simplify") || lower.includes("combine like terms");
 }
@@ -20943,6 +20994,13 @@ function extractLaplaceQuestion(question) {
 function cleanLogicQuestion(question) {
   return question
     .replace(/^(is|check|evaluate|determine)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+}
+
+function cleanLogicSimplificationQuestion(question) {
+  return question
+    .replace(/^(simplify\s+(?:logic|boolean)|(?:logic|boolean)\s+simplify)\s+/i, "")
     .replace(/[?!.]+$/, "")
     .trim();
 }
@@ -21280,6 +21338,155 @@ function findLogicCounterexample(left, right) {
     }
   }
   return null;
+}
+
+function simplifyLogicNode(node, steps = []) {
+  if (node.kind === "logicConstant" || node.kind === "logicVariable") {
+    return node;
+  }
+
+  if (node.kind === "logicNot") {
+    const operand = simplifyLogicNode(node.operand, steps);
+    if (operand.kind === "logicConstant") {
+      const result = { kind: "logicConstant", value: !operand.value };
+      steps.push({
+        title: "Apply Boolean constant rule",
+        expression: `not ${formatTruth(operand.value)} = ${formatTruth(result.value)}`,
+        detail: "The negation of a constant truth value can be evaluated immediately.",
+      });
+      return result;
+    }
+    if (operand.kind === "logicNot") {
+      steps.push({
+        title: "Apply double-negation law",
+        expression: `not not ${logicToString(operand.operand)} = ${logicToString(operand.operand)}`,
+        detail: "Two negations cancel each other.",
+      });
+      return operand.operand;
+    }
+    if (operand.kind === "logicBinary" && (operand.operator === "and" || operand.operator === "or")) {
+      const operator = operand.operator === "and" ? "or" : "and";
+      const result = logicBinary(
+        operator,
+        simplifyLogicNode({ kind: "logicNot", operand: operand.left }, steps),
+        simplifyLogicNode({ kind: "logicNot", operand: operand.right }, steps),
+      );
+      steps.push({
+        title: "Apply De Morgan's law",
+        expression: `not (${logicToString(operand)}) = ${logicToString(result)}`,
+        detail: "Negation distributes across and/or while flipping the operator.",
+      });
+      return result;
+    }
+    return { kind: "logicNot", operand };
+  }
+
+  const left = simplifyLogicNode(node.left, steps);
+  const right = simplifyLogicNode(node.right, steps);
+  if (node.operator === "and") return simplifyLogicAnd(left, right, steps);
+  if (node.operator === "or") return simplifyLogicOr(left, right, steps);
+  if (node.operator === "xor") return simplifyLogicXor(left, right, steps);
+  if (node.operator === "implies") return simplifyLogicImplies(left, right, steps);
+  if (node.operator === "iff") return simplifyLogicIff(left, right, steps);
+  return logicBinary(node.operator, left, right);
+}
+
+function simplifyLogicAnd(left, right, steps) {
+  if (sameLogicTree(left, right)) {
+    steps.push({
+      title: "Apply idempotent law",
+      expression: `${logicToString(left)} and ${logicToString(right)} = ${logicToString(left)}`,
+      detail: "Repeating the same term with AND does not change the result.",
+    });
+    return left;
+  }
+  if (isLogicNegationOf(left, right)) {
+    steps.push({
+      title: "Apply complement law",
+      expression: `${logicToString(left)} and ${logicToString(right)} = false`,
+      detail: "A statement and its negation cannot both be true.",
+    });
+    return logicConstant(false);
+  }
+  if (isLogicConstant(left, false) || isLogicConstant(right, false)) return logicConstant(false);
+  if (isLogicConstant(left, true)) return right;
+  if (isLogicConstant(right, true)) return left;
+  return logicBinary("and", left, right);
+}
+
+function simplifyLogicOr(left, right, steps) {
+  if (sameLogicTree(left, right)) {
+    steps.push({
+      title: "Apply idempotent law",
+      expression: `${logicToString(left)} or ${logicToString(right)} = ${logicToString(left)}`,
+      detail: "Repeating the same term with OR does not change the result.",
+    });
+    return left;
+  }
+  if (isLogicNegationOf(left, right)) {
+    steps.push({
+      title: "Apply complement law",
+      expression: `${logicToString(left)} or ${logicToString(right)} = true`,
+      detail: "A statement or its negation is always true.",
+    });
+    return logicConstant(true);
+  }
+  if (isLogicConstant(left, true) || isLogicConstant(right, true)) return logicConstant(true);
+  if (isLogicConstant(left, false)) return right;
+  if (isLogicConstant(right, false)) return left;
+  return logicBinary("or", left, right);
+}
+
+function simplifyLogicXor(left, right, steps) {
+  if (sameLogicTree(left, right)) return logicConstant(false);
+  if (isLogicConstant(left, false)) return right;
+  if (isLogicConstant(right, false)) return left;
+  if (isLogicConstant(left, true)) return simplifyLogicNode({ kind: "logicNot", operand: right }, steps);
+  if (isLogicConstant(right, true)) return simplifyLogicNode({ kind: "logicNot", operand: left }, steps);
+  return logicBinary("xor", left, right);
+}
+
+function simplifyLogicImplies(left, right, steps) {
+  if (sameLogicTree(left, right)) return logicConstant(true);
+  if (isLogicConstant(left, false) || isLogicConstant(right, true)) return logicConstant(true);
+  if (isLogicConstant(left, true)) return right;
+  if (isLogicConstant(right, false)) return simplifyLogicNode({ kind: "logicNot", operand: left }, steps);
+  return logicBinary("implies", left, right);
+}
+
+function simplifyLogicIff(left, right, steps) {
+  if (sameLogicTree(left, right)) return logicConstant(true);
+  if (isLogicConstant(left, true)) return right;
+  if (isLogicConstant(right, true)) return left;
+  if (isLogicConstant(left, false)) return simplifyLogicNode({ kind: "logicNot", operand: right }, steps);
+  if (isLogicConstant(right, false)) return simplifyLogicNode({ kind: "logicNot", operand: left }, steps);
+  return logicBinary("iff", left, right);
+}
+
+function logicConstant(value) {
+  return { kind: "logicConstant", value };
+}
+
+function isLogicConstant(node, value) {
+  return node.kind === "logicConstant" && node.value === value;
+}
+
+function isLogicNegationOf(left, right) {
+  return (left.kind === "logicNot" && sameLogicTree(left.operand, right)) ||
+    (right.kind === "logicNot" && sameLogicTree(right.operand, left));
+}
+
+function sameLogicTree(left, right) {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "logicConstant") return left.value === right.value;
+  if (left.kind === "logicVariable") return left.name === right.name;
+  if (left.kind === "logicNot") return sameLogicTree(left.operand, right.operand);
+  if (left.kind === "logicBinary") {
+    return left.operator === right.operator &&
+      sameLogicTree(left.left, right.left) &&
+      sameLogicTree(left.right, right.right);
+  }
+  return false;
 }
 
 function logicToString(node, parentPrecedence = 0) {

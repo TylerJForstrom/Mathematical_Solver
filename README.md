@@ -11,6 +11,8 @@ The frontend currently supports:
 
 - Universal Ask mode that routes common math questions to the right solver
 - Propositional logic evaluation and truth tables
+- Boolean algebra simplification with identity, domination, complement,
+  idempotent, De Morgan, double-negation, implication, XOR, and IFF rules
 - Algebra simplification with constants, like terms, Pythagorean identities,
   reciprocal trig functions, cofunction identities, double-angle rules, and
   angle-sum/product-to-sum/sum-to-product rules
@@ -191,6 +193,8 @@ Each node evaluates itself recursively:
 - `AND` asks whether both child expressions are true.
 - `OR` asks whether at least one child expression is true.
 - `IMPLIES` is false only when the left side is true and the right side is false.
+- `simplify logic P and (not P)` applies the complement law and returns
+  `false`.
 
 The same idea works for algebra and calculus:
 
@@ -523,8 +527,8 @@ These are good ways to make the project more impressive mathematically:
 10. Add exact symbolic roots for more higher-degree equations when possible.
 11. Convert logic statements to negation normal form, conjunctive normal form, and
    disjunctive normal form.
-12. Add Boolean algebra simplification rules, such as idempotent laws,
-   absorption laws, De Morgan's laws, and double-negation elimination.
+12. Add more Boolean algebra simplification rules, including absorption laws
+   and consensus-style reductions.
 13. Build a small SAT solver using the DPLL algorithm instead of checking every
    truth-table row.
 14. Generate formal proof steps for tautologies using natural deduction or
