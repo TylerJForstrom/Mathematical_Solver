@@ -3154,7 +3154,7 @@ export function analyzeIntegral(statement, variableHint = "x") {
   const simplifiedExpression = simplifyNode(expression, steps);
   const integral = integrateSymbolic(simplifiedExpression, request.variable);
   if (!integral) {
-    throw new Error("Integral mode supports polynomials, scalar multiples, elementary functions, reciprocal forms, and linear/quadratic partial fractions.");
+    throw new Error("Integral mode supports polynomials, scalar multiples, elementary functions, substitution products, reciprocal forms, and linear/quadratic partial fractions.");
   }
 
   const antiderivative = integral.antiderivative;
@@ -12857,7 +12857,8 @@ function integrateSymbolic(node, variable) {
       return left ? scaleIntegral(left, rightConstant) : null;
     }
 
-    return integrateByPartsProduct(node.left, node.right, variable);
+    return integrateSubstitutionProduct(node.left, node.right, variable) ??
+      integrateByPartsProduct(node.left, node.right, variable);
   }
 
   if (node.operator === "/") {
@@ -12993,6 +12994,129 @@ function integrateRationalPartialFractions(numeratorNode, denominatorNode, varia
     title: "Use polynomial division and partial fractions",
     detail: "Divide the rational function into a polynomial quotient plus a proper fraction, then decompose the proper fraction.",
   };
+}
+
+function integrateSubstitutionProduct(leftNode, rightNode, variable) {
+  const request = substitutionProductRequest(leftNode, rightNode, variable);
+  if (!request) {
+    return null;
+  }
+
+  const { scale, functionNode } = request;
+  const outer = substitutionOuterIntegral(functionNode);
+  if (!outer) {
+    return null;
+  }
+
+  return {
+    antiderivative: formatScaledAntiderivative(scale, outer.antiderivative),
+    evaluate: (x) => {
+      const innerValue = safeEvaluateMath(functionNode.argument, { [variable]: x });
+      return Number.isFinite(innerValue) ? scale * outer.evaluateInner(innerValue) : Number.NaN;
+    },
+    validateBounds: outer.validateBounds
+      ? (lower, upper) => outer.validateBounds(
+          safeEvaluateMath(functionNode.argument, { [variable]: lower }),
+          safeEvaluateMath(functionNode.argument, { [variable]: upper }),
+        )
+      : null,
+    title: "Apply u-substitution",
+    detail: "Recognize the product as a constant multiple of an inner derivative times an outer function.",
+  };
+}
+
+function substitutionProductRequest(leftNode, rightNode, variable) {
+  return substitutionProductRequestInOrder(leftNode, rightNode, variable) ??
+    substitutionProductRequestInOrder(rightNode, leftNode, variable);
+}
+
+function substitutionProductRequestInOrder(factorNode, functionNode, variable) {
+  if (functionNode.kind !== "mathFunction" || !["sin", "cos", "tan", "exp", "sqrt"].includes(functionNode.name)) {
+    return null;
+  }
+
+  const factor = polynomialFrom(factorNode);
+  if (!factor) {
+    return null;
+  }
+
+  const derivativeSteps = [];
+  const innerDerivative = simplifyNode(differentiate(functionNode.argument, variable, derivativeSteps), derivativeSteps);
+  const derivative = polynomialFrom(innerDerivative);
+  if (!derivative) {
+    return null;
+  }
+
+  const scale = proportionalPolynomialScale(factor, derivative, variable);
+  return Number.isFinite(scale) ? { scale, functionNode } : null;
+}
+
+function proportionalPolynomialScale(left, right, variable) {
+  const leftCoefficients = polynomialCoefficients(left, variable);
+  const rightCoefficients = polynomialCoefficients(right, variable);
+  if (!leftCoefficients.length || !rightCoefficients.length) {
+    return Number.NaN;
+  }
+
+  const degree = Math.max(leftCoefficients.length, rightCoefficients.length);
+  let scale = Number.NaN;
+  for (let index = 0; index < degree; index += 1) {
+    const leftValue = leftCoefficients[index] ?? 0;
+    const rightValue = rightCoefficients[index] ?? 0;
+    if (nearlyEqual(rightValue, 0)) {
+      if (!nearlyEqual(leftValue, 0)) {
+        return Number.NaN;
+      }
+      continue;
+    }
+    const candidate = leftValue / rightValue;
+    if (!Number.isFinite(scale)) {
+      scale = candidate;
+    } else if (!nearlyEqual(scale, candidate)) {
+      return Number.NaN;
+    }
+  }
+  return Number.isFinite(scale) ? normalizeNumber(scale) : Number.NaN;
+}
+
+function substitutionOuterIntegral(functionNode) {
+  const argumentText = formatMath(functionNode.argument);
+  if (functionNode.name === "sin") {
+    return {
+      antiderivative: `-cos(${argumentText})`,
+      evaluateInner: (u) => -Math.cos(u),
+    };
+  }
+  if (functionNode.name === "cos") {
+    return {
+      antiderivative: `sin(${argumentText})`,
+      evaluateInner: (u) => Math.sin(u),
+    };
+  }
+  if (functionNode.name === "tan") {
+    return {
+      antiderivative: `-ln(abs(cos(${argumentText})))`,
+      evaluateInner: (u) => -Math.log(Math.abs(Math.cos(u))),
+    };
+  }
+  if (functionNode.name === "exp") {
+    return {
+      antiderivative: `exp(${argumentText})`,
+      evaluateInner: (u) => Math.exp(u),
+    };
+  }
+  if (functionNode.name === "sqrt") {
+    return {
+      antiderivative: formatScaledAntiderivative(2 / 3, `${formatPowerBase(argumentText)}^(3/2)`),
+      evaluateInner: (u) => (2 / 3) * u ** 1.5,
+      validateBounds: (lower, upper) => {
+        if (lower < 0 || upper < 0) {
+          throw new Error("sqrt substitution integrals need bounds where the inner expression stays nonnegative.");
+        }
+      },
+    };
+  }
+  return null;
 }
 
 function integrateByPartsProduct(leftNode, rightNode, variable) {

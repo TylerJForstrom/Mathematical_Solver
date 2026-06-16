@@ -1231,6 +1231,15 @@ runTest("integral mode handles irreducible quadratic partial fractions", () => {
   assert.equal(analyzeIntegral("integrate 1/(x^2 + 1) from 0 to 1").answer, "integral = 0.785398");
 });
 
+runTest("integral mode applies u-substitution", () => {
+  assert.equal(analyzeIntegral("integrate 2x*cos(x^2)").answer, "sin(x ^ 2) + C");
+  assert.equal(analyzeIntegral("integrate x*cos(x^2)").answer, "0.5sin(x ^ 2) + C");
+  assert.equal(analyzeIntegral("integrate 3x^2*exp(x^3)").answer, "exp(x ^ 3) + C");
+  assert.equal(analyzeIntegral("integrate 2x*sin(x^2)").answer, "-cos(x ^ 2) + C");
+  assert.equal(analyzeIntegral("integrate 2x*tan(x^2)").answer, "-ln(abs(cos(x ^ 2))) + C");
+  assert.equal(analyzeIntegral("integrate 2x*cos(x^2) from 0 to 1").answer, "integral = 0.841471");
+});
+
 runTest("integral mode handles integration by parts for linear factors", () => {
   assert.equal(analyzeIntegral("integrate x*exp(x)").answer, "(x - 1) * exp(x) + C");
   assert.equal(analyzeIntegral("integrate x*sin(x)").answer, "-x * cos(x) + sin(x) + C");
