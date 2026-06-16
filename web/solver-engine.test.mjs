@@ -1204,6 +1204,19 @@ runTest("integral mode handles partial fractions", () => {
   );
 });
 
+runTest("integral mode handles repeated partial fractions", () => {
+  assert.equal(analyzeIntegral("integrate 1/(x - 1)^2").answer, "-1/(x - 1) + C");
+  assert.equal(
+    analyzeIntegral("integrate (x + 1)/(x^2 - 2x + 1)").answer,
+    "ln(abs(x - 1)) - 2/(x - 1) + C",
+  );
+  assert.equal(
+    analyzeIntegral("integrate 1/(x^3 - 3x^2 + 3x - 1)").answer,
+    "-0.5/(x - 1)^2 + C",
+  );
+  assert.equal(analyzeIntegral("integrate 1/(x - 1)^2 from 2 to 3").answer, "integral = 0.5");
+});
+
 runTest("integral mode handles integration by parts for linear factors", () => {
   assert.equal(analyzeIntegral("integrate x*exp(x)").answer, "(x - 1) * exp(x) + C");
   assert.equal(analyzeIntegral("integrate x*sin(x)").answer, "-x * cos(x) + sin(x) + C");

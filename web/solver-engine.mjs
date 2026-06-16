@@ -3154,7 +3154,7 @@ export function analyzeIntegral(statement, variableHint = "x") {
   const simplifiedExpression = simplifyNode(expression, steps);
   const integral = integrateSymbolic(simplifiedExpression, request.variable);
   if (!integral) {
-    throw new Error("Integral mode supports polynomials, scalar multiples, elementary functions, reciprocal forms, and distinct-linear-factor partial fractions.");
+    throw new Error("Integral mode supports polynomials, scalar multiples, elementary functions, reciprocal forms, and linear-factor partial fractions.");
   }
 
   const antiderivative = integral.antiderivative;
@@ -13098,25 +13098,15 @@ function formatPolynomialProductWithFunction(coefficients, variable, functionTex
 }
 
 function integrateProperPartialFractions(numeratorCoefficients, denominatorCoefficients, variable) {
-  const roots = distinctRationalLinearRoots(denominatorCoefficients);
-  if (!roots) {
+  const factors = rationalLinearRootFactors(denominatorCoefficients);
+  if (!factors) {
     return null;
   }
 
-  const derivative = derivativeCoefficients(denominatorCoefficients);
-  const terms = roots
-    .map((root) => {
-      const derivativeAtRoot = evaluatePolynomialCoefficients(derivative, root);
-      if (nearlyEqual(derivativeAtRoot, 0)) {
-        return null;
-      }
-      return {
-        coefficient: normalizeNumber(evaluatePolynomialCoefficients(numeratorCoefficients, root) / derivativeAtRoot),
-        root,
-        factorText: formatLinearRootExpression(variable, root),
-      };
-    })
-    .filter((term) => term && !nearlyEqual(term.coefficient, 0));
+  const terms = solvePartialFractionTerms(numeratorCoefficients, denominatorCoefficients, factors, variable);
+  if (!terms) {
+    return null;
+  }
 
   if (terms.length === 0) {
     return integratePolynomialSymbolic(new Map([["", 0]]), variable);
@@ -13124,17 +13114,16 @@ function integrateProperPartialFractions(numeratorCoefficients, denominatorCoeff
 
   return {
     antiderivative: formatPartialFractionAntiderivative(terms),
-    evaluate: (x) => terms.reduce((sum, term) =>
-      sum + term.coefficient * Math.log(Math.abs(x - term.root)), 0),
+    evaluate: (x) => terms.reduce((sum, term) => sum + evaluatePartialFractionAntiderivativeTerm(term, x), 0),
     validateBounds: (lower, upper) => {
-      for (const term of terms) {
-        if (isBetweenInclusive(term.root, lower, upper)) {
+      for (const factor of factors) {
+        if (isBetweenInclusive(factor.root, lower, upper)) {
           throw new Error("Definite partial-fraction integrals cannot cross a zero denominator.");
         }
       }
     },
     title: "Apply partial fractions",
-    detail: "Factor the denominator into distinct linear terms and integrate each reciprocal term.",
+    detail: "Factor the denominator into linear terms, solve for reciprocal coefficients, and integrate each term.",
   };
 }
 
@@ -13164,31 +13153,74 @@ function dividePolynomialCoefficients(numerator, denominator) {
   };
 }
 
-function distinctRationalLinearRoots(coefficients) {
+function rationalLinearRootFactors(coefficients) {
   let remaining = trimPolynomialCoefficients(coefficients);
-  const roots = [];
+  const factors = [];
   while (polynomialDegree(remaining) > 0) {
     const root = findRationalRoot(remaining);
     if (!root) {
       return null;
     }
-    if (roots.some((existing) => nearlyEqual(existing, root.value))) {
+    let multiplicity = 0;
+    while (polynomialDegree(remaining) > 0 && nearlyEqual(evaluatePolynomialCoefficients(remaining, root.value), 0)) {
+      remaining = syntheticDivide(remaining, root.value);
+      multiplicity += 1;
+    }
+    if (multiplicity === 0) {
       return null;
     }
-    const divided = syntheticDivide(remaining, root.value);
-    if (nearlyEqual(evaluatePolynomialCoefficients(divided, root.value), 0)) {
-      return null;
-    }
-    roots.push(normalizeNumber(root.value));
-    remaining = divided;
+    factors.push({
+      root: normalizeNumber(root.value),
+      multiplicity,
+    });
   }
-  return roots.length === polynomialDegree(coefficients) ? roots : null;
+  const factorCount = factors.reduce((sum, factor) => sum + factor.multiplicity, 0);
+  return factorCount === polynomialDegree(coefficients) ? factors : null;
 }
 
-function derivativeCoefficients(coefficients) {
-  return trimPolynomialCoefficients(coefficients.slice(1).map((coefficient, index) =>
-    (coefficient ?? 0) * (index + 1),
-  ));
+function solvePartialFractionTerms(numeratorCoefficients, denominatorCoefficients, factors, variable) {
+  const unknowns = factors.flatMap((factor) =>
+    Array.from({ length: factor.multiplicity }, (_, index) => ({
+      root: factor.root,
+      power: index + 1,
+      factorText: formatLinearRootExpression(variable, factor.root),
+    })),
+  );
+  const degree = polynomialDegree(denominatorCoefficients);
+  const basisColumns = unknowns.map((unknown) =>
+    divideByLinearFactorPower(denominatorCoefficients, unknown.root, unknown.power),
+  );
+  if (basisColumns.some((column) => !column)) {
+    return [];
+  }
+
+  const matrix = Array.from({ length: degree }, (_, power) =>
+    basisColumns.map((column) => column[power] ?? 0),
+  );
+  const constants = Array.from({ length: degree }, (_, power) => numeratorCoefficients[power] ?? 0);
+  let coefficients;
+  try {
+    coefficients = solveLinearSystem(matrix, constants);
+  } catch {
+    return null;
+  }
+  return unknowns
+    .map((unknown, index) => ({
+      ...unknown,
+      coefficient: normalizeNumber(coefficients[index]),
+    }))
+    .filter((term) => !nearlyEqual(term.coefficient, 0));
+}
+
+function divideByLinearFactorPower(coefficients, root, power) {
+  let quotient = trimPolynomialCoefficients(coefficients);
+  for (let index = 0; index < power; index += 1) {
+    if (polynomialDegree(quotient) <= 0 || !nearlyEqual(evaluatePolynomialCoefficients(quotient, root), 0)) {
+      return null;
+    }
+    quotient = syntheticDivide(quotient, root);
+  }
+  return quotient;
 }
 
 function coefficientsToPolynomial(coefficients, variable) {
@@ -13222,14 +13254,43 @@ function formatLinearRootExpression(variable, root) {
 
 function formatPartialFractionAntiderivative(terms) {
   return terms.map((term, index) => {
+    const formatted = formatPartialFractionAntiderivativeTerm(term);
+    if (index === 0) {
+      return formatted.sign < 0 ? `-${formatted.text}` : formatted.text;
+    }
+    return `${formatted.sign < 0 ? " - " : " + "}${formatted.text}`;
+  }).join("");
+}
+
+function formatPartialFractionAntiderivativeTerm(term) {
+  if (term.power === 1) {
     const magnitude = Math.abs(term.coefficient);
     const body = `ln(abs(${term.factorText}))`;
-    const text = nearlyEqual(magnitude, 1) ? body : `${formatNumber(magnitude)}${body}`;
-    if (index === 0) {
-      return term.coefficient < 0 ? `-${text}` : text;
-    }
-    return `${term.coefficient < 0 ? " - " : " + "}${text}`;
-  }).join("");
+    return {
+      sign: term.coefficient < 0 ? -1 : 1,
+      text: nearlyEqual(magnitude, 1) ? body : `${formatNumber(magnitude)}${body}`,
+    };
+  }
+
+  const integratedCoefficient = term.coefficient / (1 - term.power);
+  const magnitude = Math.abs(integratedCoefficient);
+  const denominator = formatLinearPowerDenominator(term.factorText, term.power - 1);
+  return {
+    sign: integratedCoefficient < 0 ? -1 : 1,
+    text: nearlyEqual(magnitude, 1) ? `1/${denominator}` : `${formatNumber(magnitude)}/${denominator}`,
+  };
+}
+
+function evaluatePartialFractionAntiderivativeTerm(term, x) {
+  if (term.power === 1) {
+    return term.coefficient * Math.log(Math.abs(x - term.root));
+  }
+  return term.coefficient * (x - term.root) ** (1 - term.power) / (1 - term.power);
+}
+
+function formatLinearPowerDenominator(factorText, power) {
+  const base = formatPowerBase(factorText);
+  return power === 1 ? base : `${base}^${power}`;
 }
 
 function elementaryIntegral(antiderivative, evaluate, validateBounds = null) {
