@@ -20955,22 +20955,30 @@ function simplifyNode(node, steps = []) {
   }
 
   if (node.operator === "+") {
+    const pythagorean = simplifyTrigPythagoreanSum(left, right, steps);
+    if (pythagorean) return pythagorean;
     if (isZero(left)) return right;
     if (isZero(right)) return left;
   }
 
   if (node.operator === "-") {
+    const pythagoreanDifference = simplifyTrigPythagoreanDifference(left, right, steps);
+    if (pythagoreanDifference) return pythagoreanDifference;
     if (isZero(right)) return left;
     if (isZero(left)) return { kind: "mathUnary", operator: "-", operand: right };
   }
 
   if (node.operator === "*") {
+    const trigProduct = simplifyTrigProduct(left, right, steps);
+    if (trigProduct) return trigProduct;
     if (isZero(left) || isZero(right)) return mathNumber(0);
     if (isOne(left)) return right;
     if (isOne(right)) return left;
   }
 
   if (node.operator === "/") {
+    const trigQuotient = simplifyTrigQuotient(left, right, steps);
+    if (trigQuotient) return trigQuotient;
     if (isZero(left)) return mathNumber(0);
     if (isOne(right)) return left;
   }
@@ -20982,6 +20990,138 @@ function simplifyNode(node, steps = []) {
   }
 
   return { kind: "mathBinary", operator: node.operator, left, right };
+}
+
+function simplifyTrigPythagoreanSum(left, right, steps) {
+  const leftSin = squaredTrigArgument(left, "sin");
+  const leftCos = squaredTrigArgument(left, "cos");
+  const rightSin = squaredTrigArgument(right, "sin");
+  const rightCos = squaredTrigArgument(right, "cos");
+  const argument = leftSin && rightCos && sameMathTree(leftSin, rightCos)
+    ? leftSin
+    : leftCos && rightSin && sameMathTree(leftCos, rightSin)
+      ? leftCos
+      : null;
+  if (!argument) {
+    return null;
+  }
+
+  steps.push({
+    title: "Apply Pythagorean identity",
+    expression: `sin(${formatMath(argument)})^2 + cos(${formatMath(argument)})^2 = 1`,
+    detail: "The matching sine-squared and cosine-squared terms add to one.",
+  });
+  return mathNumber(1);
+}
+
+function simplifyTrigPythagoreanDifference(left, right, steps) {
+  if (!isOne(left)) {
+    return null;
+  }
+  const sinArgument = squaredTrigArgument(right, "sin");
+  if (sinArgument) {
+    const result = squaredTrigNode("cos", sinArgument);
+    steps.push({
+      title: "Apply Pythagorean identity",
+      expression: `1 - sin(${formatMath(sinArgument)})^2 = cos(${formatMath(sinArgument)})^2`,
+      detail: "Rearrange sin^2(theta) + cos^2(theta) = 1.",
+    });
+    return result;
+  }
+
+  const cosArgument = squaredTrigArgument(right, "cos");
+  if (cosArgument) {
+    const result = squaredTrigNode("sin", cosArgument);
+    steps.push({
+      title: "Apply Pythagorean identity",
+      expression: `1 - cos(${formatMath(cosArgument)})^2 = sin(${formatMath(cosArgument)})^2`,
+      detail: "Rearrange sin^2(theta) + cos^2(theta) = 1.",
+    });
+    return result;
+  }
+  return null;
+}
+
+function simplifyTrigProduct(left, right, steps) {
+  const leftTan = trigFunctionArgument(left, "tan");
+  const leftCos = trigFunctionArgument(left, "cos");
+  const rightTan = trigFunctionArgument(right, "tan");
+  const rightCos = trigFunctionArgument(right, "cos");
+  const argument = leftTan && rightCos && sameMathTree(leftTan, rightCos)
+    ? leftTan
+    : leftCos && rightTan && sameMathTree(leftCos, rightTan)
+      ? leftCos
+      : null;
+  if (!argument) {
+    return null;
+  }
+
+  steps.push({
+    title: "Apply tangent identity",
+    expression: `tan(${formatMath(argument)}) * cos(${formatMath(argument)}) = sin(${formatMath(argument)})`,
+    detail: "Because tan(theta) = sin(theta) / cos(theta), multiplying by cos(theta) leaves sin(theta).",
+  });
+  return { kind: "mathFunction", name: "sin", argument };
+}
+
+function simplifyTrigQuotient(left, right, steps) {
+  const sinArgument = trigFunctionArgument(left, "sin");
+  const cosArgument = trigFunctionArgument(right, "cos");
+  if (!sinArgument || !cosArgument || !sameMathTree(sinArgument, cosArgument)) {
+    return null;
+  }
+
+  steps.push({
+    title: "Apply tangent identity",
+    expression: `sin(${formatMath(sinArgument)}) / cos(${formatMath(sinArgument)}) = tan(${formatMath(sinArgument)})`,
+    detail: "The quotient identity rewrites sine divided by cosine as tangent.",
+  });
+  return { kind: "mathFunction", name: "tan", argument: sinArgument };
+}
+
+function trigFunctionArgument(node, name) {
+  return node.kind === "mathFunction" && node.name === name ? node.argument : null;
+}
+
+function squaredTrigArgument(node, name) {
+  if (node.kind !== "mathBinary" || node.operator !== "^" || node.right.kind !== "mathNumber" || !nearlyEqual(node.right.value, 2)) {
+    return null;
+  }
+  if (node.left.kind !== "mathFunction" || node.left.name !== name) {
+    return null;
+  }
+  return node.left.argument;
+}
+
+function squaredTrigNode(name, argument) {
+  return mathBinary("^", { kind: "mathFunction", name, argument }, mathNumber(2));
+}
+
+function sameMathTree(left, right) {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+  if (left.kind === "mathNumber") {
+    return nearlyEqual(left.value, right.value);
+  }
+  if (left.kind === "mathSymbol") {
+    return left.name === right.name;
+  }
+  if (left.kind === "mathFunction") {
+    return left.name === right.name && sameMathTree(left.argument, right.argument);
+  }
+  if (left.kind === "mathUnary") {
+    return left.operator === right.operator && sameMathTree(left.operand, right.operand);
+  }
+  if (left.kind === "mathBinary") {
+    return left.operator === right.operator &&
+      sameMathTree(left.left, right.left) &&
+      sameMathTree(left.right, right.right);
+  }
+  if (left.kind === "equation") {
+    return sameMathTree(left.left, right.left) && sameMathTree(left.right, right.right);
+  }
+  return false;
 }
 
 function evaluateBinary(operator, left, right) {

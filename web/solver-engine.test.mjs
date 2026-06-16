@@ -74,6 +74,13 @@ runTest("simplify mode combines like terms", () => {
   assert.equal(result.answer, "5x + 6");
 });
 
+runTest("simplify mode applies trigonometric identities", () => {
+  assert.equal(analyzeSimplification("sin(x)^2 + cos(x)^2").answer, "1");
+  assert.equal(analyzeSimplification("1 - sin(x)^2").answer, "cos(x) ^ 2");
+  assert.equal(analyzeSimplification("sin(x)/cos(x)").answer, "tan(x)");
+  assert.equal(analyzeSimplification("tan(x)*cos(x)").answer, "sin(x)");
+});
+
 runTest("factoring mode factors quadratics over rationals", () => {
   const result = analyzeFactoring("factor x^2 - 5x + 6");
 
