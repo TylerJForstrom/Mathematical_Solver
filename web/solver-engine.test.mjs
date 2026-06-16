@@ -236,6 +236,7 @@ runTest("derivative mode supports reciprocal trig functions", () => {
   assert.equal(analyzeDerivative("sec(x)", "x").answer, "sec(x) * tan(x)");
   assert.equal(analyzeDerivative("csc(x)", "x").answer, "-(csc(x) * cot(x))");
   assert.equal(analyzeDerivative("cot(x)", "x").answer, "-(csc(x) ^ 2)");
+  assert.equal(analyzeDerivative("atan(x)", "x").answer, "1 / (1 + x ^ 2)");
 });
 
 runTest("multivariable mode computes partials, gradients, and directional derivatives", () => {
@@ -278,6 +279,7 @@ runTest("complex mode evaluates arithmetic and functions", () => {
   assert.equal(analyzeComplex("complex sqrt(-1)").answer, "i");
   assert.equal(analyzeComplex("complex (1+i)^2").answer, "2i");
   assert.equal(analyzeComplex("complex sec(0)").answer, "1");
+  assert.equal(analyzeComplex("complex atan(1)").answer, "0.785398");
 });
 
 runTest("statistics mode computes descriptive summaries", () => {
@@ -1215,6 +1217,18 @@ runTest("integral mode handles repeated partial fractions", () => {
     "-0.5/(x - 1)^2 + C",
   );
   assert.equal(analyzeIntegral("integrate 1/(x - 1)^2 from 2 to 3").answer, "integral = 0.5");
+});
+
+runTest("integral mode handles irreducible quadratic partial fractions", () => {
+  assert.equal(analyzeIntegral("integrate 1/(x^2 + 1)").answer, "atan(x) + C");
+  assert.equal(analyzeIntegral("integrate x/(x^2 + 1)").answer, "0.5ln(abs(x^2 + 1)) + C");
+  assert.equal(analyzeIntegral("integrate (2x + 3)/(x^2 + 1)").answer, "ln(abs(x^2 + 1)) + 3atan(x) + C");
+  assert.equal(analyzeIntegral("integrate 1/(x^2 + 2x + 2)").answer, "atan(x + 1) + C");
+  assert.equal(
+    analyzeIntegral("integrate 1/((x + 1)*(x^2 + 1))").answer,
+    "0.5ln(abs(x + 1)) - 0.25ln(abs(x^2 + 1)) + 0.5atan(x) + C",
+  );
+  assert.equal(analyzeIntegral("integrate 1/(x^2 + 1) from 0 to 1").answer, "integral = 0.785398");
 });
 
 runTest("integral mode handles integration by parts for linear factors", () => {
