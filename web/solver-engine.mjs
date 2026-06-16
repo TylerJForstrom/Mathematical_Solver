@@ -20997,21 +20997,51 @@ function simplifyNode(node, steps = []) {
 }
 
 function simplifyTrigFunctionIdentity(name, argument, steps) {
-  if (!["sin", "cos", "tan"].includes(name)) {
+  const supportedTrigFunctions = ["sin", "cos", "tan", "sec", "csc", "cot"];
+  const supportsDoubleAndAngleSum = ["sin", "cos", "tan"].includes(name);
+  if (!supportedTrigFunctions.includes(name)) {
     return null;
   }
 
-  const doubleArgument = doubleAngleArgument(argument);
+  const doubleArgument = supportsDoubleAndAngleSum ? doubleAngleArgument(argument) : null;
   if (doubleArgument) {
     return rewriteTrigDoubleAngle(name, doubleArgument, steps);
   }
 
-  const angleParts = trigAngleParts(argument);
+  const cofunctionArgument = trigCofunctionArgument(argument);
+  if (cofunctionArgument) {
+    return rewriteTrigCofunction(name, cofunctionArgument, steps);
+  }
+
+  const angleParts = supportsDoubleAndAngleSum ? trigAngleParts(argument) : null;
   if (angleParts) {
     return rewriteTrigAngleSum(name, angleParts.left, angleParts.right, angleParts.operator, steps);
   }
 
   return null;
+}
+
+function rewriteTrigCofunction(name, argument, steps) {
+  const pairs = {
+    sin: "cos",
+    cos: "sin",
+    tan: "cot",
+    cot: "tan",
+    sec: "csc",
+    csc: "sec",
+  };
+  const target = pairs[name];
+  if (!target) {
+    return null;
+  }
+
+  const theta = formatIdentityArgument(argument);
+  steps.push({
+    title: "Apply cofunction identity",
+    expression: `${name}(pi / 2 - ${theta}) = ${target}(${theta})`,
+    detail: "Cofunction identities rewrite trig functions of complementary angles.",
+  });
+  return trigNode(target, argument);
 }
 
 function rewriteTrigDoubleAngle(name, argument, steps) {
@@ -21121,6 +21151,34 @@ function trigAngleParts(argument) {
     right: argument.right,
     operator: argument.operator,
   };
+}
+
+function trigCofunctionArgument(argument) {
+  if (argument.kind !== "mathBinary" || argument.operator !== "-" || !isHalfPiNode(argument.left)) {
+    return null;
+  }
+  return argument.right;
+}
+
+function isHalfPiNode(node) {
+  if (node.kind === "mathBinary" && node.operator === "/" && isPiSymbol(node.left) && isNumericValue(node.right, 2)) {
+    return true;
+  }
+  if (node.kind === "mathBinary" && node.operator === "*" && isPiSymbol(node.left) && isNumericValue(node.right, 0.5)) {
+    return true;
+  }
+  if (node.kind === "mathBinary" && node.operator === "*" && isNumericValue(node.left, 0.5) && isPiSymbol(node.right)) {
+    return true;
+  }
+  return false;
+}
+
+function isPiSymbol(node) {
+  return node.kind === "mathSymbol" && node.name.toLowerCase() === "pi";
+}
+
+function isNumericValue(node, value) {
+  return node.kind === "mathNumber" && nearlyEqual(node.value, value);
 }
 
 function trigNode(name, argument) {

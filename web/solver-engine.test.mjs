@@ -84,6 +84,10 @@ runTest("simplify mode applies trigonometric identities", () => {
   assert.equal(analyzeSimplification("cos(x)/sin(x)").answer, "cot(x)");
   assert.equal(analyzeSimplification("sec(x)*cos(x)").answer, "1");
   assert.equal(analyzeSimplification("cot(x)*sin(x)").answer, "cos(x)");
+  assert.equal(analyzeSimplification("sin(pi/2 - x)").answer, "cos(x)");
+  assert.equal(analyzeSimplification("cos(pi/2 - x)").answer, "sin(x)");
+  assert.equal(analyzeSimplification("tan(pi/2 - x)").answer, "cot(x)");
+  assert.equal(analyzeSimplification("sec(pi/2 - x)").answer, "csc(x)");
   assert.equal(analyzeSimplification("sin(2x)").answer, "2 * sin(x) * cos(x)");
   assert.equal(analyzeSimplification("cos(2x)").answer, "cos(x) ^ 2 - sin(x) ^ 2");
   assert.equal(analyzeSimplification("tan(2x)").answer, "2 * tan(x) / (1 - tan(x) ^ 2)");
