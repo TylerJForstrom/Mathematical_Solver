@@ -47,6 +47,8 @@ The frontend currently supports:
 - Polynomial and elementary indefinite/definite integrals, including trig,
   exponential, logarithmic, square-root, reciprocal, and
   distinct-linear-factor partial-fraction forms
+- Integration by parts for linear factors multiplied by exponential, sine, or
+  cosine functions
 - Polynomial critical points and local max/min classification
 - Two-variable linear programming with feasible-vertex enumeration and
   constrained objective optimization
@@ -218,6 +220,8 @@ The same idea works for algebra and calculus:
   `x = i, x = -i`.
 - `integrate (2x + 3)/(x^2 + 3x + 2)` decomposes the rational function and
   returns `ln(abs(x + 1)) + ln(abs(x + 2)) + C`.
+- `integrate x*exp(x)` applies integration by parts and returns
+  `(x - 1) * exp(x) + C`.
 - `complex (3+4i)*(2-i)` evaluates the same math tree with complex pairs and
   returns `10 + 5i`.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
@@ -499,8 +503,8 @@ These are good ways to make the project more impressive mathematically:
 2. Add broader exact symbolic root output for selected cubic and quartic equations.
 3. Add more trigonometric identities, including product-to-sum and sum-to-product
    rules.
-4. Add substitution, integration by parts, and repeated/irreducible partial
-   fractions.
+4. Add substitution, broader integration by parts, and repeated/irreducible
+   partial fractions.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
 7. Add graphing for tangent lines, root-finding iterations, and more regression diagnostics.

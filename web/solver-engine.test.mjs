@@ -1204,6 +1204,13 @@ runTest("integral mode handles partial fractions", () => {
   );
 });
 
+runTest("integral mode handles integration by parts for linear factors", () => {
+  assert.equal(analyzeIntegral("integrate x*exp(x)").answer, "(x - 1) * exp(x) + C");
+  assert.equal(analyzeIntegral("integrate x*sin(x)").answer, "-x * cos(x) + sin(x) + C");
+  assert.equal(analyzeIntegral("integrate x*cos(x)").answer, "x * sin(x) + cos(x) + C");
+  assert.equal(analyzeIntegral("integrate x*exp(x) from 0 to 1").answer, "integral = 1");
+});
+
 runTest("integral mode handles logarithmic and square-root antiderivatives", () => {
   assert.equal(analyzeIntegral("integrate ln(x)").answer, "xln(abs(x)) - x + C");
   assert.equal(analyzeIntegral("integrate sqrt(x)").answer, "0.666667x^(3/2) + C");

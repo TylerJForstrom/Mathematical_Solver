@@ -12856,6 +12856,8 @@ function integrateSymbolic(node, variable) {
       const left = integrateSymbolic(node.left, variable);
       return left ? scaleIntegral(left, rightConstant) : null;
     }
+
+    return integrateByPartsProduct(node.left, node.right, variable);
   }
 
   if (node.operator === "/") {
@@ -12991,6 +12993,108 @@ function integrateRationalPartialFractions(numeratorNode, denominatorNode, varia
     title: "Use polynomial division and partial fractions",
     detail: "Divide the rational function into a polynomial quotient plus a proper fraction, then decompose the proper fraction.",
   };
+}
+
+function integrateByPartsProduct(leftNode, rightNode, variable) {
+  const request = integrationByPartsRequest(leftNode, rightNode, variable);
+  if (!request) {
+    return null;
+  }
+
+  const { linearFactor, functionNode, functionArgument } = request;
+  const factorSlope = linearFactor.slope;
+  const factorIntercept = linearFactor.intercept;
+  const argumentSlope = functionArgument.slope;
+  const argumentText = functionArgument.text;
+  const functionText = `${functionNode.name}(${argumentText})`;
+  const linearValue = (x) => factorSlope * x + factorIntercept;
+  const argumentValue = (x) => argumentSlope * x + functionArgument.intercept;
+
+  if (functionNode.name === "exp") {
+    const helperCoefficients = [
+      factorIntercept / argumentSlope - factorSlope / argumentSlope ** 2,
+      factorSlope / argumentSlope,
+    ];
+    return {
+      antiderivative: formatPolynomialProductWithFunction(helperCoefficients, variable, functionText),
+      evaluate: (x) => Math.exp(argumentValue(x)) *
+        (linearValue(x) / argumentSlope - factorSlope / argumentSlope ** 2),
+      title: "Apply integration by parts",
+      detail: "For a linear factor times an exponential, choose u as the linear factor and dv as the exponential.",
+    };
+  }
+
+  if (functionNode.name === "sin") {
+    const first = formatPolynomialProductWithFunction(
+      [-factorIntercept / argumentSlope, -factorSlope / argumentSlope],
+      variable,
+      `cos(${argumentText})`,
+    );
+    const second = formatScaledAntiderivative(factorSlope / argumentSlope ** 2, `sin(${argumentText})`);
+    return {
+      antiderivative: formatAntiderivativeSum(first, second, "+"),
+      evaluate: (x) => -(linearValue(x) / argumentSlope) * Math.cos(argumentValue(x)) +
+        (factorSlope / argumentSlope ** 2) * Math.sin(argumentValue(x)),
+      title: "Apply integration by parts",
+      detail: "For a linear factor times sine, choose u as the linear factor and integrate sine for dv.",
+    };
+  }
+
+  if (functionNode.name === "cos") {
+    const first = formatPolynomialProductWithFunction(
+      [factorIntercept / argumentSlope, factorSlope / argumentSlope],
+      variable,
+      `sin(${argumentText})`,
+    );
+    const second = formatScaledAntiderivative(factorSlope / argumentSlope ** 2, `cos(${argumentText})`);
+    return {
+      antiderivative: formatAntiderivativeSum(first, second, "+"),
+      evaluate: (x) => (linearValue(x) / argumentSlope) * Math.sin(argumentValue(x)) +
+        (factorSlope / argumentSlope ** 2) * Math.cos(argumentValue(x)),
+      title: "Apply integration by parts",
+      detail: "For a linear factor times cosine, choose u as the linear factor and integrate cosine for dv.",
+    };
+  }
+
+  return null;
+}
+
+function integrationByPartsRequest(leftNode, rightNode, variable) {
+  return integrationByPartsRequestInOrder(leftNode, rightNode, variable) ??
+    integrationByPartsRequestInOrder(rightNode, leftNode, variable);
+}
+
+function integrationByPartsRequestInOrder(factorNode, functionNode, variable) {
+  const linearFactor = linearArgumentInfo(factorNode, variable);
+  if (!linearFactor || functionNode.kind !== "mathFunction" || !["exp", "sin", "cos"].includes(functionNode.name)) {
+    return null;
+  }
+
+  const functionArgument = linearArgumentInfo(functionNode.argument, variable);
+  if (!functionArgument) {
+    return null;
+  }
+
+  return {
+    linearFactor,
+    functionNode,
+    functionArgument,
+  };
+}
+
+function formatPolynomialProductWithFunction(coefficients, variable, functionText) {
+  const polynomial = coefficientsToPolynomial(coefficients, variable);
+  const polynomialText = formatPolynomial(polynomial);
+  if (polynomialText === "0") {
+    return "0";
+  }
+  if (polynomialText === "1") {
+    return functionText;
+  }
+  if (polynomialText === "-1") {
+    return `-${functionText}`;
+  }
+  return `${formatProductFactor(polynomialText)} * ${functionText}`;
 }
 
 function integrateProperPartialFractions(numeratorCoefficients, denominatorCoefficients, variable) {
