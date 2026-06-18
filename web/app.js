@@ -257,7 +257,7 @@ function renderLogicValues(names) {
 }
 
 function renderOutput(analysis) {
-  const graphMarkup = analysis.graph ? renderGraph(analysis.graph) : "";
+  const graphMarkup = renderGraphs(analysis);
   const artifactMarkup = renderArtifacts(analysis.artifacts);
 
   if (analysis.table) {
@@ -273,6 +273,11 @@ function renderOutput(analysis) {
 
   const artifacts = analysis.artifacts ?? [["Answer", analysis.answer]];
   elements.outputPanel.innerHTML = `${graphMarkup}${renderArtifacts(artifacts)}`;
+}
+
+function renderGraphs(analysis) {
+  const graphs = analysis.graphs ?? (analysis.graph ? [analysis.graph] : []);
+  return graphs.map(renderGraph).join("");
 }
 
 function renderArtifacts(artifacts = []) {
@@ -345,7 +350,9 @@ function renderGraph(graph) {
       ? "Probability distribution graph"
       : graph.kind === "root-iterations"
         ? "Root-finding graph"
-        : "Function graph";
+        : graph.kind === "regression-diagnostic"
+          ? "Regression diagnostic graph"
+          : "Function graph";
 
   return `
     <div class="graph-card" aria-label="${graphLabel}">

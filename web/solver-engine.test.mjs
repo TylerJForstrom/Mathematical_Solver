@@ -463,6 +463,12 @@ runTest("statistics mode computes regression diagnostics", () => {
   assert.equal(artifactValue(result, "Residual JB p-value"), "0.706194");
   assert.equal(artifactValue(result, "Influential count"), "2");
   assert.deepEqual(result.table.rows[5], ["6", "21", "17.809524", "3.190476", "1.77053", "0.52381", "1.724127"]);
+  assert.equal(result.graphs.length, 3);
+  assert.equal(result.graphs[0].expression, "Actual vs fitted");
+  assert.equal(result.graphs[1].expression, "Residuals vs fitted");
+  assert.equal(result.graphs[2].expression, "Leverage vs Cook's D");
+  assert.equal(result.graphs[2].scatterLabel, "Influence");
+  assert.ok(result.graphs[2].lines.some((series) => series.label === "Cook's D threshold"));
 });
 
 runTest("statistics mode computes ridge regression", () => {

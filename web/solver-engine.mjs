@@ -8142,7 +8142,122 @@ function analyzeRegressionDiagnostics(statement) {
       ["Cook's D threshold", formatNumber(cookThreshold)],
       ["Leverage threshold", formatNumber(leverageThreshold)],
     ],
+    graphs: buildRegressionDiagnosticGraphs(request.y, result, {
+      cookThreshold,
+      leverageThreshold,
+    }),
   };
+}
+
+function buildRegressionDiagnosticGraphs(actualValues, result, thresholds) {
+  return [
+    buildActualVsFittedGraph(actualValues, result.fitted),
+    buildResidualsVsFittedGraph(result.fitted, result.residuals),
+    buildInfluenceDiagnosticGraph(result.leverages, result.cooksDistances, thresholds),
+  ];
+}
+
+function buildActualVsFittedGraph(actualValues, fittedValues) {
+  const [minValue, maxValue] = paddedNumericRange([...actualValues, ...fittedValues]);
+  return {
+    expression: "Actual vs fitted",
+    kind: "regression-diagnostic",
+    scatterLabel: "Observations",
+    xMin: minValue,
+    xMax: maxValue,
+    yMin: minValue,
+    yMax: maxValue,
+    scatter: fittedValues.map((value, index) => ({
+      x: normalizeNumber(value),
+      y: normalizeNumber(actualValues[index]),
+    })),
+    lines: [
+      {
+        label: "perfect fit",
+        className: "graph-line-muted",
+        points: [
+          { x: minValue, y: minValue },
+          { x: maxValue, y: maxValue },
+        ],
+      },
+    ],
+  };
+}
+
+function buildResidualsVsFittedGraph(fittedValues, residuals) {
+  const [xMin, xMax] = paddedNumericRange(fittedValues);
+  const [yMin, yMax] = paddedNumericRange([...residuals, 0]);
+  return {
+    expression: "Residuals vs fitted",
+    kind: "regression-diagnostic",
+    scatterLabel: "Residuals",
+    xMin,
+    xMax,
+    yMin,
+    yMax,
+    scatter: fittedValues.map((value, index) => ({
+      x: normalizeNumber(value),
+      y: normalizeNumber(residuals[index]),
+    })),
+    lines: [
+      {
+        label: "zero residual",
+        className: "graph-line-muted",
+        points: [
+          { x: xMin, y: 0 },
+          { x: xMax, y: 0 },
+        ],
+      },
+    ],
+  };
+}
+
+function buildInfluenceDiagnosticGraph(leverages, cooksDistances, thresholds) {
+  const xMax = normalizeNumber(Math.max(...leverages, thresholds.leverageThreshold, EPSILON) * 1.2);
+  const yMax = normalizeNumber(Math.max(...cooksDistances, thresholds.cookThreshold, EPSILON) * 1.2);
+  return {
+    expression: "Leverage vs Cook's D",
+    kind: "regression-diagnostic",
+    scatterLabel: "Influence",
+    xMin: 0,
+    xMax,
+    yMin: 0,
+    yMax,
+    scatter: leverages.map((value, index) => ({
+      x: normalizeNumber(value),
+      y: normalizeNumber(cooksDistances[index]),
+    })),
+    lines: [
+      {
+        label: "Cook's D threshold",
+        className: "graph-line-accent",
+        points: [
+          { x: 0, y: thresholds.cookThreshold },
+          { x: xMax, y: thresholds.cookThreshold },
+        ],
+      },
+      {
+        label: "leverage threshold",
+        className: "graph-line-muted",
+        points: [
+          { x: thresholds.leverageThreshold, y: 0 },
+          { x: thresholds.leverageThreshold, y: yMax },
+        ],
+      },
+    ],
+  };
+}
+
+function paddedNumericRange(values) {
+  const finite = values.filter(Number.isFinite);
+  const minimum = Math.min(...finite);
+  const maximum = Math.max(...finite);
+  if (nearlyEqual(minimum, maximum)) {
+    const pad = Math.max(1, Math.abs(minimum) * 0.1);
+    return [normalizeNumber(minimum - pad), normalizeNumber(maximum + pad)];
+  }
+  const pad = (maximum - minimum) * 0.08;
+  return [normalizeNumber(minimum - pad), normalizeNumber(maximum + pad)];
 }
 
 function fitOlsDiagnostics(yValues, predictors) {
