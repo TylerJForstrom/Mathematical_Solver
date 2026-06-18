@@ -16,6 +16,7 @@ import {
   analyzeLimit,
   analyzeLogic,
   analyzeLogicNormalForm,
+  analyzeLogicSat,
   analyzeLogicSimplification,
   analyzeMatrix,
   analyzeMarkovChain,
@@ -84,7 +85,28 @@ runTest("logic mode converts to normal forms", () => {
   assert.equal(analyzeUniversal("convert P -> Q to cnf").answer, "not P or Q");
 });
 
+runTest("logic mode solves SAT with DPLL", () => {
+  const sat = analyzeLogicSat("sat (P or Q) and (not P or not Q)");
+  const unsat = analyzeLogicSat("sat P and not P");
+
+  assert.equal(sat.summary, "SAT satisfiable");
+  assert.equal(sat.answer, "satisfiable: P=true, Q=false");
+  assert.equal(artifactValue(sat, "Clauses"), "P or Q; not P or not Q");
+  assert.equal(artifactValue(sat, "Decisions"), "1");
+  assert.equal(artifactValue(sat, "Unit propagations"), "1");
+  assert.deepEqual(sat.extraTables[0].rows.slice(0, 2), [["1", "branch P=true", "P=true"], ["2", "unit not Q", "P=true, Q=false"]]);
+  assert.equal(unsat.summary, "SAT unsatisfiable");
+  assert.equal(unsat.answer, "unsatisfiable");
+  assert.equal(artifactValue(unsat, "Clauses"), "empty");
+  assert.equal(artifactValue(unsat, "DPLL result"), "unsatisfiable");
+  assert.equal(analyzeUniversal("sat (P or Q) and (not P or not Q)").summary, "SAT satisfiable");
+});
+
 runTest("input assistant suggests structured problem formats", () => {
+  const satHelp = suggestProblemHelp("is this satisfiable?", "ask", "Need a logic statement.");
+  assert.equal(satHelp.title, "SAT solver");
+  assert.equal(satHelp.examples[0][2], "sat (P or Q) and (not P or R) and (not Q or R)");
+
   const normalForm = suggestProblemHelp("convert to cnf", "ask", "Need a logic statement.");
   assert.equal(normalForm.title, "Logic normal form");
   assert.equal(normalForm.examples[0][2], "cnf P -> (Q and R)");

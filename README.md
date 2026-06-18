@@ -10,7 +10,7 @@ closed-form differential equations, and explain the work step by step.
 The frontend currently supports:
 
 - Universal Ask mode that routes common math questions to the right solver
-- Propositional logic evaluation and truth tables
+- Propositional logic evaluation, truth tables, and DPLL SAT solving
 - Boolean algebra simplification with identity, domination, complement,
   idempotent, absorption, consensus, De Morgan, double-negation, implication,
   XOR, and IFF rules
@@ -262,6 +262,8 @@ The same idea works for algebra and calculus:
   returns `10 + 5i`.
 - `cnf P -> (Q and R)` rewrites a propositional tree into
   `(not P or Q) and (not P or R)` and verifies equivalence.
+- `sat (P or Q) and (not P or not Q)` converts to CNF clauses and runs DPLL
+  with branching, unit propagation, and pure-literal assignments.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
 - `solve nonlinear system x^2 + y^2 = 25; x - y = 1 guess x=3 y=2`
   numerically solves a square nonlinear system with Newton iterations.
@@ -499,6 +501,7 @@ The demo includes:
 - Truth tables for logic mode
 - Polynomial factoring through Ask mode
 - Exact combinatorics through Ask mode
+- DPLL SAT solving and logic normal forms through Ask mode
 - Number theory and modular arithmetic through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
 - Numeric limits through Ask mode
@@ -592,8 +595,7 @@ These are good ways to make the project more impressive mathematically:
 10. Add exact symbolic roots for more higher-degree equations when possible.
 11. Add more Boolean algebra simplification rules, including normal-form
    factoring and larger multi-clause reductions.
-12. Build a small SAT solver using the DPLL algorithm instead of checking every
-   truth-table row.
+12. Extend SAT solving with watched literals, clause learning, and unsat cores.
 13. Generate formal proof steps for tautologies using natural deduction or
    sequent calculus.
 14. Add semantic tableaux, which are also tree-based, to prove whether a

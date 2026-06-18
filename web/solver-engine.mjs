@@ -42,6 +42,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
 
   const suggestions = [
     {
+      title: "SAT solver",
+      when: () => activeMode === "ask" && /\b(?:sat solver|satisfiable|satisfiability|dpll)\b/.test(lower),
+      reason: "I detected a propositional satisfiability question.",
+      needs: [
+        "A logic statement using and, or, not, ->, xor, or iff",
+        "Use sat, satisfiable, or DPLL to request a satisfiability search",
+      ],
+      examples: [
+        ["SAT", "ask", "sat (P or Q) and (not P or R) and (not Q or R)"],
+        ["Unsat", "ask", "sat P and not P"],
+      ],
+    },
+    {
       title: "Logic normal form",
       when: () => activeMode === "ask" && /\b(cnf|dnf|nnf|normal forms?|conjunctive normal|disjunctive normal|negation normal)\b/.test(lower),
       reason: "I detected a propositional-logic normal-form question.",
@@ -474,6 +487,82 @@ export function analyzeLogicNormalForm(statement) {
       ["DNF", logicToString(forms.dnf)],
       ["Requested form", request.form === "all" ? "all" : request.form.toUpperCase()],
       ["Equivalent", equivalent ? "yes" : "no"],
+    ],
+  };
+}
+
+export function analyzeLogicSat(statement) {
+  const request = extractLogicSatQuestion(statement);
+  const tree = parseLogic(request.expression);
+  const steps = [
+    {
+      title: "Parse logic statement",
+      expression: logicToString(tree),
+      detail: "The statement becomes a propositional expression tree.",
+    },
+  ];
+  const forms = buildLogicNormalForms(tree, steps);
+  const clauses = logicCnfClauses(forms.cnf);
+  const result = solveDpllClauses(clauses, logicVariables(tree));
+  const answer = result.satisfiable
+    ? `satisfiable: ${formatAssignment(result.assignment)}`
+    : "unsatisfiable";
+  const clauseText = clauses.length
+    ? clauses.map(formatDpllClause).join("; ")
+    : "no clauses";
+
+  steps.push(
+    {
+      title: "Extract CNF clauses",
+      expression: clauseText,
+      detail: "DPLL works on a set of clauses where each clause is an OR of literals and all clauses must be satisfied.",
+    },
+    {
+      title: "Run DPLL search",
+      expression: result.satisfiable ? formatAssignment(result.assignment) : "empty clause conflict",
+      detail: result.satisfiable
+        ? "Unit propagation, pure literals, and branching found a satisfying assignment."
+        : "DPLL derived a conflict in every branch, so no satisfying assignment exists.",
+    },
+  );
+
+  const treeForMetrics = forms.cnf;
+  return {
+    mode: "logic",
+    tree: treeForMetrics,
+    answer,
+    summary: result.satisfiable ? "SAT satisfiable" : "SAT unsatisfiable",
+    details: "DPLL propositional satisfiability search",
+    variables: result.variables,
+    assignment: result.assignment,
+    metrics: treeMetrics(treeForMetrics),
+    steps,
+    table: {
+      headers: ["Clause", "Literals"],
+      rows: clauses.length
+        ? clauses.map((clause, index) => [String(index + 1), formatDpllClause(clause)])
+        : [["1", "true"]],
+    },
+    extraTables: [{
+      title: "DPLL trace",
+      headers: ["Step", "Action", "Assignment"],
+      rows: result.trace.map((entry, index) => [
+        String(index + 1),
+        entry.action,
+        formatAssignment(entry.assignment),
+      ]),
+    }],
+    artifacts: [
+      ["Original", logicToString(tree)],
+      ["CNF", logicToString(forms.cnf)],
+      ["Clauses", clauseText],
+      ["Variables", result.variables.join(", ") || "none"],
+      ["DPLL result", result.satisfiable ? "satisfiable" : "unsatisfiable"],
+      ["Assignment", result.satisfiable ? formatAssignment(result.assignment) : "none"],
+      ["Decisions", formatNumber(result.stats.decisions)],
+      ["Unit propagations", formatNumber(result.stats.unitPropagations)],
+      ["Pure literal assignments", formatNumber(result.stats.pureLiteralAssignments)],
+      ["Search nodes", formatNumber(result.stats.nodes)],
     ],
   };
 }
@@ -1720,6 +1809,9 @@ export function analyzeUniversal(question, values = {}) {
   if (isMarkovQuestion(lower)) {
     routed = analyzeMarkovChain(question);
     routedLabel = "Markov chain";
+  } else if (isLogicSatQuestion(lower)) {
+    routed = analyzeLogicSat(question);
+    routedLabel = "SAT solver";
   } else if (isLogicNormalFormQuestion(lower)) {
     routed = analyzeLogicNormalForm(question);
     routedLabel = "Logic normal form";
@@ -25003,6 +25095,13 @@ function isLogicNormalFormQuestion(lower) {
     lower.startsWith("normal forms ");
 }
 
+function isLogicSatQuestion(lower) {
+  return lower.startsWith("sat ") ||
+    lower.startsWith("sat(") ||
+    lower.startsWith("dpll ") ||
+    /\b(?:sat solver|boolean sat|propositional sat|satisfiability|satisfiable|dpll)\b/.test(lower);
+}
+
 function isSimplifyQuestion(lower) {
   return isTrigIdentityQuestion(lower) ||
     lower.includes("simplify") ||
@@ -25285,6 +25384,25 @@ function extractLogicNormalFormQuestion(question) {
     throw new Error("Logic normal-form mode needs a statement, such as cnf P -> (Q and R).");
   }
   return { form, expression };
+}
+
+function extractLogicSatQuestion(question) {
+  const expression = question
+    .replace(/[?!.]+$/, "")
+    .replace(/\b(?:using|with|via)\s+dpll\b/gi, " ")
+    .replace(/^(?:check|determine|decide|test|solve|find|show)\s+(?:if|whether)?\s*/i, "")
+    .replace(/^(?:is|whether)\s+/i, "")
+    .replace(/^(?:dpll|sat(?:\s+solver)?|boolean\s+sat|propositional\s+sat|satisfiability|satisfiable)\s*:?\s*/i, "")
+    .replace(/\b(?:is|are)\s+satisfiable\b/gi, " ")
+    .replace(/\b(?:sat\s+solver|satisfiability|satisfiable|dpll)\b/gi, " ")
+    .replace(/^\s*of\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!expression) {
+    throw new Error("SAT mode needs a logic statement, such as sat (P or Q) and not R.");
+  }
+  return { expression };
 }
 
 function readLogicNormalFormTarget(question) {
@@ -25992,6 +26110,265 @@ function buildLogicNormalForms(tree, steps = []) {
   const dnf = simplifyLogicNode(dnfRaw, steps);
 
   return { nnf, cnf, dnf };
+}
+
+function logicCnfClauses(cnf) {
+  if (cnf.kind === "logicConstant") {
+    return cnf.value ? [] : [[]];
+  }
+  const clauseNodes = flattenLogicOperator(cnf, "and");
+  const clauses = [];
+  for (const node of clauseNodes) {
+    const clause = logicClauseLiterals(node);
+    if (clause === null) {
+      continue;
+    }
+    clauses.push(clause);
+  }
+  return clauses;
+}
+
+function logicClauseLiterals(node) {
+  if (node.kind === "logicConstant") {
+    return node.value ? null : [];
+  }
+  const literalNodes = flattenLogicOperator(node, "or");
+  const byName = new Map();
+
+  for (const literalNode of literalNodes) {
+    if (literalNode.kind === "logicConstant") {
+      if (literalNode.value) return null;
+      continue;
+    }
+    const literal = logicLiteralFromNode(literalNode);
+    const existing = byName.get(literal.name);
+    if (existing !== undefined && existing !== literal.positive) {
+      return null;
+    }
+    byName.set(literal.name, literal.positive);
+  }
+
+  return [...byName.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, positive]) => ({ name, positive }));
+}
+
+function logicLiteralFromNode(node) {
+  if (node.kind === "logicVariable") {
+    return { name: node.name, positive: true };
+  }
+  if (node.kind === "logicNot" && node.operand.kind === "logicVariable") {
+    return { name: node.operand.name, positive: false };
+  }
+  throw new Error("CNF clause extraction expected literals only.");
+}
+
+function solveDpllClauses(clauses, variables) {
+  const stats = {
+    decisions: 0,
+    unitPropagations: 0,
+    pureLiteralAssignments: 0,
+    nodes: 0,
+  };
+  const trace = [];
+  const search = dpllSearch(clauses, {}, variables, stats, trace);
+  const assignment = search.satisfiable
+    ? completeDpllAssignment(search.assignment, variables)
+    : {};
+  return {
+    satisfiable: search.satisfiable,
+    assignment,
+    variables,
+    stats,
+    trace,
+  };
+}
+
+function dpllSearch(clauses, assignment, variables, stats, trace) {
+  stats.nodes += 1;
+  const propagated = propagateDpllClauses(clauses, assignment, stats, trace);
+  if (propagated.conflict) {
+    return { satisfiable: false, assignment: propagated.assignment };
+  }
+  if (propagated.clauses.length === 0) {
+    addDpllTrace(trace, "all clauses satisfied", propagated.assignment);
+    return { satisfiable: true, assignment: propagated.assignment };
+  }
+
+  const decision = chooseDpllLiteral(propagated.clauses, variables, propagated.assignment);
+  if (!decision) {
+    return { satisfiable: false, assignment: propagated.assignment };
+  }
+
+  stats.decisions += 1;
+  for (const value of [decision.preferred, !decision.preferred]) {
+    const branchAssignment = {
+      ...propagated.assignment,
+      [decision.name]: value,
+    };
+    addDpllTrace(trace, `branch ${decision.name}=${formatTruth(value)}`, branchAssignment);
+    const result = dpllSearch(clauses, branchAssignment, variables, stats, trace);
+    if (result.satisfiable) {
+      return result;
+    }
+  }
+
+  addDpllTrace(trace, `backtrack ${decision.name}`, propagated.assignment);
+  return { satisfiable: false, assignment: propagated.assignment };
+}
+
+function propagateDpllClauses(clauses, baseAssignment, stats, trace) {
+  let assignment = { ...baseAssignment };
+  while (true) {
+    const simplified = simplifyDpllClauses(clauses, assignment);
+    if (simplified.some((clause) => clause.length === 0)) {
+      addDpllTrace(trace, "empty clause conflict", assignment);
+      return { conflict: true, assignment, clauses: simplified };
+    }
+    if (simplified.length === 0) {
+      return { conflict: false, assignment, clauses: simplified };
+    }
+
+    const unit = simplified.find((clause) => clause.length === 1)?.[0];
+    if (unit) {
+      const assigned = assignDpllLiteral(assignment, unit);
+      if (!assigned.ok) {
+        addDpllTrace(trace, "unit conflict", assignment);
+        return { conflict: true, assignment, clauses: simplified };
+      }
+      assignment = assigned.assignment;
+      stats.unitPropagations += 1;
+      addDpllTrace(trace, `unit ${formatDpllLiteral(unit)}`, assignment);
+      continue;
+    }
+
+    const pure = findPureDpllLiteral(simplified, assignment);
+    if (pure) {
+      const assigned = assignDpllLiteral(assignment, pure);
+      assignment = assigned.assignment;
+      stats.pureLiteralAssignments += 1;
+      addDpllTrace(trace, `pure ${formatDpllLiteral(pure)}`, assignment);
+      continue;
+    }
+
+    return { conflict: false, assignment, clauses: simplified };
+  }
+}
+
+function simplifyDpllClauses(clauses, assignment) {
+  const simplified = [];
+  for (const clause of clauses) {
+    let satisfied = false;
+    const unresolved = [];
+    for (const literal of clause) {
+      const value = assignment[literal.name];
+      if (value === undefined) {
+        unresolved.push(literal);
+      } else if (value === literal.positive) {
+        satisfied = true;
+        break;
+      }
+    }
+    if (!satisfied) {
+      simplified.push(unresolved);
+    }
+  }
+  return simplified;
+}
+
+function assignDpllLiteral(assignment, literal) {
+  const value = literal.positive;
+  if (assignment[literal.name] !== undefined && assignment[literal.name] !== value) {
+    return { ok: false, assignment };
+  }
+  return {
+    ok: true,
+    assignment: {
+      ...assignment,
+      [literal.name]: value,
+    },
+  };
+}
+
+function findPureDpllLiteral(clauses, assignment) {
+  const signs = new Map();
+  for (const clause of clauses) {
+    for (const literal of clause) {
+      if (assignment[literal.name] !== undefined) continue;
+      const current = signs.get(literal.name) ?? { positive: false, negative: false };
+      if (literal.positive) {
+        current.positive = true;
+      } else {
+        current.negative = true;
+      }
+      signs.set(literal.name, current);
+    }
+  }
+
+  for (const [name, sign] of [...signs.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    if (sign.positive !== sign.negative) {
+      return { name, positive: sign.positive };
+    }
+  }
+  return null;
+}
+
+function chooseDpllLiteral(clauses, variables, assignment) {
+  const scores = new Map();
+  for (const clause of clauses) {
+    for (const literal of clause) {
+      if (assignment[literal.name] !== undefined) continue;
+      const score = scores.get(literal.name) ?? { positive: 0, negative: 0 };
+      if (literal.positive) {
+        score.positive += 1;
+      } else {
+        score.negative += 1;
+      }
+      scores.set(literal.name, score);
+    }
+  }
+
+  let best = null;
+  for (const name of variables) {
+    const score = scores.get(name);
+    if (!score) continue;
+    const total = score.positive + score.negative;
+    const candidate = {
+      name,
+      total,
+      preferred: score.positive >= score.negative,
+    };
+    if (!best || candidate.total > best.total || (candidate.total === best.total && candidate.name < best.name)) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function completeDpllAssignment(assignment, variables) {
+  const completed = {};
+  for (const name of variables) {
+    completed[name] = Boolean(assignment[name] ?? false);
+  }
+  return completed;
+}
+
+function addDpllTrace(trace, action, assignment) {
+  if (trace.length >= 40) {
+    return;
+  }
+  trace.push({ action, assignment: { ...assignment } });
+}
+
+function formatDpllClause(clause) {
+  if (clause.length === 0) {
+    return "empty";
+  }
+  return clause.map(formatDpllLiteral).join(" or ");
+}
+
+function formatDpllLiteral(literal) {
+  return literal.positive ? literal.name : `not ${literal.name}`;
 }
 
 function eliminateLogicDerivedOperators(node) {
