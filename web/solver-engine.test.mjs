@@ -436,6 +436,23 @@ runTest("equation mode reports complex quadratic roots", () => {
   assert.equal(analyzeEquation("x^2 + 2x + 5 = 0", "x").answer, "x = -1 + 2i, x = -1 - 2i");
 });
 
+runTest("equation mode solves biquadratic quartics exactly", () => {
+  const result = analyzeEquation("x^4 - 5x^2 + 4 = 0", "x");
+
+  assert.equal(result.summary, "biquadratic quartic solution");
+  assert.equal(result.answer, "x = -2, x = -1, x = 1, x = 2");
+  assert.equal(artifactValue(result, "Substitution"), "u = x^2");
+  assert.equal(artifactValue(result, "Quadratic in u"), "u^2 - 5u + 4 = 0");
+  assert.equal(analyzeUniversal("solve x^4 - 5x^2 + 4 = 0").summary, "biquadratic quartic solution");
+});
+
+runTest("equation mode deduplicates repeated biquadratic roots", () => {
+  const result = analyzeEquation("x^4 - 2x^2 + 1 = 0", "x");
+
+  assert.equal(result.answer, "x = -1, x = 1");
+  assert.equal(artifactValue(result, "u roots"), "1");
+});
+
 runTest("equation mode solves linear equations", () => {
   const result = analyzeEquation("2x + 5 = 17", "x");
 

@@ -32,8 +32,8 @@ The frontend currently supports:
 - Number theory tools: gcd, lcm, prime factorization, modular powers,
   modular inverses, and Chinese remainder theorem systems
 - One-variable polynomial inequalities with sign charts and interval notation
-- Linear and quadratic equation solving, including exact radical roots and
-  complex roots
+- Linear, quadratic, and biquadratic quartic equation solving, including exact
+  radical roots and complex quadratic roots
 - Complex-number arithmetic and elementary complex functions through Ask mode
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations and Newton-style nonlinear systems through
@@ -254,6 +254,8 @@ The same idea works for algebra and calculus:
   `x = sqrt(2), x = -sqrt(2)`.
 - `x^2 + 1 = 0` keeps the quadratic formula in the complex plane and returns
   `x = i, x = -i`.
+- `x^4 - 5x^2 + 4 = 0` recognizes biquadratic form, substitutes
+  `u = x^2`, and returns `x = -2, x = -1, x = 1, x = 2`.
 - `integrate (2x + 3)/(x^2 + 3x + 2)` decomposes the rational function and
   returns `ln(abs(x + 1)) + ln(abs(x + 2)) + C`.
 - `integrate 1/(x - 1)^2` handles a repeated linear factor and returns
@@ -605,7 +607,7 @@ node web/solver-engine.test.mjs
 These are good ways to make the project more impressive mathematically:
 
 1. Add a formal problem-router grammar for more natural-language questions.
-2. Add broader exact symbolic root output for selected cubic and quartic equations.
+2. Add broader exact symbolic root output for cubic and non-biquadratic quartic equations.
 3. Add broader inverse-trig identities and verified branch/sign handling for
    half-angle rewrites.
 4. Add broader substitution, broader integration by parts, and repeated

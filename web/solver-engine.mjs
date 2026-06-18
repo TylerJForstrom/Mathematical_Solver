@@ -29496,6 +29496,13 @@ function solvePolynomial(poly, variable) {
     };
   }
 
+  if (degree === 4) {
+    const biquadratic = solveBiquadraticEquation(coefficients, variable);
+    if (biquadratic) {
+      return biquadratic;
+    }
+  }
+
   const numericRoots = approximateRealPolynomialRoots(coefficients);
   return {
     answer: numericRoots.length
@@ -29517,6 +29524,149 @@ function solvePolynomial(poly, variable) {
       },
     ],
   };
+}
+
+function solveBiquadraticEquation(coefficients, variable) {
+  const oddTermsAreZero = nearlyEqual(coefficients[1] ?? 0, 0) &&
+    nearlyEqual(coefficients[3] ?? 0, 0);
+  if (!oddTermsAreZero || nearlyEqual(coefficients[4] ?? 0, 0)) {
+    return null;
+  }
+
+  const c = coefficients[0] ?? 0;
+  const b = coefficients[2] ?? 0;
+  const a = coefficients[4] ?? 0;
+  const discriminant = b * b - 4 * a * c;
+  const uRoots = realQuadraticRootEntries(a, b, c, discriminant);
+  const roots = uniqueSortedRootEntries(
+    uRoots.flatMap((root) => xRootEntriesFromBiquadraticRoot(root)),
+  );
+  const hasApproximation = roots.some((root) => root.approximate);
+  const answer = roots.length
+    ? roots.map((root) => `${variable} ${root.approximate ? "~=" : "="} ${root.text}`).join(", ")
+    : "no real roots found";
+
+  return {
+    answer,
+    summary: "biquadratic quartic solution",
+    steps: [
+      {
+        title: "Detect biquadratic form",
+        expression: `${formatPolynomialFromCoefficients(coefficients, variable)} = 0`,
+        detail: `Only even powers appear, so the quartic can be reduced with u = ${variable}^2.`,
+      },
+      {
+        title: "Substitute u",
+        expression: `${formatPolynomialFromCoefficients([c, b, a], "u")} = 0`,
+        detail: `Let u = ${variable}^2 and solve the resulting quadratic equation.`,
+      },
+      {
+        title: "Solve the quadratic in u",
+        expression: `b^2 - 4ac = ${formatNumber(discriminant)}`,
+        detail: uRoots.length
+          ? `Real u roots: ${uRoots.map((root) => root.text).join(", ")}.`
+          : "The quadratic in u has no real nonnegative roots.",
+      },
+      {
+        title: "Take square roots",
+        expression: roots.length
+          ? roots.map((root) => `${variable} ${root.approximate ? "~=" : "="} ${root.text}`).join(", ")
+          : "none",
+        detail: roots.length
+          ? `Each nonnegative u root gives ${variable} = +/-sqrt(u).`
+          : "No real x-values satisfy the quartic.",
+      },
+    ],
+    artifacts: [
+      ["Substitution", `u = ${variable}^2`],
+      ["Quadratic in u", `${formatPolynomialFromCoefficients([c, b, a], "u")} = 0`],
+      ["u roots", uRoots.length ? uRoots.map((root) => root.text).join(", ") : "none"],
+      ...(hasApproximation || roots.some((root) => root.exactRadical)
+        ? [["Numeric approximations", roots.length ? roots.map((root) => formatNumber(root.value)).join(", ") : "none"]]
+        : []),
+    ],
+  };
+}
+
+function realQuadraticRootEntries(a, b, c, discriminant) {
+  if (discriminant < -EPSILON) {
+    return [];
+  }
+
+  const denominator = 2 * a;
+  if (nearlyEqual(discriminant, 0)) {
+    const value = normalizeNumber(-b / denominator);
+    return [{ value, text: formatNumber(value), exact: isIntegerLike(value) }];
+  }
+
+  const root = Math.sqrt(Math.max(0, discriminant));
+  const values = [
+    normalizeNumber((-b + root) / denominator),
+    normalizeNumber((-b - root) / denominator),
+  ];
+  const exactRoots = exactQuadraticRadicalRoots(a, b, c, discriminant);
+  return uniqueSortedRootEntries(values.map((value, index) => ({
+    value,
+    text: exactRoots ? exactRoots[index] : formatNumber(value),
+    exact: Boolean(exactRoots) || isIntegerLike(value),
+    approximate: !exactRoots && !isIntegerLike(value),
+  })));
+}
+
+function xRootEntriesFromBiquadraticRoot(uRoot) {
+  if (uRoot.value < -EPSILON) {
+    return [];
+  }
+  if (nearlyEqual(uRoot.value, 0)) {
+    return [{ value: 0, text: "0", exact: true }];
+  }
+
+  const magnitudeValue = normalizeNumber(Math.sqrt(Math.max(0, uRoot.value)));
+  const magnitude = exactSquareRootMagnitude(uRoot);
+  const makeEntry = (sign) => {
+    const value = normalizeNumber(sign * magnitudeValue);
+    return {
+      value,
+      text: sign < 0 ? `-${magnitude.text}` : magnitude.text,
+      exact: magnitude.exact,
+      exactRadical: magnitude.exactRadical,
+      approximate: !magnitude.exact,
+    };
+  };
+  return [makeEntry(-1), makeEntry(1)];
+}
+
+function exactSquareRootMagnitude(root) {
+  if (isIntegerLike(root.value)) {
+    const integer = Math.round(root.value);
+    const { outside, radicand } = simplifySquareRootInteger(integer);
+    if (radicand === 1) {
+      return { text: formatNumber(outside), exact: true, exactRadical: false };
+    }
+    return {
+      text: formatRadicalFactor(outside, radicand),
+      exact: true,
+      exactRadical: true,
+    };
+  }
+
+  if (root.exact) {
+    return {
+      text: `sqrt(${wrapExpressionForFunction(root.text)})`,
+      exact: true,
+      exactRadical: true,
+    };
+  }
+
+  return {
+    text: formatNumber(Math.sqrt(Math.max(0, root.value))),
+    exact: false,
+    exactRadical: false,
+  };
+}
+
+function wrapExpressionForFunction(text) {
+  return /^[A-Za-z0-9_.]+$/.test(text) ? text : `(${text})`;
 }
 
 function factorPolynomialOverRationals(poly, variable) {
@@ -30015,6 +30165,19 @@ function uniqueSortedNumbers(values) {
   for (const value of sorted) {
     if (unique.every((existing) => Math.abs(existing - value) > 1e-5)) {
       unique.push(value);
+    }
+  }
+  return unique;
+}
+
+function uniqueSortedRootEntries(entries) {
+  const sorted = entries
+    .filter((entry) => Number.isFinite(entry.value))
+    .sort((left, right) => left.value - right.value);
+  const unique = [];
+  for (const entry of sorted) {
+    if (unique.every((existing) => Math.abs(existing.value - entry.value) > 1e-5)) {
+      unique.push(entry);
     }
   }
   return unique;
