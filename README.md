@@ -61,7 +61,8 @@ The frontend currently supports:
 - Fourier series partial sums with numerically integrated sine/cosine
   coefficients and plotted approximations
 - Differential equations: exponential growth/decay, Newton cooling, logistic
-  growth, and separable power ODEs
+  growth, separable power ODEs, and 2D linear ODE systems with phase-plane
+  classification
 - Numerical ODE solvers: Euler's method and fourth-order Runge-Kutta for
   first-order differential equations
 - Smart input assistance for incomplete math/statistics questions, including
@@ -285,6 +286,9 @@ The same idea works for algebra and calculus:
   integral numerically and returns `integral ~= 2`.
 - `ode dy/dt = 0.3y y0=2 t=5`, `newton cooling ambient=70 initial=100 k=0.2 t=10`,
   and `logistic r=0.4 K=100 y0=10 t=8` solve closed-form differential equations.
+- `ode system dx/dt = y; dy/dt = -2*x - 3*y; x0=1 y0=0 t=1`
+  evaluates a 2D linear system, classifies the phase portrait by eigenvalues,
+  and samples direction-field vectors.
 - `rk4 dy/dt = t + y y0=1 from t=0 to 1 h=0.25` approximates a first-order
   ODE with fourth-order Runge-Kutta.
 - `regression for (1,2), (2,3), (3,5), (4,8); predict x=5` becomes a statistical model tree
@@ -523,7 +527,8 @@ These are good ways to make the project more impressive mathematically:
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
 7. Add graphing for tangent lines, root-finding iterations, and more regression diagnostics.
-8. Add systems of differential equations and phase-plane direction fields.
+8. Add nonlinear systems of differential equations, nullclines, and richer
+   phase-plane plotting.
 9. Add multi-step natural-language explanations for word problems.
 10. Add exact symbolic roots for more higher-degree equations when possible.
 11. Convert logic statements to negation normal form, conjunctive normal form, and

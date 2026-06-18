@@ -219,6 +219,20 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
     },
     {
+      title: "Linear ODE system",
+      when: () => activeMode === "ask" && /\b(ode system|phase plane|direction field|system of differential equations)\b/.test(lower),
+      reason: "I detected a two-variable differential equation system.",
+      needs: [
+        "Two equations such as x' and y'",
+        "Initial values x0 and y0 if you want a trajectory",
+        "A target time t or a from/to interval",
+      ],
+      examples: [
+        ["ODE system", "ask", "ode system x'=y; y'=-2x - 3y; x0=1 y0=0 t=1"],
+        ["Phase plane", "ask", "phase plane [[0,1],[-2,-3]] initial [1,0] t=1"],
+      ],
+    },
+    {
       title: "Nonlinear system solver",
       when: () => activeMode === "ask" && /\b(nonlinear system|nonlinear equations|newton system|system.*guess)\b/.test(lower),
       reason: "I detected a nonlinear equation system.",
@@ -3577,7 +3591,12 @@ function analyzeNumericalIntegration(request, expression) {
 }
 
 export function analyzeDifferentialEquation(statement) {
-  if (isNumericalOdeQuestion(statement.toLowerCase())) {
+  const lower = statement.toLowerCase();
+  if (isLinearOdeSystemQuestion(lower)) {
+    return analyzeLinearOdeSystem(statement);
+  }
+
+  if (isNumericalOdeQuestion(lower)) {
     return analyzeNumericalDifferentialEquation(statement);
   }
 
@@ -3793,6 +3812,90 @@ function analyzeNumericalDifferentialEquation(statement) {
       ["Steps", formatNumber(request.steps)],
       ["Approximation", `${request.dependent}(${formatNumber(request.target)}) ~= ${formatNumber(finalRow.y)}`],
     ],
+  };
+}
+
+function analyzeLinearOdeSystem(statement) {
+  const request = extractLinearOdeSystem(statement);
+  const trace = traceMatrix(request.matrix);
+  const determinantValue = determinant(request.matrix);
+  const discriminant = trace ** 2 - 4 * determinantValue;
+  const classification = classifyLinearOdeSystem(request.matrix);
+  const eigenvalues = formatLinearOdeEigenvalues(request.matrix);
+  const delta = request.target - request.initialTime;
+  const state = solveLinearOdeSystemState(request.matrix, request.initialState, delta);
+  const equationText = formatLinearOdeSystemEquations(request);
+  const fieldRows = samplePhasePlaneField(request.matrix, request.stateVariables);
+
+  const tree = {
+    kind: "statsDistribution",
+    label: "ODE SYSTEM",
+    children: [
+      matrixNode("A", request.matrix),
+      vectorNode("initial", request.initialState),
+      vectorNode("state", state),
+      statsMetricNode("trace", trace),
+      statsMetricNode("det", determinantValue),
+    ],
+  };
+
+  return {
+    mode: "ode",
+    tree,
+    answer: `state(${formatNumber(request.target)}) = ${formatVector(state)}; ${classification}`,
+    summary: "linear ODE system",
+    details: "2D homogeneous linear system with eigenvalue phase-plane classification",
+    variables: [request.variable, ...request.stateVariables],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read system",
+        expression: equationText,
+        detail: "The solver converts the two first-order equations into a coefficient matrix.",
+      },
+      {
+        title: "Build phase matrix",
+        expression: `A = ${formatMatrix(request.matrix)}`,
+        detail: "The state vector follows u' = Au, so eigenvalues of A control the phase portrait.",
+      },
+      {
+        title: "Classify equilibrium",
+        expression: `trace = ${formatNumber(trace)}, det = ${formatNumber(determinantValue)}, discriminant = ${formatNumber(discriminant)}`,
+        detail: `The trace-determinant test classifies the origin as a ${classification}.`,
+      },
+      {
+        title: "Evaluate matrix exponential",
+        expression: `u(${formatNumber(request.target)}) = exp(A * ${formatNumber(delta)}) ${formatVector(request.initialState)} = ${formatVector(state)}`,
+        detail: "For 2x2 systems, the solver uses the closed-form matrix exponential rather than a step-by-step approximation.",
+      },
+      {
+        title: "Sample direction field",
+        expression: `${fieldRows.length} phase-plane vectors`,
+        detail: "Each field row evaluates Au at a nearby phase-plane point.",
+      },
+    ],
+    artifacts: [
+      ["System", equationText],
+      ["Matrix A", formatMatrix(request.matrix)],
+      ["Initial state", `${formatVector(request.initialState)} at ${request.variable}=${formatNumber(request.initialTime)}`],
+      ["Target", `${request.variable}=${formatNumber(request.target)}`],
+      ["Eigenvalues", eigenvalues.join(", ")],
+      ["Trace", formatNumber(trace)],
+      ["Determinant", formatNumber(determinantValue)],
+      ["Discriminant", formatNumber(discriminant)],
+      ["Classification", classification],
+      ["State at target", formatVector(state)],
+      ["Initial state defaulted", request.initialProvided ? "no" : "yes"],
+    ],
+    table: {
+      headers: [
+        request.stateVariables[0],
+        request.stateVariables[1],
+        `${request.stateVariables[0]}'`,
+        `${request.stateVariables[1]}'`,
+      ],
+      rows: fieldRows.map((row) => row.map(formatNumber)),
+    },
   };
 }
 
@@ -15024,6 +15127,313 @@ function extractNumericalDifferentialEquation(statement) {
   };
 }
 
+function extractLinearOdeSystem(statement) {
+  const matrices = extractMatrices(statement);
+  const stateVariables = ["x", "y"];
+  if (matrices.length > 0) {
+    const matrix = matrices[0];
+    if (!is2x2Matrix(matrix)) {
+      throw new Error("Linear ODE systems currently need a 2x2 coefficient matrix.");
+    }
+    const variable = readLinearOdeIndependentVariable(statement) ?? "t";
+    const time = readLinearOdeTimeWindow(statement, variable);
+    const initial = readLinearOdeInitialState(statement, stateVariables, time.initialTime);
+    return {
+      matrix,
+      stateVariables,
+      variable,
+      initialTime: time.initialTime,
+      target: time.target,
+      initialState: initial.state,
+      initialProvided: initial.provided,
+    };
+  }
+
+  const equations = extractLinearOdeSystemEquations(statement);
+  if (equations.length !== 2) {
+    throw new Error("Linear ODE systems need two equations, such as ode system x'=y; y'=-2x-3y; x0=1 y0=0 t=1.");
+  }
+
+  const variable = equations.find((entry) => entry.independent)?.independent ?? "t";
+  if (equations.some((entry) => entry.independent && entry.independent !== variable)) {
+    throw new Error("Both ODE system equations must use the same independent variable.");
+  }
+  const variables = equations.map((entry) => entry.state);
+  if (new Set(variables).size !== 2) {
+    throw new Error("Linear ODE systems need two different state variables.");
+  }
+
+  const matrix = variables.map((state) => {
+    const entry = equations.find((candidate) => candidate.state === state);
+    return linearCoefficientsFromExpression(entry.expression, variables);
+  });
+  const time = readLinearOdeTimeWindow(statement, variable);
+  const initial = readLinearOdeInitialState(statement, variables, time.initialTime);
+
+  return {
+    matrix,
+    stateVariables: variables,
+    variable,
+    initialTime: time.initialTime,
+    target: time.target,
+    initialState: initial.state,
+    initialProvided: initial.provided,
+  };
+}
+
+function extractLinearOdeSystemEquations(statement) {
+  const derivativePattern = /(?:d\s*([A-Za-z_]\w*)\s*\/\s*d\s*([A-Za-z_]\w*)|([A-Za-z_]\w*)\s*'|([A-Za-z_]\w*)\s*prime)\s*=\s*(.+)/i;
+  return statement
+    .split(";")
+    .map((part) => part.trim())
+    .map((part) => {
+      const match = part.match(derivativePattern);
+      if (!match) return null;
+      const state = match[1] ?? match[3] ?? match[4];
+      const independent = match[2] ?? "";
+      const expression = stripLinearOdeSystemOptions(match[5], independent || "t");
+      if (!expression) {
+        throw new Error(`The equation for ${state}' needs a right-hand side.`);
+      }
+      return { state, independent, expression };
+    })
+    .filter(Boolean);
+}
+
+function stripLinearOdeSystemOptions(expression, independentVariable) {
+  const numberPattern = "[-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?";
+  const variablePattern = independentVariable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return expression
+    .replace(new RegExp(`\\bfrom\\s+(?:${variablePattern}\\s*=\\s*)?.+?\\s+to\\s+.+$`, "i"), "")
+    .replace(new RegExp(`\\b${variablePattern}\\s*=\\s*${numberPattern}`, "gi"), "")
+    .replace(new RegExp(`\\b[A-Za-z_]\\w*_?0\\s*=\\s*${numberPattern}`, "gi"), "")
+    .replace(new RegExp(`\\b(?:target|time|at|initialTime|startTime)\\s*=\\s*${numberPattern}`, "gi"), "")
+    .replace(/\b(?:initial|start|state)\s*=?\s*\[[^\]]+\]/gi, "")
+    .replace(/[,.]+$/, "")
+    .trim();
+}
+
+function linearCoefficientsFromExpression(expressionText, variables) {
+  const expression = parseMath(expressionText);
+  const zeroValues = Object.fromEntries(variables.map((variable) => [variable, 0]));
+  const constant = safeEvaluateMath(expression, zeroValues);
+  if (!Number.isFinite(constant) || Math.abs(constant) > 1e-8) {
+    throw new Error("Linear ODE system equations must be homogeneous linear combinations of the state variables.");
+  }
+
+  const coefficients = variables.map((variable) => {
+    const values = { ...zeroValues, [variable]: 1 };
+    const coefficient = safeEvaluateMath(expression, values);
+    if (!Number.isFinite(coefficient)) {
+      throw new Error(`Could not read the coefficient of ${variable}.`);
+    }
+    return normalizeNumber(coefficient);
+  });
+
+  const checks = [
+    [1, 1],
+    [2, -1],
+    [-1, 3],
+  ];
+  for (const point of checks) {
+    const values = Object.fromEntries(variables.map((variable, index) => [variable, point[index]]));
+    const observed = safeEvaluateMath(expression, values);
+    const predicted = dotProduct(coefficients, point);
+    if (!Number.isFinite(observed) || Math.abs(observed - predicted) > 1e-7) {
+      throw new Error("Linear ODE system equations must stay linear in both state variables.");
+    }
+  }
+
+  return coefficients;
+}
+
+function readLinearOdeIndependentVariable(text) {
+  const match = text.match(/d\s*[A-Za-z_]\w*\s*\/\s*d\s*([A-Za-z_]\w*)/i);
+  return match?.[1] ?? null;
+}
+
+function readLinearOdeTimeWindow(text, variable) {
+  const rangeMatch = text.match(/\bfrom\s+(?:([A-Za-z_]\w*)\s*=\s*)?(.+?)\s+to\s+(.+?)(?=\s*(?:;|\b[A-Za-z_]\w*_?0\s*=|\b(?:initial|start|state)\s*=?\s*\[|$))/i);
+  if (rangeMatch) {
+    return {
+      initialTime: evaluateBoundExpression(rangeMatch[2]),
+      target: evaluateBoundExpression(rangeMatch[3]),
+    };
+  }
+
+  const initialTime = readLinearOdeInitialTime(text, variable);
+  const namedTarget = readNamedNumber(text, [variable, "target", "time"], Number.NaN);
+  const atMatch = text.match(new RegExp(`\\bat\\s+(?:${variable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=\\s*)?([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)`, "i"));
+  const target = Number.isFinite(namedTarget)
+    ? namedTarget
+    : atMatch
+      ? Number(atMatch[1])
+      : initialTime + 1;
+
+  if (!Number.isFinite(initialTime) || !Number.isFinite(target) || nearlyEqual(initialTime, target)) {
+    throw new Error("Linear ODE systems need finite, distinct start and target times.");
+  }
+  return { initialTime, target };
+}
+
+function readLinearOdeInitialTime(text, variable) {
+  const explicit = readNamedNumber(text, ["t0", `${variable}0`, `${variable}_0`, "initialTime", "startTime"], Number.NaN);
+  if (Number.isFinite(explicit)) return explicit;
+  const conditionTime = text.match(/\b[A-Za-z_]\w*\s*\(\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s*\)\s*=/i);
+  return conditionTime ? Number(conditionTime[1]) : 0;
+}
+
+function readLinearOdeInitialState(text, variables, initialTime) {
+  const withoutMatrices = removeMatrixLiterals(text);
+  const vectors = extractVectors(withoutMatrices);
+  if (vectors.length > 0) {
+    if (vectors[0].length !== 2) {
+      throw new Error("Linear ODE system initial vectors need two entries, such as initial [1,0].");
+    }
+    return {
+      state: vectors[0].map(normalizeNumber),
+      provided: true,
+    };
+  }
+
+  const values = variables.map((variable) => readLinearOdeInitialValue(text, variable, initialTime));
+  if (values.every(Number.isFinite)) {
+    return {
+      state: values.map(normalizeNumber),
+      provided: true,
+    };
+  }
+  if (values.some(Number.isFinite)) {
+    throw new Error("Linear ODE systems need both initial state values, such as x0=1 y0=0.");
+  }
+
+  return {
+    state: [1, 0],
+    provided: false,
+  };
+}
+
+function readLinearOdeInitialValue(text, variable, initialTime) {
+  const escaped = variable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const atTimePattern = `\\b${escaped}\\s*\\(\\s*([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)`;
+  const condition = text.match(new RegExp(atTimePattern, "i"));
+  if (condition) {
+    const conditionTime = Number(condition[1]);
+    if (!nearlyEqual(conditionTime, initialTime)) {
+      throw new Error("Initial-condition times must match the system start time.");
+    }
+    return Number(condition[2]);
+  }
+  return readNamedNumber(text, [`${variable}0`, `${variable}_0`, `${variable}initial`], Number.NaN);
+}
+
+function solveLinearOdeSystemState(matrix, initialState, delta) {
+  const [[a, b], [c, d]] = matrix;
+  const halfTrace = (a + d) / 2;
+  const centered = [
+    [a - halfTrace, b],
+    [c, d - halfTrace],
+  ];
+  const gammaSquared = ((a - d) / 2) ** 2 + b * c;
+  const scale = Math.exp(halfTrace * delta);
+
+  let identityFactor;
+  let centeredFactor;
+  if (gammaSquared > EPSILON) {
+    const gamma = Math.sqrt(gammaSquared);
+    identityFactor = Math.cosh(gamma * delta);
+    centeredFactor = Math.sinh(gamma * delta) / gamma;
+  } else if (gammaSquared < -EPSILON) {
+    const omega = Math.sqrt(-gammaSquared);
+    identityFactor = Math.cos(omega * delta);
+    centeredFactor = Math.sin(omega * delta) / omega;
+  } else {
+    identityFactor = 1;
+    centeredFactor = delta;
+  }
+
+  const exponential = [
+    [
+      scale * (identityFactor + centeredFactor * centered[0][0]),
+      scale * centeredFactor * centered[0][1],
+    ],
+    [
+      scale * centeredFactor * centered[1][0],
+      scale * (identityFactor + centeredFactor * centered[1][1]),
+    ],
+  ];
+  return multiplyMatrixVector(exponential, initialState).map(normalizeNumber);
+}
+
+function classifyLinearOdeSystem(matrix) {
+  const trace = traceMatrix(matrix);
+  const determinantValue = determinant(matrix);
+  const discriminant = trace ** 2 - 4 * determinantValue;
+
+  if (determinantValue < -EPSILON) return "saddle point";
+  if (Math.abs(determinantValue) <= EPSILON) return "line of equilibria or semistable system";
+  if (discriminant < -EPSILON) {
+    if (trace < -EPSILON) return "stable spiral";
+    if (trace > EPSILON) return "unstable spiral";
+    return "center";
+  }
+  if (Math.abs(discriminant) <= EPSILON) {
+    if (trace < -EPSILON) return "stable degenerate node";
+    if (trace > EPSILON) return "unstable degenerate node";
+    return "degenerate equilibrium";
+  }
+  if (trace < -EPSILON) return "stable node";
+  if (trace > EPSILON) return "unstable node";
+  return "real-eigenvalue equilibrium";
+}
+
+function formatLinearOdeEigenvalues(matrix) {
+  const trace = traceMatrix(matrix);
+  const determinantValue = determinant(matrix);
+  const discriminant = trace ** 2 - 4 * determinantValue;
+  if (discriminant >= -EPSILON) {
+    const root = Math.sqrt(Math.max(0, discriminant));
+    return [
+      formatNumber((trace + root) / 2),
+      formatNumber((trace - root) / 2),
+    ];
+  }
+  const real = trace / 2;
+  const imaginary = Math.sqrt(-discriminant) / 2;
+  return [
+    formatComplex(complex(real, imaginary)),
+    formatComplex(complex(real, -imaginary)),
+  ];
+}
+
+function formatLinearOdeSystemEquations(request) {
+  return request.stateVariables
+    .map((variable, index) => `${variable}' = ${formatLinearExpression(request.matrix[index], request.stateVariables)}`)
+    .join("; ");
+}
+
+function samplePhasePlaneField(matrix, variables) {
+  const points = [
+    [-1, -1],
+    [0, -1],
+    [1, -1],
+    [-1, 0],
+    [1, 0],
+    [-1, 1],
+    [0, 1],
+    [1, 1],
+  ];
+  return points.map((point) => {
+    const derivative = multiplyMatrixVector(matrix, point).map(normalizeNumber);
+    return [
+      normalizeNumber(point[0]),
+      normalizeNumber(point[1]),
+      derivative[0],
+      derivative[1],
+    ];
+  });
+}
+
 function readOdeEquation(text) {
   const match = text.match(/(?:dy\s*\/\s*d[A-Za-z_]\w*|y\s*'|yprime)\s*=\s*([+-]?\s*(?:\d*\.?\d+(?:e[-+]?\d+)?)?)\s*\*?\s*y(?:\s*\^\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?))?/i);
   if (!match) {
@@ -20392,7 +20802,8 @@ function isLinearProgrammingQuestion(lower) {
 }
 
 function isDifferentialEquationQuestion(lower) {
-  return isNumericalOdeQuestion(lower) ||
+  return isLinearOdeSystemQuestion(lower) ||
+    isNumericalOdeQuestion(lower) ||
     lower.startsWith("ode ") ||
     lower.startsWith("solve ode ") ||
     lower.includes("differential equation") ||
@@ -20401,6 +20812,16 @@ function isDifferentialEquationQuestion(lower) {
     lower.includes("newton cooling") ||
     lower.includes("newton's cooling") ||
     (lower.includes("logistic") && (lower.includes("y0") || lower.includes("carrying") || lower.includes("capacity")));
+}
+
+function isLinearOdeSystemQuestion(lower) {
+  return lower.includes("phase plane") ||
+    lower.includes("direction field") ||
+    lower.includes("ode system") ||
+    lower.includes("differential equation system") ||
+    lower.includes("system of differential equations") ||
+    lower.includes("linear ode system") ||
+    ((lower.includes("x'") || lower.includes("dx/d")) && (lower.includes("y'") || lower.includes("dy/d")));
 }
 
 function isNumericalOdeQuestion(lower) {

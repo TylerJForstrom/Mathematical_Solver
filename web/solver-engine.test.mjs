@@ -83,6 +83,10 @@ runTest("input assistant suggests structured problem formats", () => {
   assert.equal(nonlinear.title, "Nonlinear system solver");
   assert.ok(nonlinear.examples[0][2].includes("guess x=3 y=2"));
 
+  const odeSystem = suggestProblemHelp("phase plane for an ode system", "ask", "Need a differential equation system.");
+  assert.equal(odeSystem.title, "Linear ODE system");
+  assert.ok(odeSystem.examples[0][2].includes("x'=y"));
+
   const arima = suggestProblemHelp("arima forecast", "statistics", "Time-series forecast needs a series.");
   assert.equal(arima.title, "ARIMA forecast");
   assert.ok(arima.examples[0][2].startsWith("arima(2,1,0)"));
@@ -1376,6 +1380,18 @@ runTest("differential equation mode runs numerical ODE methods", () => {
   assert.equal(euler.answer, "y(1) ~= 2.882813");
 });
 
+runTest("differential equation mode analyzes linear ODE systems", () => {
+  const equationInput = analyzeDifferentialEquation("ode system dx/dt = y; dy/dt = -2*x - 3*y; x0=1 y0=0 t=1");
+  const matrixInput = analyzeDifferentialEquation("phase plane [[0,1],[-2,-3]] initial [1,0] t=1");
+
+  assert.equal(equationInput.summary, "linear ODE system");
+  assert.equal(equationInput.answer, "state(1) = [0.600424, -0.465088]; stable node");
+  assert.equal(artifactValue(equationInput, "Eigenvalues"), "-1, -2");
+  assert.equal(artifactValue(equationInput, "Classification"), "stable node");
+  assert.equal(equationInput.table.headers.join(","), "x,y,x',y'");
+  assert.equal(matrixInput.answer, equationInput.answer);
+});
+
 runTest("equation mode approximates higher-degree real roots", () => {
   const result = analyzeEquation("x^3 - x - 2 = 0", "x");
 
@@ -1432,6 +1448,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("simpson integrate sin(x) from 0 to pi n=100").summary, "simpson numerical integration");
   assert.equal(analyzeUniversal("rk4 dy/dt = t + y y0=1 from t=0 to 1 h=0.25").summary, "RK4 numerical ODE");
   assert.equal(analyzeUniversal("ode dy/dt = 0.3y y0=2 t=5").summary, "exponential ODE");
+  assert.equal(analyzeUniversal("ode system dx/dt = y; dy/dt = -2*x - 3*y; x0=1 y0=0 t=1").summary, "linear ODE system");
   assert.equal(analyzeUniversal("newton cooling ambient=70 initial=100 k=0.2 t=10").summary, "Newton cooling");
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
   assert.equal(analyzeUniversal("bootstrap mean data 10, 12, 14, 16, 18 resamples=1000 seed=7 confidence=95").summary, "bootstrap confidence interval");
