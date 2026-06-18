@@ -26619,6 +26619,106 @@ function chooseVariable(variableNames, hint) {
   return variableNames[0] ?? hint;
 }
 
+// For cubics and quartics, prefer exact roots: peel off rational roots with
+// synthetic division and solve the leftover (degree <= 2) factor exactly. Returns
+// null when the residual stays cubic-or-higher so the caller can fall back to
+// numerical approximation.
+function solvePolynomialExactly(coefficients, variable, degree) {
+  let working = trimPolynomialCoefficients(coefficients.map(normalizeNumber));
+  const rationalRoots = [];
+  while (polynomialDegree(working) > 2) {
+    const root = findRationalRoot(working);
+    if (!root) {
+      return null;
+    }
+    rationalRoots.push(root);
+    working = syntheticDivide(working, root.value);
+  }
+
+  const entries = [];
+  for (const root of rationalRoots) {
+    entries.push({ text: formatNumber(root.value), key: root.value });
+  }
+
+  const residualDegree = polynomialDegree(working);
+  let residualText = "constant";
+  if (residualDegree >= 1) {
+    residualText = formatPolynomialFromCoefficients(working, variable);
+  }
+
+  if (residualDegree === 1) {
+    const b = working[0] ?? 0;
+    const a = working[1] ?? 0;
+    const rootValue = -b / a;
+    entries.push({ text: formatNumber(rootValue), key: rootValue });
+  } else if (residualDegree === 2) {
+    const integerized = integerizeCoefficients(working);
+    const quad = integerized ? integerized.coefficients : working;
+    const c = quad[0] ?? 0;
+    const b = quad[1] ?? 0;
+    const a = quad[2] ?? 0;
+    const discriminant = b * b - 4 * a * c;
+    const result = quadraticRootResult(a, b, c, discriminant);
+    if (nearlyEqual(discriminant, 0)) {
+      entries.push({ text: result.roots[0], key: -b / (2 * a) });
+    } else if (discriminant > 0) {
+      const span = Math.sqrt(discriminant);
+      entries.push({ text: result.roots[0], key: (-b + span) / (2 * a) });
+      entries.push({ text: result.roots[1], key: (-b - span) / (2 * a) });
+    } else {
+      // Complex conjugate pair: keep them last in reading order.
+      entries.push({ text: result.roots[0], key: Number.POSITIVE_INFINITY });
+      entries.push({ text: result.roots[1], key: Number.POSITIVE_INFINITY });
+    }
+  }
+
+  const seen = new Set();
+  const distinct = [];
+  for (const entry of entries.sort((left, right) => (left.key === right.key ? 0 : left.key - right.key))) {
+    if (seen.has(entry.text)) {
+      continue;
+    }
+    seen.add(entry.text);
+    distinct.push(entry);
+  }
+
+  const approximations = distinct
+    .filter((entry) => Number.isFinite(entry.key))
+    .map((entry) => formatNumber(entry.key));
+
+  return {
+    answer: distinct.map((entry) => `${variable} = ${entry.text}`).join(", "),
+    summary: "exact roots",
+    steps: [
+      {
+        title: "Detect polynomial degree",
+        expression: `degree ${degree}`,
+        detail: "The solver attempts an exact factorization before any numerical approximation.",
+      },
+      {
+        title: "Extract rational roots",
+        expression: rationalRoots.length
+          ? rationalRoots.map((root) => formatNumber(root.value)).join(", ")
+          : "none",
+        detail: "Rational-root candidates are tested and divided out with synthetic division.",
+      },
+      {
+        title: "Solve the remaining factor exactly",
+        expression: residualText,
+        detail: residualDegree === 2
+          ? "The leftover quadratic is solved with the quadratic formula for exact radical or complex roots."
+          : "After removing rational roots the leftover factor is linear or constant.",
+      },
+    ],
+    artifacts: [
+      ["Degree", String(degree)],
+      ["Rational roots", rationalRoots.length ? rationalRoots.map((root) => formatNumber(root.value)).join(", ") : "none"],
+      ["Exact roots", distinct.map((entry) => entry.text).join(", ")],
+      ...(approximations.length ? [["Numeric approximations", approximations.join(", ")]] : []),
+    ],
+  };
+}
+
 function solvePolynomial(poly, variable) {
   const coefficients = polynomialCoefficients(poly, variable);
   const degree = polynomialDegree(coefficients);
@@ -26683,6 +26783,11 @@ function solvePolynomial(poly, variable) {
         ...(result.exactRadicals ? [["Numeric approximations", result.numericRoots.join(", ")]] : []),
       ],
     };
+  }
+
+  const exact = solvePolynomialExactly(coefficients, variable, degree);
+  if (exact) {
+    return exact;
   }
 
   const numericRoots = approximateRealPolynomialRoots(coefficients);

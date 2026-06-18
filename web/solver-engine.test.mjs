@@ -1644,6 +1644,34 @@ runTest("equation mode approximates higher-degree real roots", () => {
   assert.equal(result.answer, "x ~= 1.52138");
 });
 
+runTest("equation mode solves cubics and quartics exactly when roots are nice", () => {
+  // All-rational roots come out exact and sorted, without numeric "~=".
+  const rationalCubic = analyzeEquation("x^3 - 6x^2 + 11x - 6 = 0", "x");
+  assert.equal(rationalCubic.summary, "exact roots");
+  assert.equal(rationalCubic.answer, "x = 1, x = 2, x = 3");
+
+  const quartic = analyzeEquation("x^4 - 5x^2 + 4 = 0", "x");
+  assert.equal(quartic.answer, "x = -2, x = -1, x = 1, x = 2");
+
+  // A rational root leaves a quadratic factor solved with exact radicals.
+  const radicalCubic = analyzeEquation("x^3 - 2x = 0", "x");
+  assert.equal(radicalCubic.answer, "x = -sqrt(2), x = 0, x = sqrt(2)");
+  assert.equal(artifactValue(radicalCubic, "Rational roots"), "0");
+  assert.equal(artifactValue(radicalCubic, "Numeric approximations"), "-1.414214, 0, 1.414214");
+
+  // The residual quadratic can deliver an exact complex conjugate pair.
+  const complexCubic = analyzeEquation("x^3 - 1 = 0", "x");
+  assert.equal(complexCubic.answer, "x = 1, x = -0.5 + 0.866025i, x = -0.5 - 0.866025i");
+
+  // Repeated rational roots are reported once.
+  assert.equal(analyzeEquation("x^3 - 3x + 2 = 0", "x").answer, "x = -2, x = 1");
+
+  // Irreducible cases keep the numerical fallback.
+  const irreducible = analyzeEquation("x^3 - 2 = 0", "x");
+  assert.equal(irreducible.summary, "numeric roots");
+  assert.equal(irreducible.answer, "x ~= 1.259921");
+});
+
 runTest("universal mode routes statistics questions", () => {
   const result = analyzeUniversal("what is the median of 1, 7, 9?");
 

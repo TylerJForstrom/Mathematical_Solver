@@ -31,6 +31,9 @@ The frontend currently supports:
 - One-variable polynomial inequalities with sign charts and interval notation
 - Linear and quadratic equation solving, including exact radical roots and
   complex roots
+- Exact cubic and quartic solving when rational roots peel off a linear or
+  quadratic factor, yielding exact rational, radical, or complex roots before
+  falling back to numerical approximation
 - Complex-number arithmetic and elementary complex functions through Ask mode
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations and Newton-style nonlinear systems through
@@ -236,6 +239,10 @@ The same idea works for algebra and calculus:
   and half-angle identities without changing the default simplification mode.
 - `factor x^3 - 6x^2 + 11x - 6` uses rational roots and synthetic division
   to produce `(x - 1)(x - 2)(x - 3)`.
+- `x^3 - 6x^2 + 11x - 6 = 0` solves exactly to `x = 1, x = 2, x = 3`, while
+  `x^3 - 2x = 0` peels off the rational root `0` and returns the exact radicals
+  `x = -sqrt(2), x = 0, x = sqrt(2)`. Irreducible cases such as `x^3 - 2 = 0`
+  keep the numerical approximation.
 - `10 choose 3` uses exact integer combinatorics and returns `C(10, 3) = 120`.
 - `gcd 84 126` and `lcm 36 84` run integer divisibility algorithms.
 - `prime factors of 84` returns `84 = 2^2 * 3 * 7`.
