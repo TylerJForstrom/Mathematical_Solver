@@ -31,6 +31,7 @@ import {
   analyzeStatistics,
   analyzeSystem,
   analyzeTaylor,
+  analyzeTreeExport,
   analyzeUniversal,
   analyzeVector,
   suggestProblemHelp,
@@ -144,7 +145,33 @@ runTest("logic mode builds Karnaugh maps", () => {
   assert.equal(analyzeUniversal("kmap P or Q").summary, "Karnaugh map");
 });
 
+runTest("tree export emits Graphviz DOT", () => {
+  const math = analyzeTreeExport("dot tree x^2 + 2x + 1");
+  const logic = analyzeTreeExport("graphviz tree P -> (Q or R)");
+  const mathDot = artifactValue(math, "Graphviz DOT");
+  const logicDot = artifactValue(logic, "Graphviz DOT");
+
+  assert.equal(math.summary, "Graphviz DOT tree");
+  assert.equal(math.answer, "Graphviz DOT with 9 nodes");
+  assert.equal(artifactValue(math, "Parsed as"), "math");
+  assert.equal(artifactValue(math, "Variables"), "x");
+  assert.deepEqual(math.table.rows[0], ["n0", "+", "mathBinary", "n1, n8"]);
+  assert.ok(mathDot.startsWith("digraph ExpressionTree"));
+  assert.ok(mathDot.includes("n0 [label=\"+\\nmathBinary\"]"));
+  assert.ok(math.extraTables[0].rows.some((row) => row[0] === "n0" && row[1] === "n1"));
+
+  assert.equal(logic.answer, "Graphviz DOT with 5 nodes");
+  assert.equal(artifactValue(logic, "Parsed as"), "logic");
+  assert.equal(artifactValue(logic, "Variables"), "P, Q, R");
+  assert.ok(logicDot.includes("IMPLIES\\nlogicBinary"));
+  assert.equal(analyzeUniversal("dot tree x^2 + 2x + 1").summary, "Graphviz DOT tree");
+});
+
 runTest("input assistant suggests structured problem formats", () => {
+  const treeHelp = suggestProblemHelp("export expression tree", "ask", "Need an expression.");
+  assert.equal(treeHelp.title, "Graphviz tree export");
+  assert.equal(treeHelp.examples[0][2], "dot tree x^2 + 2x + 1");
+
   const kmapHelp = suggestProblemHelp("karnaugh map", "ask", "Need a Boolean statement.");
   assert.equal(kmapHelp.title, "Karnaugh map");
   assert.equal(kmapHelp.examples[0][2], "kmap P or Q");

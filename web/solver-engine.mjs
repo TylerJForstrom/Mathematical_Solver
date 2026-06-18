@@ -42,6 +42,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
 
   const suggestions = [
     {
+      title: "Graphviz tree export",
+      when: () => activeMode === "ask" && /\b(?:graphviz|dot tree|tree dot|export tree|expression tree)\b/.test(lower),
+      reason: "I detected an expression-tree export request.",
+      needs: [
+        "A math expression, equation, or propositional statement",
+        "Use dot tree or Graphviz tree to export the parsed tree",
+      ],
+      examples: [
+        ["Math tree", "ask", "dot tree x^2 + 2x + 1"],
+        ["Logic tree", "ask", "graphviz tree P -> (Q or R)"],
+      ],
+    },
+    {
       title: "Karnaugh map",
       when: () => activeMode === "ask" && /\b(?:karnaugh|k-map|kmap|boolean map)\b/.test(lower),
       reason: "I detected a Karnaugh-map simplification request.",
@@ -774,6 +787,71 @@ export function analyzeLogicKarnaughMap(statement) {
       ["Prime groups found", formatNumber(map.primeGroups.length)],
       ["Selected groups", selectedGroupText],
       ["Simplified SOP", simplified],
+    ],
+  };
+}
+
+export function analyzeTreeExport(statement) {
+  const request = extractTreeExportQuestion(statement);
+  const parsed = parseTreeExportExpression(request.expression);
+  const dot = treeToGraphvizDot(parsed.tree, parsed.type);
+  const metrics = treeMetrics(parsed.tree);
+  const nodeRows = dot.nodes.map((node) => [
+    node.id,
+    node.label,
+    node.kind,
+    node.children.join(", ") || "none",
+  ]);
+  const edgeRows = dot.edges.map((edge) => [
+    edge.from,
+    edge.to,
+    edge.label,
+  ]);
+  const displayExpression = parsed.type === "logic"
+    ? logicToString(parsed.tree)
+    : formatMath(parsed.tree);
+
+  return {
+    mode: "tree",
+    tree: parsed.tree,
+    answer: `Graphviz DOT with ${formatNumber(metrics.nodes)} nodes`,
+    summary: "Graphviz DOT tree",
+    details: `${parsed.type === "logic" ? "Logic" : "Math"} expression-tree export`,
+    variables: parsed.variables,
+    metrics,
+    steps: [
+      {
+        title: "Parse expression",
+        expression: displayExpression,
+        detail: `The input is parsed as a ${parsed.type} expression tree.`,
+      },
+      {
+        title: "Assign DOT node ids",
+        expression: `${formatNumber(dot.nodes.length)} nodes; ${formatNumber(dot.edges.length)} edges`,
+        detail: "Each tree node receives a stable preorder id so Graphviz can render the parent-child structure.",
+      },
+      {
+        title: "Emit Graphviz DOT",
+        expression: "digraph ExpressionTree",
+        detail: "The DOT artifact can be pasted into Graphviz tools to render a standalone parse-tree diagram.",
+      },
+    ],
+    table: {
+      headers: ["Node", "Label", "Kind", "Children"],
+      rows: nodeRows,
+    },
+    extraTables: [{
+      title: "DOT edges",
+      headers: ["From", "To", "Child"],
+      rows: edgeRows.length ? edgeRows : [["none", "none", "none"]],
+    }],
+    artifacts: [
+      ["Input", request.expression],
+      ["Parsed as", parsed.type],
+      ["Variables", parsed.variables.join(", ") || "none"],
+      ["DOT nodes", formatNumber(dot.nodes.length)],
+      ["DOT edges", formatNumber(dot.edges.length)],
+      ["Graphviz DOT", dot.text],
     ],
   };
 }
@@ -2020,6 +2098,9 @@ export function analyzeUniversal(question, values = {}) {
   if (isMarkovQuestion(lower)) {
     routed = analyzeMarkovChain(question);
     routedLabel = "Markov chain";
+  } else if (isTreeExportQuestion(lower)) {
+    routed = analyzeTreeExport(question);
+    routedLabel = "Graphviz tree export";
   } else if (isLogicKarnaughMapQuestion(lower)) {
     routed = analyzeLogicKarnaughMap(question);
     routedLabel = "Karnaugh map";
@@ -25286,6 +25367,16 @@ function isRepeatedMeasuresAnovaQuestion(lower) {
   ) && (lower.includes("anova") || lower.includes("analysis of variance"));
 }
 
+function isTreeExportQuestion(lower) {
+  return lower.startsWith("dot tree ") ||
+    lower.startsWith("tree dot ") ||
+    lower.startsWith("graphviz tree ") ||
+    lower.startsWith("export tree ") ||
+    lower.startsWith("export expression tree ") ||
+    /\b(?:graphviz|dot)\s+(?:parse\s+)?tree\b/.test(lower) ||
+    /\b(?:parse|expression)\s+tree\s+(?:dot|graphviz|export)\b/.test(lower);
+}
+
 function isLogicQuestion(question) {
   return /\b(and|or|not|xor|implies|iff)\b|->|<->|=>|&&|\|\|/i.test(question);
 }
@@ -25678,6 +25769,25 @@ function extractLogicKarnaughMapQuestion(question) {
 
   if (!expression) {
     throw new Error("Karnaugh-map mode needs a Boolean statement, such as kmap P or Q.");
+  }
+  return { expression };
+}
+
+function extractTreeExportQuestion(question) {
+  const expression = question
+    .replace(/[?!.]+$/, "")
+    .replace(/^(?:show|make|build|create|draw|generate|export)\s+(?:a\s+)?/i, "")
+    .replace(/^(?:graphviz\s+)?(?:parse\s+)?tree\s*:?\s*/i, "")
+    .replace(/^(?:dot\s+tree|tree\s+dot|expression\s+tree|parse\s+tree)\s*:?\s*/i, "")
+    .replace(/\b(?:as|to|into|in)\s+(?:graphviz\s+)?dot\b/gi, " ")
+    .replace(/\b(?:graphviz|dot)\s+(?:parse\s+)?tree\b/gi, " ")
+    .replace(/\b(?:parse|expression)\s+tree\s+(?:graphviz|dot|export)\b/gi, " ")
+    .replace(/^\s*(?:of|for)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!expression) {
+    throw new Error("Tree export needs a math or logic expression, such as dot tree x^2 + 2x + 1.");
   }
   return { expression };
 }
@@ -27127,6 +27237,86 @@ function formatKarnaughMinterms(minterms, separator) {
 
 function formatKarnaughCell(cell) {
   return cell.value ? `1 m${cell.minterm}` : "0";
+}
+
+function parseTreeExportExpression(expression) {
+  if (isLogicQuestion(expression)) {
+    const tree = parseLogic(expression);
+    return {
+      type: "logic",
+      tree,
+      variables: logicVariables(tree),
+    };
+  }
+
+  const tree = parseMath(expression);
+  return {
+    type: "math",
+    tree,
+    variables: mathVariables(tree),
+  };
+}
+
+function treeToGraphvizDot(root, graphLabel = "Expression Tree") {
+  const nodes = [];
+  const edges = [];
+
+  function visit(node) {
+    const id = `n${nodes.length}`;
+    const children = nodeChildren(node);
+    const row = {
+      id,
+      label: nodeLabel(node),
+      kind: node.kind,
+      children: [],
+    };
+    nodes.push(row);
+
+    children.forEach((child, index) => {
+      const childId = visit(child);
+      row.children.push(childId);
+      edges.push({
+        from: id,
+        to: childId,
+        label: String(index + 1),
+      });
+    });
+    return id;
+  }
+
+  visit(root);
+  const title = graphLabel === "logic"
+    ? "Logic Expression Tree"
+    : graphLabel === "math"
+      ? "Math Expression Tree"
+      : graphLabel;
+  const lines = [
+    "digraph ExpressionTree {",
+    `  graph [rankdir=TB, labelloc="t", label="${escapeDotLabel(title)}"];`,
+    "  node [shape=box, style=\"rounded,filled\", fillcolor=\"#f8fafc\", fontname=\"Inter\"];",
+    "  edge [fontname=\"Inter\"];",
+  ];
+  for (const node of nodes) {
+    lines.push(`  ${node.id} [label="${escapeDotLabel(node.label)}\\n${escapeDotLabel(node.kind)}"];`);
+  }
+  for (const edge of edges) {
+    lines.push(`  ${edge.from} -> ${edge.to} [label="${escapeDotLabel(edge.label)}"];`);
+  }
+  lines.push("}");
+
+  return {
+    nodes,
+    edges,
+    text: lines.join("\n"),
+    label: graphLabel,
+  };
+}
+
+function escapeDotLabel(value) {
+  return String(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, "\\\"")
+    .replace(/\r?\n/g, "\\n");
 }
 
 function eliminateLogicDerivedOperators(node) {
