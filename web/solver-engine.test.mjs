@@ -58,6 +58,12 @@ runTest("logic mode simplifies Boolean algebra", () => {
   assert.equal(analyzeLogicSimplification("P and (not P)").answer, "false");
   assert.equal(analyzeLogicSimplification("P -> false").answer, "not P");
   assert.equal(analyzeLogicSimplification("P xor P").answer, "false");
+  assert.equal(analyzeLogicSimplification("P or (P and Q)").answer, "P");
+  assert.equal(analyzeLogicSimplification("P and (P or Q)").answer, "P");
+  assert.equal(analyzeLogicSimplification("(P and Q) or (P and not Q)").answer, "P");
+  assert.equal(analyzeLogicSimplification("(P and Q) or (P and Q and R)").answer, "P and Q");
+  assert.equal(analyzeLogicSimplification("(P and Q) or (not P and R) or (Q and R)").answer, "P and Q or not P and R");
+  assert.equal(analyzeLogicSimplification("(P or Q) and (P or not Q)").answer, "P");
   assert.equal(analyzeUniversal("simplify logic not (P and Q)").answer, "not P or not Q");
 });
 

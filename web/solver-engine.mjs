@@ -21411,6 +21411,10 @@ function simplifyLogicAnd(left, right, steps) {
   if (isLogicConstant(left, false) || isLogicConstant(right, false)) return logicConstant(false);
   if (isLogicConstant(left, true)) return right;
   if (isLogicConstant(right, true)) return left;
+  const absorption = simplifyLogicAbsorption(left, right, "and", steps);
+  if (absorption) return absorption;
+  const complementaryPair = simplifyLogicComplementaryPair(left, right, "and", steps);
+  if (complementaryPair) return complementaryPair;
   return logicBinary("and", left, right);
 }
 
@@ -21434,6 +21438,12 @@ function simplifyLogicOr(left, right, steps) {
   if (isLogicConstant(left, true) || isLogicConstant(right, true)) return logicConstant(true);
   if (isLogicConstant(left, false)) return right;
   if (isLogicConstant(right, false)) return left;
+  const absorption = simplifyLogicAbsorption(left, right, "or", steps);
+  if (absorption) return absorption;
+  const complementaryPair = simplifyLogicComplementaryPair(left, right, "or", steps);
+  if (complementaryPair) return complementaryPair;
+  const consensus = simplifyLogicConsensus(left, right, steps);
+  if (consensus) return consensus;
   return logicBinary("or", left, right);
 }
 
@@ -21474,6 +21484,149 @@ function isLogicConstant(node, value) {
 function isLogicNegationOf(left, right) {
   return (left.kind === "logicNot" && sameLogicTree(left.operand, right)) ||
     (right.kind === "logicNot" && sameLogicTree(right.operand, left));
+}
+
+function simplifyLogicAbsorption(left, right, operator, steps) {
+  const innerOperator = operator === "and" ? "or" : "and";
+  const leftAbsorbs = logicTermIncludes(right, left, innerOperator);
+  if (leftAbsorbs) {
+    steps.push({
+      title: "Apply absorption law",
+      expression: `${logicToString(left)} ${operator} ${logicToString(right)} = ${logicToString(left)}`,
+      detail: "A term absorbs a larger clause that already contains that term.",
+    });
+    return left;
+  }
+
+  const rightAbsorbs = logicTermIncludes(left, right, innerOperator);
+  if (rightAbsorbs) {
+    steps.push({
+      title: "Apply absorption law",
+      expression: `${logicToString(left)} ${operator} ${logicToString(right)} = ${logicToString(right)}`,
+      detail: "A term absorbs a larger clause that already contains that term.",
+    });
+    return right;
+  }
+
+  return null;
+}
+
+function simplifyLogicComplementaryPair(left, right, operator, steps) {
+  const innerOperator = operator === "and" ? "or" : "and";
+  const leftParts = flattenLogicOperator(left, innerOperator);
+  const rightParts = flattenLogicOperator(right, innerOperator);
+  let complementaryPair = null;
+  for (const leftPart of leftParts) {
+    const rightPart = rightParts.find((part) => isLogicNegationOf(leftPart, part));
+    if (rightPart) {
+      complementaryPair = { leftPart, rightPart };
+      break;
+    }
+  }
+  if (!complementaryPair) {
+    return null;
+  }
+
+  const shared = leftParts.filter((leftPart) =>
+    rightParts.some((rightPart) => sameLogicTree(leftPart, rightPart)),
+  );
+  if (shared.length === 0) {
+    return null;
+  }
+
+  const reduced = logicTreeFromTerms(shared, innerOperator);
+  steps.push({
+    title: "Apply complementary-pair reduction",
+    expression: `${logicToString(left)} ${operator} ${logicToString(right)} = ${logicToString(reduced)}`,
+    detail: "Two clauses that differ only by a complemented term reduce to their shared part.",
+  });
+  return reduced;
+}
+
+function simplifyLogicConsensus(left, right, steps) {
+  const terms = flattenLogicOperator(logicBinary("or", left, right), "or");
+  if (terms.length < 3) {
+    return null;
+  }
+
+  for (let firstIndex = 0; firstIndex < terms.length; firstIndex += 1) {
+    for (let secondIndex = firstIndex + 1; secondIndex < terms.length; secondIndex += 1) {
+      const consensus = consensusTerm(terms[firstIndex], terms[secondIndex]);
+      if (!consensus) {
+        continue;
+      }
+      const consensusIndex = terms.findIndex((term, index) =>
+        index !== firstIndex &&
+        index !== secondIndex &&
+        sameLogicTree(term, consensus),
+      );
+      if (consensusIndex === -1) {
+        continue;
+      }
+
+      const reducedTerms = terms.filter((_, index) => index !== consensusIndex);
+      const reduced = logicTreeFromTerms(reducedTerms, "or");
+      steps.push({
+        title: "Apply consensus theorem",
+        expression: `${logicToString(logicTreeFromTerms(terms, "or"))} = ${logicToString(reduced)}`,
+        detail: "The consensus term is redundant when both complementary product terms are present.",
+      });
+      return reduced;
+    }
+  }
+
+  return null;
+}
+
+function consensusTerm(left, right) {
+  const leftFactors = flattenLogicOperator(left, "and");
+  const rightFactors = flattenLogicOperator(right, "and");
+  if (leftFactors.length < 2 || rightFactors.length < 2) {
+    return null;
+  }
+
+  for (const leftFactor of leftFactors) {
+    for (const rightFactor of rightFactors) {
+      if (!isLogicNegationOf(leftFactor, rightFactor)) {
+        continue;
+      }
+      const remainingLeft = leftFactors.filter((factor) => factor !== leftFactor);
+      const remainingRight = rightFactors.filter((factor) => factor !== rightFactor);
+      const consensusFactors = [];
+      for (const factor of [...remainingLeft, ...remainingRight]) {
+        if (consensusFactors.every((existing) => !sameLogicTree(existing, factor))) {
+          consensusFactors.push(factor);
+        }
+      }
+      return logicTreeFromTerms(consensusFactors, "and");
+    }
+  }
+  return null;
+}
+
+function logicTermIncludes(container, contained, operator) {
+  const containerParts = flattenLogicOperator(container, operator);
+  const containedParts = flattenLogicOperator(contained, operator);
+  return containedParts.every((part) =>
+    containerParts.some((candidate) => sameLogicTree(candidate, part)),
+  );
+}
+
+function flattenLogicOperator(node, operator) {
+  if (node.kind === "logicBinary" && node.operator === operator) {
+    return [
+      ...flattenLogicOperator(node.left, operator),
+      ...flattenLogicOperator(node.right, operator),
+    ];
+  }
+  return [node];
+}
+
+function logicTreeFromTerms(terms, operator) {
+  if (terms.length === 0) {
+    return logicConstant(operator === "and");
+  }
+  return terms.reduce((tree, term) => tree ? logicBinary(operator, tree, term) : term, null);
 }
 
 function sameLogicTree(left, right) {
