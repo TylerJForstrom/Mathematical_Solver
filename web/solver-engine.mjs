@@ -42,6 +42,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
 
   const suggestions = [
     {
+      title: "Karnaugh map",
+      when: () => activeMode === "ask" && /\b(?:karnaugh|k-map|kmap|boolean map)\b/.test(lower),
+      reason: "I detected a Karnaugh-map simplification request.",
+      needs: [
+        "A Boolean statement with two to four variables",
+        "Use kmap or Karnaugh map to request Gray-code map grouping",
+      ],
+      examples: [
+        ["Two variables", "ask", "kmap P or Q"],
+        ["Three variables", "ask", "kmap (P and Q) or (P and R)"],
+      ],
+    },
+    {
       title: "Semantic tableau",
       when: () => activeMode === "ask" && /\b(?:semantic tableaux?|tableaux?|truth tree|valid|tautology|countermodel)\b/.test(lower),
       reason: "I detected a proof-tree logic question.",
@@ -683,6 +696,84 @@ export function analyzeLogicTableau(statement) {
       ["Open branches", formatNumber(result.openBranches)],
       ["Model or countermodel", modelText],
       ["Expansions", formatNumber(result.expansions)],
+    ],
+  };
+}
+
+export function analyzeLogicKarnaughMap(statement) {
+  const request = extractLogicKarnaughMapQuestion(statement);
+  const tree = parseLogic(request.expression);
+  const variables = logicVariables(tree);
+  if (variables.length < 2 || variables.length > 4) {
+    throw new Error("Karnaugh maps need two to four Boolean variables.");
+  }
+
+  const map = buildKarnaughMap(tree, variables);
+  const groups = selectKarnaughGroups(map.primeGroups, map.minterms, variables);
+  const simplified = formatKarnaughSimplified(groups, map.minterms, variables);
+  const selectedGroupText = groups.length
+    ? groups.map((group) => formatKarnaughGroup(group, variables)).join("; ")
+    : "none";
+  const steps = [
+    {
+      title: "Parse logic statement",
+      expression: logicToString(tree),
+      detail: "The statement becomes a propositional expression tree.",
+    },
+    {
+      title: "Arrange Gray-code axes",
+      expression: `${map.rowVariables.join(", ")} rows; ${map.columnVariables.join(", ")} columns`,
+      detail: "Adjacent Karnaugh-map cells differ in exactly one variable, including wraparound edges.",
+    },
+    {
+      title: "Mark true minterms",
+      expression: formatKarnaughMinterms(map.minterms, ", "),
+      detail: "Each 1-cell is labeled by its binary minterm index using the sorted variable order.",
+    },
+    {
+      title: "Select power-of-two groups",
+      expression: selectedGroupText,
+      detail: "The solver chooses wraparound groups containing only 1-cells, then derives the variables that stay constant in each group.",
+    },
+  ];
+
+  return {
+    mode: "logic",
+    tree,
+    answer: `simplified SOP: ${simplified}`,
+    summary: "Karnaugh map",
+    details: "Gray-code Karnaugh-map simplification",
+    variables,
+    metrics: treeMetrics(tree),
+    steps,
+    table: {
+      headers: [`${map.rowVariables.join("")}\\${map.columnVariables.join("")}`, ...map.columnLabels],
+      rows: map.rows.map((row) => [
+        row.label,
+        ...row.cells.map(formatKarnaughCell),
+      ]),
+    },
+    extraTables: [{
+      title: "Karnaugh groups",
+      headers: ["Group", "Cells", "Term", "Size"],
+      rows: groups.length
+        ? groups.map((group, index) => [
+            String(index + 1),
+            formatKarnaughMinterms(group.minterms, ","),
+            karnaughGroupTerm(group, variables),
+            formatNumber(group.size),
+          ])
+        : [["1", "none", "false", "0"]],
+    }],
+    artifacts: [
+      ["Original", logicToString(tree)],
+      ["Variables", variables.join(", ")],
+      ["Row variables", map.rowVariables.join(", ")],
+      ["Column variables", map.columnVariables.join(", ")],
+      ["Minterms", formatKarnaughMinterms(map.minterms, ", ")],
+      ["Prime groups found", formatNumber(map.primeGroups.length)],
+      ["Selected groups", selectedGroupText],
+      ["Simplified SOP", simplified],
     ],
   };
 }
@@ -1929,6 +2020,9 @@ export function analyzeUniversal(question, values = {}) {
   if (isMarkovQuestion(lower)) {
     routed = analyzeMarkovChain(question);
     routedLabel = "Markov chain";
+  } else if (isLogicKarnaughMapQuestion(lower)) {
+    routed = analyzeLogicKarnaughMap(question);
+    routedLabel = "Karnaugh map";
   } else if (isLogicTableauQuestion(lower)) {
     routed = analyzeLogicTableau(question);
     routedLabel = "Semantic tableau";
@@ -25218,6 +25312,13 @@ function isLogicNormalFormQuestion(lower) {
     lower.startsWith("normal forms ");
 }
 
+function isLogicKarnaughMapQuestion(lower) {
+  return lower.startsWith("kmap ") ||
+    lower.startsWith("k-map ") ||
+    lower.startsWith("karnaugh ") ||
+    /\b(?:karnaugh map|k-map|kmap|boolean map)\b/.test(lower);
+}
+
 function isLogicTableauQuestion(lower) {
   return lower.startsWith("tableau ") ||
     lower.startsWith("tableaux ") ||
@@ -25561,6 +25662,24 @@ function extractLogicTableauQuestion(question) {
     throw new Error("Tableau mode needs a logic statement, such as tableau P -> P.");
   }
   return { goal, expression };
+}
+
+function extractLogicKarnaughMapQuestion(question) {
+  const expression = question
+    .replace(/[?!.]+$/, "")
+    .replace(/^(?:make|build|draw|create|show|solve|simplify|minimize)\s+(?:a\s+)?/i, "")
+    .replace(/^(?:karnaugh\s+map|k-map|kmap|boolean\s+map)\s*:?\s*/i, "")
+    .replace(/\b(?:using|with|via)\s+(?:a\s+)?(?:karnaugh\s+map|k-map|kmap)\b/gi, " ")
+    .replace(/\b(?:karnaugh\s+map|k-map|kmap|boolean\s+map)\b/gi, " ")
+    .replace(/\b(?:logic|boolean|propositional|expression|statement)\b/gi, " ")
+    .replace(/^\s*(?:of|for)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!expression) {
+    throw new Error("Karnaugh-map mode needs a Boolean statement, such as kmap P or Q.");
+  }
+  return { expression };
 }
 
 function readLogicNormalFormTarget(question) {
@@ -26770,6 +26889,244 @@ function addTableauTrace(trace, branchId, rule, result) {
     return;
   }
   trace.push({ branchId, rule, result });
+}
+
+function buildKarnaughMap(tree, variables) {
+  const rowCount = Math.floor(variables.length / 2);
+  const rowVariables = variables.slice(0, rowCount);
+  const columnVariables = variables.slice(rowCount);
+  const rowCodes = grayCodes(rowVariables.length);
+  const columnCodes = grayCodes(columnVariables.length);
+  const rows = rowCodes.map((rowCode) => ({
+    code: rowCode,
+    label: formatKarnaughAxis(rowVariables, rowCode),
+    cells: columnCodes.map((columnCode) => {
+      const assignment = assignmentFromKarnaughCodes(rowVariables, rowCode, columnVariables, columnCode);
+      const value = evaluateLogic(tree, assignment);
+      return {
+        assignment,
+        value,
+        minterm: karnaughMintermIndex(assignment, variables),
+      };
+    }),
+  }));
+  const minterms = rows
+    .flatMap((row) => row.cells)
+    .filter((cell) => cell.value)
+    .map((cell) => cell.minterm)
+    .sort((left, right) => left - right);
+  const primeGroups = findKarnaughPrimeGroups(rows);
+
+  return {
+    rowVariables,
+    columnVariables,
+    rowLabels: rows.map((row) => row.label),
+    columnLabels: columnCodes.map((code) => formatKarnaughAxis(columnVariables, code)),
+    rows,
+    minterms,
+    primeGroups,
+  };
+}
+
+function grayCodes(bits) {
+  const count = 2 ** bits;
+  const codes = [];
+  for (let value = 0; value < count; value += 1) {
+    const gray = value ^ (value >> 1);
+    codes.push(gray.toString(2).padStart(bits, "0"));
+  }
+  return codes;
+}
+
+function assignmentFromKarnaughCodes(rowVariables, rowCode, columnVariables, columnCode) {
+  const assignment = {};
+  rowVariables.forEach((name, index) => {
+    assignment[name] = rowCode[index] === "1";
+  });
+  columnVariables.forEach((name, index) => {
+    assignment[name] = columnCode[index] === "1";
+  });
+  return assignment;
+}
+
+function formatKarnaughAxis(variables, code) {
+  return variables.map((name, index) => `${name}=${code[index]}`).join(", ");
+}
+
+function karnaughMintermIndex(assignment, variables) {
+  return variables.reduce((index, name) => index * 2 + (assignment[name] ? 1 : 0), 0);
+}
+
+function findKarnaughPrimeGroups(rows) {
+  const rowTotal = rows.length;
+  const columnTotal = rows[0]?.cells.length ?? 0;
+  const trueCells = rows.flatMap((row) => row.cells).filter((cell) => cell.value);
+  if (trueCells.length === 0) {
+    return [];
+  }
+
+  const rowSizes = powersOfTwoUpTo(rowTotal);
+  const columnSizes = powersOfTwoUpTo(columnTotal);
+  const groupsByKey = new Map();
+
+  for (const height of rowSizes) {
+    for (const width of columnSizes) {
+      for (let rowStart = 0; rowStart < rowTotal; rowStart += 1) {
+        for (let columnStart = 0; columnStart < columnTotal; columnStart += 1) {
+          const cells = [];
+          const seenCells = new Set();
+          for (let rowOffset = 0; rowOffset < height; rowOffset += 1) {
+            for (let columnOffset = 0; columnOffset < width; columnOffset += 1) {
+              const rowIndex = (rowStart + rowOffset) % rowTotal;
+              const columnIndex = (columnStart + columnOffset) % columnTotal;
+              const key = `${rowIndex},${columnIndex}`;
+              if (seenCells.has(key)) continue;
+              seenCells.add(key);
+              cells.push(rows[rowIndex].cells[columnIndex]);
+            }
+          }
+          if (cells.length !== height * width || cells.some((cell) => !cell.value)) {
+            continue;
+          }
+          const minterms = cells.map((cell) => cell.minterm).sort((left, right) => left - right);
+          const key = minterms.join(",");
+          groupsByKey.set(key, {
+            cells: cells.slice().sort((left, right) => left.minterm - right.minterm),
+            minterms,
+            size: cells.length,
+          });
+        }
+      }
+    }
+  }
+
+  const groups = [...groupsByKey.values()];
+  return groups
+    .filter((group) => !groups.some((other) =>
+      other !== group &&
+      other.size > group.size &&
+      isKarnaughGroupSubset(group, other),
+    ))
+    .sort(compareKarnaughGroups);
+}
+
+function powersOfTwoUpTo(limit) {
+  const sizes = [];
+  for (let value = 1; value <= limit; value *= 2) {
+    sizes.push(value);
+  }
+  return sizes;
+}
+
+function isKarnaughGroupSubset(left, right) {
+  const rightMinterms = new Set(right.minterms);
+  return left.minterms.every((minterm) => rightMinterms.has(minterm));
+}
+
+function selectKarnaughGroups(groups, minterms, variables) {
+  if (minterms.length === 0) {
+    return [];
+  }
+  const selected = [];
+  const covered = new Set();
+  const byMinterm = new Map(minterms.map((minterm) => [minterm, []]));
+  for (const group of groups) {
+    for (const minterm of group.minterms) {
+      if (byMinterm.has(minterm)) {
+        byMinterm.get(minterm).push(group);
+      }
+    }
+  }
+
+  for (const minterm of minterms) {
+    const candidates = byMinterm.get(minterm) ?? [];
+    if (candidates.length === 1) {
+      addSelectedKarnaughGroup(selected, covered, candidates[0]);
+    }
+  }
+
+  while (minterms.some((minterm) => !covered.has(minterm))) {
+    const best = groups
+      .filter((group) => group.minterms.some((minterm) => !covered.has(minterm)))
+      .sort((left, right) => compareKarnaughCoverChoice(left, right, covered, variables))[0];
+    if (!best) {
+      break;
+    }
+    addSelectedKarnaughGroup(selected, covered, best);
+  }
+
+  return selected.sort((left, right) =>
+    karnaughGroupTerm(left, variables).localeCompare(karnaughGroupTerm(right, variables)) ||
+    compareKarnaughGroups(left, right),
+  );
+}
+
+function addSelectedKarnaughGroup(selected, covered, group) {
+  if (!selected.includes(group)) {
+    selected.push(group);
+  }
+  for (const minterm of group.minterms) {
+    covered.add(minterm);
+  }
+}
+
+function compareKarnaughCoverChoice(left, right, covered, variables) {
+  const leftNew = left.minterms.filter((minterm) => !covered.has(minterm)).length;
+  const rightNew = right.minterms.filter((minterm) => !covered.has(minterm)).length;
+  if (leftNew !== rightNew) return rightNew - leftNew;
+  if (left.size !== right.size) return right.size - left.size;
+  const leftLiteralCount = karnaughGroupTermLiteralCount(left, variables);
+  const rightLiteralCount = karnaughGroupTermLiteralCount(right, variables);
+  if (leftLiteralCount !== rightLiteralCount) return leftLiteralCount - rightLiteralCount;
+  return compareKarnaughGroups(left, right);
+}
+
+function compareKarnaughGroups(left, right) {
+  if (left.size !== right.size) return right.size - left.size;
+  return left.minterms.join(",").localeCompare(right.minterms.join(","));
+}
+
+function karnaughGroupTerm(group, variables) {
+  const pieces = [];
+  for (const name of variables) {
+    const values = new Set(group.cells.map((cell) => cell.assignment[name]));
+    if (values.size === 1) {
+      pieces.push(values.has(true) ? name : `not ${name}`);
+    }
+  }
+  return pieces.length ? pieces.join(" and ") : "true";
+}
+
+function karnaughGroupTermLiteralCount(group, variables) {
+  const term = karnaughGroupTerm(group, variables);
+  if (term === "true") return 0;
+  return term.split(" and ").length;
+}
+
+function formatKarnaughSimplified(groups, minterms, variables) {
+  if (minterms.length === 0) {
+    return "false";
+  }
+  if (minterms.length === 2 ** variables.length) {
+    return "true";
+  }
+  const terms = groups.map((group) => karnaughGroupTerm(group, variables));
+  if (terms.includes("true")) {
+    return "true";
+  }
+  return terms.join(" or ") || "false";
+}
+
+function formatKarnaughGroup(group, variables) {
+  return `${formatKarnaughMinterms(group.minterms, ",")} -> ${karnaughGroupTerm(group, variables)}`;
+}
+
+function formatKarnaughMinterms(minterms, separator) {
+  return minterms.length ? minterms.map((minterm) => `m${minterm}`).join(separator) : "none";
+}
+
+function formatKarnaughCell(cell) {
+  return cell.value ? `1 m${cell.minterm}` : "0";
 }
 
 function eliminateLogicDerivedOperators(node) {

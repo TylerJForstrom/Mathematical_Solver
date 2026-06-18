@@ -15,6 +15,7 @@ import {
   analyzeLaplaceTransform,
   analyzeLimit,
   analyzeLogic,
+  analyzeLogicKarnaughMap,
   analyzeLogicNormalForm,
   analyzeLogicSat,
   analyzeLogicSimplification,
@@ -125,7 +126,29 @@ runTest("logic mode proves statements with semantic tableaux", () => {
   assert.equal(analyzeUniversal("tableau P -> P").summary, "tableau valid");
 });
 
+runTest("logic mode builds Karnaugh maps", () => {
+  const twoVariable = analyzeLogicKarnaughMap("kmap P or Q");
+  const threeVariable = analyzeLogicKarnaughMap("kmap (P and Q) or (P and R)");
+
+  assert.equal(twoVariable.summary, "Karnaugh map");
+  assert.equal(twoVariable.answer, "simplified SOP: P or Q");
+  assert.deepEqual(twoVariable.table.headers, ["P\\Q", "Q=0", "Q=1"]);
+  assert.deepEqual(twoVariable.table.rows, [["P=0", "0", "1 m1"], ["P=1", "1 m2", "1 m3"]]);
+  assert.equal(artifactValue(twoVariable, "Minterms"), "m1, m2, m3");
+  assert.equal(artifactValue(twoVariable, "Selected groups"), "m2,m3 -> P; m1,m3 -> Q");
+  assert.equal(twoVariable.extraTables[0].rows.length, 2);
+
+  assert.equal(threeVariable.answer, "simplified SOP: P and Q or P and R");
+  assert.equal(artifactValue(threeVariable, "Minterms"), "m5, m6, m7");
+  assert.equal(artifactValue(threeVariable, "Selected groups"), "m6,m7 -> P and Q; m5,m7 -> P and R");
+  assert.equal(analyzeUniversal("kmap P or Q").summary, "Karnaugh map");
+});
+
 runTest("input assistant suggests structured problem formats", () => {
+  const kmapHelp = suggestProblemHelp("karnaugh map", "ask", "Need a Boolean statement.");
+  assert.equal(kmapHelp.title, "Karnaugh map");
+  assert.equal(kmapHelp.examples[0][2], "kmap P or Q");
+
   const tableauHelp = suggestProblemHelp("truth tree valid?", "ask", "Need a logic statement.");
   assert.equal(tableauHelp.title, "Semantic tableau");
   assert.equal(tableauHelp.examples[0][2], "tableau P -> P");
