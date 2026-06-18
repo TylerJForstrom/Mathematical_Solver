@@ -501,13 +501,16 @@ runTest("statistics mode compares logistic growth nonlinear models", () => {
 });
 
 runTest("statistics mode fits custom nonlinear regression formulas", () => {
-  const result = analyzeStatistics("custom nonlinear regression formula=a*exp(b*x); x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5; bounds a=0:10,b=0:2; predict x=6");
+  const result = analyzeStatistics("custom nonlinear regression formula=a*exp(b*x); x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5; bounds a=0:10,b=0:2; multistart=3; predict x=6");
 
   assert.equal(result.summary, "custom nonlinear regression");
   assert.equal(result.answer, "y = a*exp(b*x); a=1, b=0.693147; prediction = 64");
   assert.equal(artifactValue(result, "a bounds"), "[0, 10]");
   assert.equal(artifactValue(result, "b bounds"), "[0, 2]");
   assert.equal(artifactValue(result, "Converged"), "yes");
+  assert.equal(artifactValue(result, "Start count"), "3");
+  assert.equal(artifactValue(result, "Best start"), "2");
+  assert.equal(artifactValue(result, "Trace rows"), "12");
   assert.equal(artifactValue(result, "Degrees freedom"), "3");
   assert.equal(artifactValue(result, "R squared"), "1");
   assert.equal(artifactValue(result, "b estimate"), "0.693147");
@@ -515,6 +518,10 @@ runTest("statistics mode fits custom nonlinear regression formulas", () => {
   assert.equal(artifactValue(result, "Predicted y"), "64");
   assert.equal(artifactValue(result, "95% prediction interval"), "[64, 64]");
   assert.deepEqual(result.table.rows[2], ["3", "3", "8", "8", "0"]);
+  assert.equal(result.extraTables[0].title, "Optimizer trace");
+  assert.deepEqual(result.extraTables[0].rows[0], ["0", "4026537.13533", "0.001", "undefined", "start"]);
+  assert.equal(result.extraTables[1].title, "Multi-start summary");
+  assert.deepEqual(result.extraTables[1].rows[1], ["2", "a=3.737337, b=1.252174", "0", "11", "yes"]);
   assert.equal(result.steps.at(-1).title, "Predict requested input");
   assert.equal(result.graph.expression, "Custom nonlinear best fit");
   assert.equal(analyzeUniversal("custom nonlinear regression formula=a*exp(b*x); x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5").summary, "custom nonlinear regression");

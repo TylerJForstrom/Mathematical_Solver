@@ -8187,6 +8187,9 @@ function analyzeCustomNonlinearRegression(statement) {
       ["AICc", Number.isFinite(fit.aicc) ? formatNumber(fit.aicc) : "undefined"],
       ["BIC", formatNumber(fit.bic)],
       ["Converged", fit.converged ? "yes" : "no"],
+      ["Start count", formatNumber(fit.startCount)],
+      ["Best start", formatNumber(fit.bestStart)],
+      ["Trace rows", formatNumber(fit.trace.length)],
       ["Final damping", formatFiniteNumber(fit.damping)],
       ["Gradient norm", formatFiniteNumber(fit.gradientNorm)],
       ["Step norm", formatFiniteNumber(fit.stepNorm)],
@@ -8200,6 +8203,7 @@ function analyzeCustomNonlinearRegression(statement) {
       ...(hasPrediction ? customNonlinearPredictionArtifacts(fit.prediction, percent) : []),
     ],
     graph,
+    extraTables: customNonlinearExtraTables(fit, request),
   };
 }
 
@@ -8537,15 +8541,82 @@ function formatLogisticGrowthEquation([asymptote, intercept, slope]) {
 }
 
 function fitCustomNonlinearRegression(request) {
-  let parameters = applyCustomParameterBounds([...request.initial], request.bounds);
+  const starts = generateCustomRegressionStarts(request.initial, request.bounds, request.startCount);
+  const runs = starts.map((start, index) =>
+    runCustomNonlinearRegressionStart(request, start, index + 1),
+  );
+  const best = [...runs].sort((left, right) =>
+    left.sse - right.sse ||
+    left.startIndex - right.startIndex,
+  )[0];
+
+  if (!best || !Number.isFinite(best.sse)) {
+    throw new Error("Custom nonlinear regression produced non-finite predictions for every start.");
+  }
+
+  const normalizedParameters = best.parameters.map(normalizeNumber);
+  const normalizedFitted = best.fitted.map(normalizeNumber);
+  const covariance = customNonlinearRegressionCovariance(request, normalizedParameters, best.sse);
+  const scored = scoreNonlinearRegressionFit({
+    family: "custom",
+    label: "Custom nonlinear",
+    equation: `${request.response} = ${request.formula}`,
+    transformedEquation: `${request.response} = ${request.formula}`,
+    coefficients: normalizedParameters,
+    fitted: normalizedFitted,
+    parameterCount: request.parameterNames.length,
+    status: `fit in ${best.iterations} iterations`,
+    predict: (x) => evaluateCustomNonlinearFormula(request.expression, request.variable, request.parameterNames, normalizedParameters, x),
+  }, request.y);
+  return {
+    ...scored,
+    parameters: normalizedParameters,
+    iterations: best.iterations,
+    converged: best.converged,
+    damping: normalizeNumber(best.damping),
+    gradientNorm: normalizeNumber(best.gradientNorm),
+    stepNorm: normalizeNumber(best.stepNorm),
+    covariance,
+    inference: customNonlinearRegressionInference(request, normalizedParameters, covariance),
+    prediction: Number.isFinite(request.prediction)
+      ? customNonlinearRegressionPrediction(request, normalizedParameters, covariance, request.prediction)
+      : null,
+    startCount: starts.length,
+    bestStart: best.startIndex,
+    trace: best.trace,
+    startSummaries: runs.map((run) => ({
+      startIndex: run.startIndex,
+      initial: run.initial,
+      sse: run.sse,
+      iterations: run.iterations,
+      converged: run.converged,
+    })),
+  };
+}
+
+function runCustomNonlinearRegressionStart(request, initial, startIndex) {
+  let parameters = applyCustomParameterBounds([...initial], request.bounds);
   let damping = 1e-3;
   let fitted = evaluateCustomRegressionFitted(request, parameters);
   let bestSse = customRegressionSse(request.y, fitted);
   let converged = false;
   let stepNorm = Number.NaN;
+  const trace = [customOptimizerTraceRow(0, bestSse, damping, stepNorm, "start")];
 
   if (!Number.isFinite(bestSse)) {
-    throw new Error("Custom nonlinear regression produced non-finite starting predictions.");
+    return {
+      startIndex,
+      initial,
+      parameters,
+      fitted: [],
+      sse: Number.POSITIVE_INFINITY,
+      iterations: 0,
+      converged: false,
+      damping,
+      gradientNorm: Number.NaN,
+      stepNorm,
+      trace,
+    };
   }
 
   let iterations = 0;
@@ -8584,6 +8655,7 @@ function fitCustomNonlinearRegression(request) {
     );
     if (candidate.some((value) => !Number.isFinite(value))) {
       damping *= 10;
+      trace.push(customOptimizerTraceRow(iteration, bestSse, damping, stepNorm, "no"));
       continue;
     }
 
@@ -8595,43 +8667,103 @@ function fitCustomNonlinearRegression(request) {
       if (Math.abs(bestSse - candidateSse) <= request.tolerance * Math.max(1, bestSse)) {
         bestSse = candidateSse;
         converged = true;
+        trace.push(customOptimizerTraceRow(iteration, bestSse, damping, stepNorm, "yes"));
         break;
       }
       bestSse = candidateSse;
       damping = Math.max(damping / 3, 1e-8);
+      trace.push(customOptimizerTraceRow(iteration, bestSse, damping, stepNorm, "yes"));
     } else {
       damping *= 10;
+      trace.push(customOptimizerTraceRow(iteration, bestSse, damping, stepNorm, "no"));
     }
   }
 
-  const normalizedParameters = parameters.map(normalizeNumber);
-  const normalizedFitted = fitted.map(normalizeNumber);
-  const covariance = customNonlinearRegressionCovariance(request, normalizedParameters, bestSse);
-  const scored = scoreNonlinearRegressionFit({
-    family: "custom",
-    label: "Custom nonlinear",
-    equation: `${request.response} = ${request.formula}`,
-    transformedEquation: `${request.response} = ${request.formula}`,
-    coefficients: normalizedParameters,
-    fitted: normalizedFitted,
-    parameterCount: request.parameterNames.length,
-    status: `fit in ${iterations} iterations`,
-    predict: (x) => evaluateCustomNonlinearFormula(request.expression, request.variable, request.parameterNames, normalizedParameters, x),
-  }, request.y);
   return {
-    ...scored,
-    parameters: normalizedParameters,
+    startIndex,
+    initial,
+    parameters,
+    fitted,
+    sse: bestSse,
     iterations,
     converged,
-    damping: normalizeNumber(damping),
-    gradientNorm: normalizeNumber(customRegressionGradientNorm(request, normalizedParameters, normalizedFitted)),
-    stepNorm: normalizeNumber(stepNorm),
-    covariance,
-    inference: customNonlinearRegressionInference(request, normalizedParameters, covariance),
-    prediction: Number.isFinite(request.prediction)
-      ? customNonlinearRegressionPrediction(request, normalizedParameters, covariance, request.prediction)
-      : null,
+    damping,
+    gradientNorm: customRegressionGradientNorm(request, parameters, fitted),
+    stepNorm,
+    trace,
   };
+}
+
+function customOptimizerTraceRow(iteration, sse, damping, stepNorm, accepted) {
+  return {
+    iteration,
+    sse: Number.isFinite(sse) ? normalizeNumber(sse) : Number.POSITIVE_INFINITY,
+    damping: normalizeNumber(damping),
+    stepNorm: normalizeNumber(stepNorm),
+    accepted,
+  };
+}
+
+function generateCustomRegressionStarts(initial, bounds, startCount) {
+  const starts = [applyCustomParameterBounds(initial, bounds)];
+  for (let startIndex = 1; startIndex < startCount; startIndex += 1) {
+    starts.push(applyCustomParameterBounds(initial.map((value, parameterIndex) =>
+      customRegressionStartValue(value, bounds[parameterIndex], startIndex, parameterIndex),
+    ), bounds));
+  }
+  return starts;
+}
+
+function customRegressionStartValue(value, bound, startIndex, parameterIndex) {
+  if (Number.isFinite(bound.lower) && Number.isFinite(bound.upper)) {
+    const fraction = deterministicFraction(startIndex, parameterIndex);
+    return bound.lower + (bound.upper - bound.lower) * fraction;
+  }
+  const scale = Math.abs(value) + 1;
+  const direction = (startIndex + parameterIndex) % 2 === 0 ? 1 : -1;
+  const magnitude = 0.5 + 0.25 * startIndex;
+  return value + direction * scale * magnitude;
+}
+
+function deterministicFraction(startIndex, parameterIndex) {
+  const raw = Math.sin((startIndex + 1) * (parameterIndex + 2) * 12.9898) * 43758.5453;
+  const fraction = raw - Math.floor(raw);
+  return Math.min(0.9, Math.max(0.1, fraction));
+}
+
+function customNonlinearExtraTables(fit, request) {
+  const traceRows = fit.trace.map((row) => [
+    formatNumber(row.iteration),
+    formatFiniteNumber(row.sse),
+    formatFiniteNumber(row.damping),
+    formatFiniteNumber(row.stepNorm),
+    row.accepted,
+  ]);
+  const tables = [{
+    title: "Optimizer trace",
+    headers: ["Iteration", "SSE", "Damping", "Step norm", "Accepted"],
+    rows: traceRows,
+  }];
+  if (fit.startSummaries.length > 1) {
+    tables.push({
+      title: "Multi-start summary",
+      headers: ["Start", "Initial", "Final SSE", "Iterations", "Converged"],
+      rows: fit.startSummaries.map((summary) => [
+        formatNumber(summary.startIndex),
+        formatCustomParameterVector(summary.initial, request.parameterNames),
+        formatFiniteNumber(summary.sse),
+        formatNumber(summary.iterations),
+        summary.converged ? "yes" : "no",
+      ]),
+    });
+  }
+  return tables;
+}
+
+function formatCustomParameterVector(values, parameterNames) {
+  return parameterNames
+    .map((name, index) => `${name}=${formatNumber(values[index])}`)
+    .join(", ");
 }
 
 function customNonlinearPredictionArtifacts(prediction, percent) {
@@ -20238,7 +20370,7 @@ function parseXYLists(text) {
 }
 
 function cleanLabeledListChunk(text) {
-  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty|families?|models?|formula|equation|params?|starts?|initial|bounds?|k\s*[- ]?\s*fold|kfold|folds?|holdout|test(?:\s*size)?|validation(?:\s*(?:size|split))?|val\s*split|split)\b/i);
+  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty|families?|models?|formula|equation|params?|starts?|initial|bounds?|multistart|multi-start|restarts?|startcount|k\s*[- ]?\s*fold|kfold|folds?|holdout|test(?:\s*size)?|validation(?:\s*(?:size|split))?|val\s*split|split)\b/i);
   return optionIndex >= 0 ? text.slice(0, optionIndex) : text;
 }
 
@@ -20474,6 +20606,7 @@ function parseCustomNonlinearRegressionInput(text) {
 
   const bounds = parseCustomRegressionBounds(text, parameterNames);
   const initial = parseCustomRegressionInitialParameters(text, parameterNames, bounds);
+  const startCount = parseCustomRegressionStartCount(text);
   const maxIterations = readNamedNumber(text, ["maxIterations", "maxiterations", "maxIter", "maxiter", "iterations"], 200);
   const tolerance = readNamedNumber(text, ["tolerance", "tol"], 1e-8);
   if (!Number.isSafeInteger(maxIterations) || maxIterations < 1 || maxIterations > 1000) {
@@ -20490,6 +20623,7 @@ function parseCustomNonlinearRegressionInput(text) {
     variable,
     parameterNames,
     initial,
+    startCount,
     bounds,
     level: parseConfidenceLevel(text, 0.95),
     maxIterations,
@@ -20501,7 +20635,7 @@ function parseCustomNonlinearRegressionInput(text) {
 }
 
 function extractCustomRegressionFormulaMatch(text) {
-  return text.match(/\b(?:formula|equation|model)\s*[:=]\s*(.+?)(?=\s*(?:;\s*)?\b(?:(?:x|y|params?|starts?|initial|bounds?|confidence|level|tol|tolerance|iterations|maxiterations|maxiter)\s*[:=]|predict(?:ion)?\b)|$)/i);
+  return text.match(/\b(?:formula|equation|model)\s*[:=]\s*(.+?)(?=\s*(?:;\s*)?\b(?:(?:x|y|params?|starts?|initial|bounds?|multistart|multi-start|restarts?|startcount|confidence|level|tol|tolerance|iterations|maxiterations|maxiter)\s*[:=]|predict(?:ion)?\b)|$)/i);
 }
 
 function parseCustomRegressionFormula(rawFormula) {
@@ -20555,6 +20689,14 @@ function parseCustomRegressionInitialParameters(text, parameterNames, bounds) {
   });
 }
 
+function parseCustomRegressionStartCount(text) {
+  const value = readNamedNumber(text, ["multistart", "multi-start", "restarts?", "startcount"], 1);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 20) {
+    throw new Error("Custom nonlinear regression multistart must be an integer from 1 through 20.");
+  }
+  return value;
+}
+
 function parseCustomRegressionBounds(text, parameterNames) {
   const chunk = extractCustomRegressionOptionChunk(text, "bounds?");
   return parameterNames.map((name) => {
@@ -20580,7 +20722,7 @@ function parseCustomRegressionBounds(text, parameterNames) {
 }
 
 function extractCustomRegressionOptionChunk(text, labelPattern) {
-  const optionPattern = "(?:x|y|formula|equation|model|params?|starts?|initial|bounds?|predict(?:ion)?|confidence|level|tol|tolerance|iterations|maxiterations|maxiter|variable|var|input)";
+  const optionPattern = "(?:x|y|formula|equation|model|params?|starts?|initial|bounds?|multistart|multi-start|restarts?|startcount|predict(?:ion)?|confidence|level|tol|tolerance|iterations|maxiterations|maxiter|variable|var|input)";
   const match = text.match(new RegExp(`\\b(?:${labelPattern})\\b\\s*[:=]?\\s*(.+?)(?=\\s*(?:;\\s*)?\\b${optionPattern}\\b\\s*[:=]|$)`, "i"));
   return match ? match[1] : "";
 }

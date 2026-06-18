@@ -259,20 +259,36 @@ function renderLogicValues(names) {
 function renderOutput(analysis) {
   const graphMarkup = renderGraphs(analysis);
   const artifactMarkup = renderArtifacts(analysis.artifacts);
+  const extraTableMarkup = renderExtraTables(analysis.extraTables);
 
   if (analysis.table) {
-    const headerCells = analysis.table.headers
-      .map((header) => `<th scope="col">${escapeHtml(header)}</th>`)
-      .join("");
-    const bodyRows = analysis.table.rows
-      .map((row) => `<tr>${row.map(outputCell).join("")}</tr>`)
-      .join("");
-    elements.outputPanel.innerHTML = `${graphMarkup}<div class="table-wrap"><table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>${artifactMarkup}`;
+    elements.outputPanel.innerHTML = `${graphMarkup}${renderTable(analysis.table)}${extraTableMarkup}${artifactMarkup}`;
     return;
   }
 
   const artifacts = analysis.artifacts ?? [["Answer", analysis.answer]];
-  elements.outputPanel.innerHTML = `${graphMarkup}${renderArtifacts(artifacts)}`;
+  elements.outputPanel.innerHTML = `${graphMarkup}${extraTableMarkup}${renderArtifacts(artifacts)}`;
+}
+
+function renderTable(table) {
+  const headerCells = table.headers
+    .map((header) => `<th scope="col">${escapeHtml(header)}</th>`)
+    .join("");
+  const bodyRows = table.rows
+    .map((row) => `<tr>${row.map(outputCell).join("")}</tr>`)
+    .join("");
+  return `<div class="table-wrap"><table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+}
+
+function renderExtraTables(tables = []) {
+  return tables
+    .map((table) => `
+      <section class="extra-table">
+        <h3>${escapeHtml(table.title)}</h3>
+        ${renderTable(table)}
+      </section>
+    `)
+    .join("");
 }
 
 function renderGraphs(analysis) {
