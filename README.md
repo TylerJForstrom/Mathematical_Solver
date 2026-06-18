@@ -14,6 +14,8 @@ The frontend currently supports:
   tableaux proof trees
 - Karnaugh maps for two- to four-variable Boolean minimization
 - Reduced ordered binary decision diagrams for compact Boolean representations
+- Fuzzy and independent-probability truth-value evaluation for propositional
+  statements
 - Graphviz DOT export for parsed math and logic expression trees
 - Boolean algebra simplification with identity, domination, complement,
   idempotent, absorption, consensus, De Morgan, double-negation, implication,
@@ -276,6 +278,10 @@ The same idea works for algebra and calculus:
   and returns the simplified sum-of-products form.
 - `bdd (P and Q) or (P and R)` builds a reduced ordered binary decision
   diagram with merged subgraphs, satisfying paths, and Graphviz DOT output.
+- `fuzzy logic (P and Q) or not R with P=0.8 Q=0.6 R=0.3` evaluates a
+  propositional tree with graded truth values instead of only true/false.
+- `probabilistic logic P or Q with P=0.2 Q=0.5` assumes independent variables
+  and applies probability formulas for logical operators.
 - `dot tree x^2 + 2x + 1` exports the parsed expression tree as Graphviz DOT
   with node and edge tables.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
@@ -519,6 +525,7 @@ The demo includes:
 - Semantic tableaux / truth-tree proofs through Ask mode
 - Karnaugh-map simplification through Ask mode
 - Reduced ordered BDDs through Ask mode
+- Fuzzy and probabilistic truth-value logic through Ask mode
 - Graphviz DOT tree export through Ask mode
 - Number theory and modular arithmetic through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
@@ -622,5 +629,5 @@ These are good ways to make the project more impressive mathematically:
 16. Add one-click SVG or PNG rendering for exported Graphviz parse trees.
 17. Add Boolean operations directly on BDDs, including apply, restrict, and
    variable reordering heuristics.
-18. Add probability or fuzzy truth values so statements can evaluate beyond
-    simple true/false logic.
+18. Extend uncertainty logic with custom t-norms, correlated probabilities,
+    and interval-valued truth values.

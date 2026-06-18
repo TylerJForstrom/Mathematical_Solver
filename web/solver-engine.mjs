@@ -42,6 +42,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
 
   const suggestions = [
     {
+      title: "Fuzzy or probabilistic logic",
+      when: () => activeMode === "ask" && /\b(?:fuzzy|graded truth|truth values?|probabilistic logic|probability logic|soft logic)\b/.test(lower),
+      reason: "I detected a logic question with truth values between 0 and 1.",
+      needs: [
+        "A propositional statement using and, or, not, ->, xor, or iff",
+        "A value for each variable, such as P=0.8 Q=0.4",
+      ],
+      examples: [
+        ["Fuzzy", "ask", "fuzzy logic (P and Q) or not R with P=0.8 Q=0.6 R=0.3"],
+        ["Probability logic", "ask", "probabilistic logic P or Q with P=0.2 Q=0.5"],
+      ],
+    },
+    {
       title: "Binary decision diagram",
       when: () => activeMode === "ask" && /\b(?:bdd|robdd|binary decision diagram|decision diagram)\b/.test(lower),
       reason: "I detected a compact Boolean-decision-diagram request.",
@@ -887,6 +900,66 @@ export function analyzeLogicBdd(statement) {
       ["Satisfying paths", formatNumber(satisfyingPaths.length)],
       ["Equivalent truth table", equivalent ? "yes" : "no"],
       ["BDD Graphviz DOT", bddDot],
+    ],
+  };
+}
+
+export function analyzeLogicTruthValue(statement) {
+  const request = extractLogicTruthValueQuestion(statement);
+  const tree = parseLogic(request.expression);
+  const variables = logicVariables(tree);
+  const assignment = resolveSoftLogicAssignments(variables, request.values);
+  const trace = [];
+  const result = evaluateSoftLogic(tree, assignment, request.kind, trace);
+  const semantics = request.kind === "probability"
+    ? "independent probability"
+    : "fuzzy min/max";
+  const answer = request.kind === "probability"
+    ? `probability = ${formatNumber(result)}`
+    : `fuzzy truth = ${formatNumber(result)}`;
+
+  return {
+    mode: "logic",
+    tree,
+    answer,
+    summary: request.kind === "probability" ? "Probabilistic logic truth value" : "Fuzzy logic truth value",
+    details: `${semantics} semantics`,
+    variables,
+    assignment,
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Parse logic statement",
+        expression: logicToString(tree),
+        detail: "The statement becomes a propositional expression tree.",
+      },
+      {
+        title: "Read graded truth values",
+        expression: formatSoftAssignment(assignment),
+        detail: "Each variable receives a value from 0 to 1 instead of only true or false.",
+      },
+      {
+        title: "Evaluate graded operators",
+        expression: answer,
+        detail: request.kind === "probability"
+          ? "Assuming independent variables, AND multiplies probabilities and OR uses inclusion-exclusion."
+          : "Fuzzy logic uses min for AND, max for OR, and 1 - x for NOT.",
+      },
+    ],
+    table: {
+      headers: ["Expression", "Rule", "Value"],
+      rows: trace.map((entry) => [
+        entry.expression,
+        entry.rule,
+        formatNumber(entry.value),
+      ]),
+    },
+    artifacts: [
+      ["Original", logicToString(tree)],
+      ["Semantics", semantics],
+      ["Assignments", formatSoftAssignment(assignment)],
+      ["Result", formatNumber(result)],
+      ["Operator count", formatNumber(treeMetrics(tree).operators)],
     ],
   };
 }
@@ -2198,6 +2271,9 @@ export function analyzeUniversal(question, values = {}) {
   if (isMarkovQuestion(lower)) {
     routed = analyzeMarkovChain(question);
     routedLabel = "Markov chain";
+  } else if (isLogicTruthValueQuestion(lower)) {
+    routed = analyzeLogicTruthValue(question);
+    routedLabel = "Fuzzy/probabilistic logic";
   } else if (isLogicBddQuestion(lower)) {
     routed = analyzeLogicBdd(question);
     routedLabel = "Binary decision diagram";
@@ -25487,6 +25563,14 @@ function isLogicBddQuestion(lower) {
     /\b(?:bdd|robdd|binary decision diagram|reduced ordered bdd|ordered bdd)\b/.test(lower);
 }
 
+function isLogicTruthValueQuestion(lower) {
+  return lower.startsWith("fuzzy ") ||
+    lower.startsWith("soft logic ") ||
+    lower.startsWith("probabilistic logic ") ||
+    lower.startsWith("probability logic ") ||
+    /\b(?:fuzzy logic|soft logic|graded truth|truth values?|probabilistic logic|probability logic)\b/.test(lower);
+}
+
 function isLogicQuestion(question) {
   return /\b(and|or|not|xor|implies|iff)\b|->|<->|=>|&&|\|\|/i.test(question);
 }
@@ -25899,6 +25983,30 @@ function extractLogicBddQuestion(question) {
     throw new Error("BDD mode needs a logic statement, such as bdd (P and Q) or (P and R).");
   }
   return { expression };
+}
+
+function extractLogicTruthValueQuestion(question) {
+  const lower = question.toLowerCase();
+  const kind = /\b(?:probabilistic logic|probability logic|prob logic|independent probability)\b/.test(lower)
+    ? "probability"
+    : "fuzzy";
+  const values = parseSoftLogicAssignments(question);
+  const expression = question
+    .replace(/[?!.]+$/, "")
+    .replace(/\b[A-Za-z_]\w*\s*(?:=|:)\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?\s*%?/gi, " ")
+    .replace(/^(?:evaluate|compute|calculate|find|show)\s+(?:the\s+)?/i, "")
+    .replace(/^(?:fuzzy\s+logic|fuzzy|soft\s+logic|graded\s+truth|truth\s+values?|probabilistic\s+logic|probability\s+logic|prob\s+logic)\s*:?\s*/i, "")
+    .replace(/\b(?:using|with|given|where|values?|truth\s+values?|degrees?)\b/gi, " ")
+    .replace(/\b(?:fuzzy\s+logic|soft\s+logic|fuzzy|graded\s+truth|probabilistic\s+logic|probability\s+logic|prob\s+logic|independent\s+probability)\b/gi, " ")
+    .replace(/\b(?:logic|boolean|propositional|expression|statement)\b/gi, " ")
+    .replace(/^\s*(?:of|for)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!expression) {
+    throw new Error("Graded logic needs a statement, such as fuzzy logic P and Q with P=0.8 Q=0.4.");
+  }
+  return { kind, expression, values };
 }
 
 function extractTreeExportQuestion(question) {
@@ -27483,6 +27591,128 @@ function bddToGraphvizDot(bdd) {
   }
   lines.push("}");
   return lines.join("\n");
+}
+
+function parseSoftLogicAssignments(text) {
+  const values = new Map();
+  for (const match of text.matchAll(/\b([A-Za-z_]\w*)\s*(?:=|:)\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?/gi)) {
+    const raw = Number(match[2]);
+    const value = match[3] ? raw / 100 : raw;
+    if (!Number.isFinite(value) || value < 0 || value > 1) {
+      throw new Error(`Truth value for ${match[1]} must be between 0 and 1, or a percent from 0% to 100%.`);
+    }
+    values.set(match[1], normalizeNumber(value));
+  }
+  return values;
+}
+
+function resolveSoftLogicAssignments(variables, provided) {
+  const assignment = {};
+  for (const variable of variables) {
+    if (provided.has(variable)) {
+      assignment[variable] = provided.get(variable);
+      continue;
+    }
+    const insensitive = [...provided.entries()].find(([name]) => name.toLowerCase() === variable.toLowerCase());
+    if (insensitive) {
+      assignment[variable] = insensitive[1];
+      continue;
+    }
+    throw new Error(`Missing truth value for ${variable}. Add ${variable}=0.5 or another value from 0 to 1.`);
+  }
+  return assignment;
+}
+
+function evaluateSoftLogic(node, assignment, kind, trace) {
+  if (node.kind === "logicConstant") {
+    const value = node.value ? 1 : 0;
+    trace.push({
+      expression: logicToString(node),
+      rule: "constant",
+      value,
+    });
+    return value;
+  }
+  if (node.kind === "logicVariable") {
+    const value = assignment[node.name];
+    trace.push({
+      expression: node.name,
+      rule: "variable value",
+      value,
+    });
+    return value;
+  }
+  if (node.kind === "logicNot") {
+    const operand = evaluateSoftLogic(node.operand, assignment, kind, trace);
+    const value = normalizeSoftTruth(1 - operand);
+    trace.push({
+      expression: logicToString(node),
+      rule: `not: 1 - ${formatNumber(operand)}`,
+      value,
+    });
+    return value;
+  }
+
+  const left = evaluateSoftLogic(node.left, assignment, kind, trace);
+  const right = evaluateSoftLogic(node.right, assignment, kind, trace);
+  const { value, rule } = kind === "probability"
+    ? evaluateProbabilityLogicOperator(node.operator, left, right)
+    : evaluateFuzzyLogicOperator(node.operator, left, right);
+  trace.push({
+    expression: logicToString(node),
+    rule,
+    value,
+  });
+  return value;
+}
+
+function evaluateFuzzyLogicOperator(operator, left, right) {
+  if (operator === "and") {
+    return { value: Math.min(left, right), rule: `and: min(${formatNumber(left)}, ${formatNumber(right)})` };
+  }
+  if (operator === "or") {
+    return { value: Math.max(left, right), rule: `or: max(${formatNumber(left)}, ${formatNumber(right)})` };
+  }
+  if (operator === "xor") {
+    return { value: normalizeSoftTruth(Math.abs(left - right)), rule: `xor: abs(${formatNumber(left)} - ${formatNumber(right)})` };
+  }
+  if (operator === "implies") {
+    return { value: Math.max(1 - left, right), rule: `implies: max(1 - ${formatNumber(left)}, ${formatNumber(right)})` };
+  }
+  if (operator === "iff") {
+    return { value: normalizeSoftTruth(1 - Math.abs(left - right)), rule: `iff: 1 - abs(${formatNumber(left)} - ${formatNumber(right)})` };
+  }
+  throw new Error(`Unsupported fuzzy operator '${operator}'.`);
+}
+
+function evaluateProbabilityLogicOperator(operator, left, right) {
+  if (operator === "and") {
+    return { value: normalizeSoftTruth(left * right), rule: `and: ${formatNumber(left)} * ${formatNumber(right)}` };
+  }
+  if (operator === "or") {
+    return { value: normalizeSoftTruth(left + right - left * right), rule: `or: P(A)+P(B)-P(A)P(B)` };
+  }
+  if (operator === "xor") {
+    return { value: normalizeSoftTruth(left * (1 - right) + (1 - left) * right), rule: "xor: P(A not B) + P(not A B)" };
+  }
+  if (operator === "implies") {
+    return { value: normalizeSoftTruth(1 - left * (1 - right)), rule: "implies: 1 - P(A and not B)" };
+  }
+  if (operator === "iff") {
+    return { value: normalizeSoftTruth(left * right + (1 - left) * (1 - right)), rule: "iff: P(both true) + P(both false)" };
+  }
+  throw new Error(`Unsupported probability operator '${operator}'.`);
+}
+
+function normalizeSoftTruth(value) {
+  return Math.min(1, Math.max(0, normalizeNumber(value)));
+}
+
+function formatSoftAssignment(assignment) {
+  return Object.entries(assignment)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => `${name}=${formatNumber(value)}`)
+    .join(", ") || "none";
 }
 
 function parseTreeExportExpression(expression) {

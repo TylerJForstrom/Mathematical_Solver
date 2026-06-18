@@ -21,6 +21,7 @@ import {
   analyzeLogicSat,
   analyzeLogicSimplification,
   analyzeLogicTableau,
+  analyzeLogicTruthValue,
   analyzeMatrix,
   analyzeMarkovChain,
   analyzeMultivariable,
@@ -171,6 +172,26 @@ runTest("logic mode builds reduced ordered BDDs", () => {
   assert.equal(analyzeUniversal("bdd (P and Q) or (P and R)").summary, "Reduced ordered BDD");
 });
 
+runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
+  const fuzzy = analyzeLogicTruthValue("fuzzy logic (P and Q) or not R with P=0.8 Q=0.6 R=0.3");
+  const probability = analyzeLogicTruthValue("probabilistic logic P or Q with P=0.2 Q=0.5");
+
+  assert.equal(fuzzy.summary, "Fuzzy logic truth value");
+  assert.equal(fuzzy.answer, "fuzzy truth = 0.7");
+  assert.equal(artifactValue(fuzzy, "Semantics"), "fuzzy min/max");
+  assert.equal(artifactValue(fuzzy, "Assignments"), "P=0.8, Q=0.6, R=0.3");
+  assert.deepEqual(fuzzy.table.rows.slice(-2), [
+    ["not R", "not: 1 - 0.3", "0.7"],
+    ["P and Q or not R", "or: max(0.6, 0.7)", "0.7"],
+  ]);
+
+  assert.equal(probability.summary, "Probabilistic logic truth value");
+  assert.equal(probability.answer, "probability = 0.6");
+  assert.equal(artifactValue(probability, "Semantics"), "independent probability");
+  assert.deepEqual(probability.table.rows.slice(-1), [["P or Q", "or: P(A)+P(B)-P(A)P(B)", "0.6"]]);
+  assert.equal(analyzeUniversal("fuzzy logic P and Q with P=0.8 Q=0.6").summary, "Fuzzy logic truth value");
+});
+
 runTest("tree export emits Graphviz DOT", () => {
   const math = analyzeTreeExport("dot tree x^2 + 2x + 1");
   const logic = analyzeTreeExport("graphviz tree P -> (Q or R)");
@@ -194,6 +215,10 @@ runTest("tree export emits Graphviz DOT", () => {
 });
 
 runTest("input assistant suggests structured problem formats", () => {
+  const fuzzyHelp = suggestProblemHelp("fuzzy truth value", "ask", "Need truth values.");
+  assert.equal(fuzzyHelp.title, "Fuzzy or probabilistic logic");
+  assert.equal(fuzzyHelp.examples[0][2], "fuzzy logic (P and Q) or not R with P=0.8 Q=0.6 R=0.3");
+
   const bddHelp = suggestProblemHelp("binary decision diagram", "ask", "Need a logic statement.");
   assert.equal(bddHelp.title, "Binary decision diagram");
   assert.equal(bddHelp.examples[0][2], "bdd (P and Q) or (P and R)");
