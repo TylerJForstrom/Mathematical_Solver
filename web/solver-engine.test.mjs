@@ -104,7 +104,19 @@ runTest("logic mode solves SAT with DPLL", () => {
   assert.equal(unsat.answer, "unsatisfiable");
   assert.equal(artifactValue(unsat, "Clauses"), "empty");
   assert.equal(artifactValue(unsat, "DPLL result"), "unsatisfiable");
+  assert.equal(artifactValue(unsat, "Unsat core"), "#1: empty");
   assert.equal(analyzeUniversal("sat (P or Q) and (not P or not Q)").summary, "SAT satisfiable");
+});
+
+runTest("logic mode extracts SAT unsat cores", () => {
+  const result = analyzeLogicSat("sat (P or Q) and not P and not Q and (R or S)");
+
+  assert.equal(result.summary, "SAT unsatisfiable");
+  assert.equal(artifactValue(result, "Clauses"), "P or Q; not P; not Q; R or S");
+  assert.equal(artifactValue(result, "Unsat core"), "#1: P or Q; #2: not P; #3: not Q");
+  assert.equal(artifactValue(result, "Unsat core size"), "3 of 4 clauses");
+  assert.deepEqual(result.extraTables.map((table) => table.title), ["DPLL trace", "Unsat core"]);
+  assert.deepEqual(result.extraTables[1].rows, [["1", "P or Q"], ["2", "not P"], ["3", "not Q"]]);
 });
 
 runTest("logic mode proves statements with semantic tableaux", () => {

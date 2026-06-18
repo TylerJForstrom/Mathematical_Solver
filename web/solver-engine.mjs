@@ -569,12 +569,16 @@ export function analyzeLogicSat(statement) {
   const forms = buildLogicNormalForms(tree, steps);
   const clauses = logicCnfClauses(forms.cnf);
   const result = solveDpllClauses(clauses, logicVariables(tree));
+  const unsatCore = result.satisfiable ? [] : findUnsatCoreClauses(clauses, result.variables);
   const answer = result.satisfiable
     ? `satisfiable: ${formatAssignment(result.assignment)}`
     : "unsatisfiable";
   const clauseText = clauses.length
     ? clauses.map(formatDpllClause).join("; ")
     : "no clauses";
+  const unsatCoreText = unsatCore.length
+    ? unsatCore.map(formatUnsatCoreClause).join("; ")
+    : "none";
 
   steps.push(
     {
@@ -590,6 +594,13 @@ export function analyzeLogicSat(statement) {
         : "DPLL derived a conflict in every branch, so no satisfying assignment exists.",
     },
   );
+  if (!result.satisfiable) {
+    steps.push({
+      title: "Extract unsat core",
+      expression: unsatCoreText,
+      detail: "Each clause is tested for removal; clauses that are still needed form a smaller conflicting core.",
+    });
+  }
 
   const treeForMetrics = forms.cnf;
   return {
@@ -616,7 +627,13 @@ export function analyzeLogicSat(statement) {
         entry.action,
         formatAssignment(entry.assignment),
       ]),
-    }],
+    }, ...(!result.satisfiable ? [{
+      title: "Unsat core",
+      headers: ["Source clause", "Literals"],
+      rows: unsatCore.length
+        ? unsatCore.map((entry) => [String(entry.index + 1), formatDpllClause(entry.clause)])
+        : [["none", "none"]],
+    }] : [])],
     artifacts: [
       ["Original", logicToString(tree)],
       ["CNF", logicToString(forms.cnf)],
@@ -624,6 +641,10 @@ export function analyzeLogicSat(statement) {
       ["Variables", result.variables.join(", ") || "none"],
       ["DPLL result", result.satisfiable ? "satisfiable" : "unsatisfiable"],
       ["Assignment", result.satisfiable ? formatAssignment(result.assignment) : "none"],
+      ...(!result.satisfiable ? [
+        ["Unsat core", unsatCoreText],
+        ["Unsat core size", `${formatNumber(unsatCore.length)} of ${formatNumber(clauses.length)} clauses`],
+      ] : []),
       ["Decisions", formatNumber(result.stats.decisions)],
       ["Unit propagations", formatNumber(result.stats.unitPropagations)],
       ["Pure literal assignments", formatNumber(result.stats.pureLiteralAssignments)],
@@ -26807,6 +26828,29 @@ function solveDpllClauses(clauses, variables) {
   };
 }
 
+function findUnsatCoreClauses(clauses, variables) {
+  if (clauses.length === 0) {
+    return [];
+  }
+
+  let core = clauses.map((clause, index) => ({ clause, index }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let index = 0; index < core.length; index += 1) {
+      const candidate = core.filter((_, candidateIndex) => candidateIndex !== index);
+      const result = solveDpllClauses(candidate.map((entry) => entry.clause), variables);
+      if (!result.satisfiable) {
+        core = candidate;
+        changed = true;
+        index -= 1;
+      }
+    }
+  }
+
+  return core;
+}
+
 function dpllSearch(clauses, assignment, variables, stats, trace) {
   stats.nodes += 1;
   const propagated = propagateDpllClauses(clauses, assignment, stats, trace);
@@ -26988,6 +27032,10 @@ function formatDpllClause(clause) {
     return "empty";
   }
   return clause.map(formatDpllLiteral).join(" or ");
+}
+
+function formatUnsatCoreClause(entry) {
+  return `#${entry.index + 1}: ${formatDpllClause(entry.clause)}`;
 }
 
 function formatDpllLiteral(literal) {

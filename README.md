@@ -10,8 +10,8 @@ closed-form differential equations, and explain the work step by step.
 The frontend currently supports:
 
 - Universal Ask mode that routes common math questions to the right solver
-- Propositional logic evaluation, truth tables, DPLL SAT solving, and semantic
-  tableaux proof trees
+- Propositional logic evaluation, truth tables, DPLL SAT solving with unsat-core
+  diagnostics, and semantic tableaux proof trees
 - Karnaugh maps for two- to four-variable Boolean minimization
 - Reduced ordered binary decision diagrams for compact Boolean representations
 - Fuzzy and independent-probability truth-value evaluation for propositional
@@ -277,6 +277,8 @@ The same idea works for algebra and calculus:
   `(not P or Q) and (not P or R)` and verifies equivalence.
 - `sat (P or Q) and (not P or not Q)` converts to CNF clauses and runs DPLL
   with branching, unit propagation, and pure-literal assignments.
+- `sat (P or Q) and not P and not Q and (R or S)` proves unsatisfiability
+  and reports the smaller conflicting core `P or Q; not P; not Q`.
 - `tableau P -> P` builds a semantic tableau by trying to make the statement
   false, then closes the countermodel branch to prove validity.
 - `tableau satisfiable (P or Q) and not P` keeps open proof branches as
@@ -528,7 +530,7 @@ The demo includes:
 - Truth tables for logic mode
 - Polynomial factoring through Ask mode
 - Exact combinatorics through Ask mode
-- DPLL SAT solving and logic normal forms through Ask mode
+- DPLL SAT solving, unsat-core diagnostics, and logic normal forms through Ask mode
 - Semantic tableaux / truth-tree proofs through Ask mode
 - Karnaugh-map simplification through Ask mode
 - Reduced ordered BDDs through Ask mode
@@ -628,7 +630,7 @@ These are good ways to make the project more impressive mathematically:
 10. Add exact symbolic roots for more higher-degree equations beyond rational-factor reductions.
 11. Add more Boolean algebra simplification rules, including normal-form
    factoring and larger multi-clause reductions.
-12. Extend SAT solving with watched literals, clause learning, and unsat cores.
+12. Extend SAT solving with watched literals, clause learning, and proof logs.
 13. Generate formal proof steps for tautologies using natural deduction or
    sequent calculus.
 14. Extend semantic tableaux with larger rendered proof trees and branch
