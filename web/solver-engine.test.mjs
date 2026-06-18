@@ -159,6 +159,18 @@ runTest("logic mode builds Karnaugh maps", () => {
   assert.equal(analyzeUniversal("kmap P or Q").summary, "Karnaugh map");
 });
 
+runTest("logic mode uses Karnaugh-map don't-care cells", () => {
+  const result = analyzeLogicKarnaughMap("kmap P and not Q with don't cares m3");
+
+  assert.equal(result.answer, "simplified SOP: P");
+  assert.deepEqual(result.table.rows, [["P=0", "0", "0"], ["P=1", "1 m2", "X m3"]]);
+  assert.equal(artifactValue(result, "Minterms"), "m2");
+  assert.equal(artifactValue(result, "Don't cares"), "x3");
+  assert.equal(artifactValue(result, "Selected groups"), "m2,x3 -> P");
+  assert.deepEqual(result.extraTables[0].rows, [["1", "m2,x3", "P", "2"]]);
+  assert.equal(analyzeUniversal("kmap P and not Q with don't cares m3").summary, "Karnaugh map");
+});
+
 runTest("logic mode builds reduced ordered BDDs", () => {
   const result = analyzeLogicBdd("bdd (P and Q) or (P and R)");
   const dot = artifactValue(result, "BDD Graphviz DOT");

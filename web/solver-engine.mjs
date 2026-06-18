@@ -768,7 +768,8 @@ export function analyzeLogicKarnaughMap(statement) {
     throw new Error("Karnaugh maps need two to four Boolean variables.");
   }
 
-  const map = buildKarnaughMap(tree, variables);
+  const dontCareMinterms = normalizeKarnaughDontCareMinterms(request.dontCareMinterms, variables);
+  const map = buildKarnaughMap(tree, variables, dontCareMinterms);
   const groups = selectKarnaughGroups(map.primeGroups, map.minterms, variables);
   const simplified = formatKarnaughSimplified(groups, map.minterms, variables);
   const selectedGroupText = groups.length
@@ -790,10 +791,15 @@ export function analyzeLogicKarnaughMap(statement) {
       expression: formatKarnaughMinterms(map.minterms, ", "),
       detail: "Each 1-cell is labeled by its binary minterm index using the sorted variable order.",
     },
+    ...(map.dontCareMinterms.length ? [{
+      title: "Mark don't-care cells",
+      expression: formatKarnaughDontCares(map.dontCareMinterms, ", "),
+      detail: "Don't-care cells may join groups to remove variables, but they do not need to be covered.",
+    }] : []),
     {
       title: "Select power-of-two groups",
       expression: selectedGroupText,
-      detail: "The solver chooses wraparound groups containing only 1-cells, then derives the variables that stay constant in each group.",
+      detail: "The solver chooses wraparound groups containing required 1-cells plus optional don't-care cells, then derives the variables that stay constant.",
     },
   ];
 
@@ -819,7 +825,7 @@ export function analyzeLogicKarnaughMap(statement) {
       rows: groups.length
         ? groups.map((group, index) => [
             String(index + 1),
-            formatKarnaughMinterms(group.minterms, ","),
+            formatKarnaughGroupCells(group, ","),
             karnaughGroupTerm(group, variables),
             formatNumber(group.size),
           ])
@@ -831,6 +837,7 @@ export function analyzeLogicKarnaughMap(statement) {
       ["Row variables", map.rowVariables.join(", ")],
       ["Column variables", map.columnVariables.join(", ")],
       ["Minterms", formatKarnaughMinterms(map.minterms, ", ")],
+      ["Don't cares", map.dontCareMinterms.length ? formatKarnaughDontCares(map.dontCareMinterms, ", ") : "none"],
       ["Prime groups found", formatNumber(map.primeGroups.length)],
       ["Selected groups", selectedGroupText],
       ["Simplified SOP", simplified],
@@ -25971,7 +25978,8 @@ function extractLogicTableauQuestion(question) {
 }
 
 function extractLogicKarnaughMapQuestion(question) {
-  const expression = question
+  const { text, minterms } = extractKarnaughDontCareClause(question);
+  const expression = text
     .replace(/[?!.]+$/, "")
     .replace(/^(?:make|build|draw|create|show|solve|simplify|minimize)\s+(?:a\s+)?/i, "")
     .replace(/^(?:karnaugh\s+map|k-map|kmap|boolean\s+map)\s*:?\s*/i, "")
@@ -25985,7 +25993,31 @@ function extractLogicKarnaughMapQuestion(question) {
   if (!expression) {
     throw new Error("Karnaugh-map mode needs a Boolean statement, such as kmap P or Q.");
   }
-  return { expression };
+  return { expression, dontCareMinterms: minterms };
+}
+
+function extractKarnaughDontCareClause(question) {
+  const trimmedQuestion = question.replace(/[?!.]+$/, "");
+  const patterns = [
+    /\b(?:with\s+)?(?:don'?t|dont|do\s+not)[-\s]?care(?:s)?(?:\s+(?:cells?|minterms?))?\s*(?:=|:)?\s*([mx\d,\s]+)$/i,
+    /\b(?:dc|dcs|x)\s*(?:=|:)\s*([mx\d,\s]+)$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = trimmedQuestion.match(pattern);
+    if (match) {
+      return {
+        text: trimmedQuestion.slice(0, match.index).trim(),
+        minterms: parseKarnaughMintermList(match[1]),
+      };
+    }
+  }
+  return { text: trimmedQuestion, minterms: [] };
+}
+
+function parseKarnaughMintermList(text) {
+  return uniqueSortedNumbers(
+    [...text.matchAll(/\b[mx]?\s*(\d+)\b/gi)].map((match) => Number(match[1])),
+  );
 }
 
 function extractLogicBddQuestion(question) {
@@ -27285,28 +27317,48 @@ function addTableauTrace(trace, branchId, rule, result) {
   trace.push({ branchId, rule, result });
 }
 
-function buildKarnaughMap(tree, variables) {
+function normalizeKarnaughDontCareMinterms(minterms, variables) {
+  const limit = 2 ** variables.length;
+  const normalized = uniqueSortedNumbers(minterms ?? []);
+  const invalid = normalized.find((minterm) =>
+    !Number.isSafeInteger(minterm) || minterm < 0 || minterm >= limit,
+  );
+  if (invalid !== undefined) {
+    throw new Error(`Karnaugh don't-care minterm ${invalid} is outside 0 through ${limit - 1}.`);
+  }
+  return normalized;
+}
+
+function buildKarnaughMap(tree, variables, requestedDontCareMinterms = []) {
   const rowCount = Math.floor(variables.length / 2);
   const rowVariables = variables.slice(0, rowCount);
   const columnVariables = variables.slice(rowCount);
   const rowCodes = grayCodes(rowVariables.length);
   const columnCodes = grayCodes(columnVariables.length);
+  const requestedDontCares = new Set(requestedDontCareMinterms);
   const rows = rowCodes.map((rowCode) => ({
     code: rowCode,
     label: formatKarnaughAxis(rowVariables, rowCode),
     cells: columnCodes.map((columnCode) => {
       const assignment = assignmentFromKarnaughCodes(rowVariables, rowCode, columnVariables, columnCode);
       const value = evaluateLogic(tree, assignment);
+      const minterm = karnaughMintermIndex(assignment, variables);
       return {
         assignment,
         value,
-        minterm: karnaughMintermIndex(assignment, variables),
+        dontCare: !value && requestedDontCares.has(minterm),
+        minterm,
       };
     }),
   }));
   const minterms = rows
     .flatMap((row) => row.cells)
     .filter((cell) => cell.value)
+    .map((cell) => cell.minterm)
+    .sort((left, right) => left - right);
+  const dontCareMinterms = rows
+    .flatMap((row) => row.cells)
+    .filter((cell) => cell.dontCare)
     .map((cell) => cell.minterm)
     .sort((left, right) => left - right);
   const primeGroups = findKarnaughPrimeGroups(rows);
@@ -27318,6 +27370,7 @@ function buildKarnaughMap(tree, variables) {
     columnLabels: columnCodes.map((code) => formatKarnaughAxis(columnVariables, code)),
     rows,
     minterms,
+    dontCareMinterms,
     primeGroups,
   };
 }
@@ -27379,14 +27432,28 @@ function findKarnaughPrimeGroups(rows) {
               cells.push(rows[rowIndex].cells[columnIndex]);
             }
           }
-          if (cells.length !== height * width || cells.some((cell) => !cell.value)) {
+          if (
+            cells.length !== height * width ||
+            cells.some((cell) => !cell.value && !cell.dontCare) ||
+            cells.every((cell) => !cell.value)
+          ) {
             continue;
           }
           const minterms = cells.map((cell) => cell.minterm).sort((left, right) => left - right);
+          const requiredMinterms = cells
+            .filter((cell) => cell.value)
+            .map((cell) => cell.minterm)
+            .sort((left, right) => left - right);
+          const dontCareMinterms = cells
+            .filter((cell) => cell.dontCare)
+            .map((cell) => cell.minterm)
+            .sort((left, right) => left - right);
           const key = minterms.join(",");
           groupsByKey.set(key, {
             cells: cells.slice().sort((left, right) => left.minterm - right.minterm),
-            minterms,
+            allMinterms: minterms,
+            minterms: requiredMinterms,
+            dontCareMinterms,
             size: cells.length,
           });
         }
@@ -27413,8 +27480,8 @@ function powersOfTwoUpTo(limit) {
 }
 
 function isKarnaughGroupSubset(left, right) {
-  const rightMinterms = new Set(right.minterms);
-  return left.minterms.every((minterm) => rightMinterms.has(minterm));
+  const rightMinterms = new Set(right.allMinterms ?? right.minterms);
+  return (left.allMinterms ?? left.minterms).every((minterm) => rightMinterms.has(minterm));
 }
 
 function selectKarnaughGroups(groups, minterms, variables) {
@@ -27512,14 +27579,28 @@ function formatKarnaughSimplified(groups, minterms, variables) {
 }
 
 function formatKarnaughGroup(group, variables) {
-  return `${formatKarnaughMinterms(group.minterms, ",")} -> ${karnaughGroupTerm(group, variables)}`;
+  return `${formatKarnaughGroupCells(group, ",")} -> ${karnaughGroupTerm(group, variables)}`;
 }
 
 function formatKarnaughMinterms(minterms, separator) {
   return minterms.length ? minterms.map((minterm) => `m${minterm}`).join(separator) : "none";
 }
 
+function formatKarnaughDontCares(minterms, separator) {
+  return minterms.length ? minterms.map((minterm) => `x${minterm}`).join(separator) : "none";
+}
+
+function formatKarnaughGroupCells(group, separator) {
+  const cells = group.cells ?? [];
+  return cells.length
+    ? cells.map((cell) => cell.dontCare && !cell.value ? `x${cell.minterm}` : `m${cell.minterm}`).join(separator)
+    : "none";
+}
+
 function formatKarnaughCell(cell) {
+  if (cell.dontCare) {
+    return `X m${cell.minterm}`;
+  }
   return cell.value ? `1 m${cell.minterm}` : "0";
 }
 

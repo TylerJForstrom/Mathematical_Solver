@@ -12,7 +12,8 @@ The frontend currently supports:
 - Universal Ask mode that routes common math questions to the right solver
 - Propositional logic evaluation, truth tables, DPLL SAT solving with unsat-core
   diagnostics, and semantic tableaux proof trees
-- Karnaugh maps for two- to four-variable Boolean minimization
+- Karnaugh maps for two- to four-variable Boolean minimization with optional
+  don't-care cells
 - Reduced ordered binary decision diagrams for compact Boolean representations
 - Fuzzy and independent-probability truth-value evaluation for propositional
   statements
@@ -285,6 +286,8 @@ The same idea works for algebra and calculus:
   concrete satisfying assignments.
 - `kmap P or Q` lays out a Gray-code Karnaugh map, groups adjacent 1-cells,
   and returns the simplified sum-of-products form.
+- `kmap P and not Q with don't cares m3` marks `m3` as an `X` cell, uses it
+  to form a larger group, and simplifies the result to `P`.
 - `bdd (P and Q) or (P and R)` builds a reduced ordered binary decision
   diagram with merged subgraphs, satisfying paths, and Graphviz DOT output.
 - `fuzzy logic (P and Q) or not R with P=0.8 Q=0.6 R=0.3` evaluates a
@@ -532,7 +535,7 @@ The demo includes:
 - Exact combinatorics through Ask mode
 - DPLL SAT solving, unsat-core diagnostics, and logic normal forms through Ask mode
 - Semantic tableaux / truth-tree proofs through Ask mode
-- Karnaugh-map simplification through Ask mode
+- Karnaugh-map simplification with optional don't-care cells through Ask mode
 - Reduced ordered BDDs through Ask mode
 - Fuzzy and probabilistic truth-value logic through Ask mode
 - Graphviz DOT tree export through Ask mode
@@ -635,7 +638,7 @@ These are good ways to make the project more impressive mathematically:
    sequent calculus.
 14. Extend semantic tableaux with larger rendered proof trees and branch
    annotations for classroom-style derivations.
-15. Add rendered Karnaugh-map group overlays and optional don't-care cells.
+15. Add rendered Karnaugh-map group overlays.
 16. Add one-click SVG or PNG rendering for exported Graphviz parse trees.
 17. Add Boolean operations directly on BDDs, including apply, restrict, and
    variable reordering heuristics.
