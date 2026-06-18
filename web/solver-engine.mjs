@@ -43,7 +43,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
   const suggestions = [
     {
       title: "Fuzzy or probabilistic logic",
-      when: () => activeMode === "ask" && /\b(?:fuzzy|graded truth|truth values?|probabilistic logic|probability logic|soft logic)\b/.test(lower),
+      when: () => activeMode === "ask" && /\b(?:fuzzy|graded truth|truth values?|probabilistic logic|probability logic|correlated probability|soft logic)\b/.test(lower),
       reason: "I detected a logic question with truth values between 0 and 1.",
       needs: [
         "A propositional statement using and, or, not, ->, xor, or iff",
@@ -52,6 +52,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       examples: [
         ["Fuzzy", "ask", "fuzzy logic (P and Q) or not R with P=0.8 Q=0.6 R=0.3"],
         ["Probability logic", "ask", "probabilistic logic P or Q with P=0.2 Q=0.5"],
+        ["Correlated", "ask", "correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35"],
       ],
     },
     {
@@ -939,11 +940,18 @@ export function analyzeLogicTruthValue(statement) {
   const assignment = request.interval
     ? resolveIntervalSoftLogicAssignments(variables, request.values)
     : resolveSoftLogicAssignments(variables, request.values);
+  const probabilityModel = request.dependence
+    ? buildCorrelatedProbabilityModel(variables, assignment, request.dependence)
+    : null;
   const trace = [];
-  const result = request.interval
+  const result = probabilityModel
+    ? evaluateCorrelatedProbabilityLogic(tree, probabilityModel, trace)
+    : request.interval
     ? evaluateIntervalSoftLogic(tree, assignment, trace, request.tNorm)
     : evaluateSoftLogic(tree, assignment, request.kind, trace, request.tNorm);
-  const semantics = request.kind === "probability"
+  const semantics = probabilityModel
+    ? "correlated probability"
+    : request.kind === "probability"
     ? "independent probability"
     : request.interval
       ? `interval-valued ${formatFuzzySemantics(request.tNorm)}`
@@ -958,7 +966,9 @@ export function analyzeLogicTruthValue(statement) {
     mode: "logic",
     tree,
     answer,
-    summary: request.kind === "probability"
+    summary: probabilityModel
+      ? "Correlated probabilistic logic truth value"
+      : request.kind === "probability"
       ? "Probabilistic logic truth value"
       : request.interval
         ? "Interval fuzzy logic truth value"
@@ -976,14 +986,18 @@ export function analyzeLogicTruthValue(statement) {
       {
         title: "Read graded truth values",
         expression: formatSoftAssignment(assignment),
-        detail: request.interval
+        detail: probabilityModel
+          ? "Each event receives a marginal probability; the pair receives a joint or correlation constraint."
+          : request.interval
           ? "Each variable receives a truth interval bounded between 0 and 1."
           : "Each variable receives a value from 0 to 1 instead of only true or false.",
       },
       {
         title: "Evaluate graded operators",
         expression: answer,
-        detail: request.kind === "probability"
+        detail: probabilityModel
+          ? "A two-event joint distribution evaluates the whole propositional expression without assuming independence."
+          : request.kind === "probability"
           ? "Assuming independent variables, AND multiplies probabilities and OR uses inclusion-exclusion."
           : request.interval
             ? `Interval arithmetic applies ${formatFuzzySemantics(request.tNorm)} to lower and upper truth bounds.`
@@ -1003,9 +1017,11 @@ export function analyzeLogicTruthValue(statement) {
       ["Semantics", semantics],
       ...(request.kind === "fuzzy" ? [["T-norm", request.tNorm]] : []),
       ["Assignments", formatSoftAssignment(assignment)],
+      ...(probabilityModel ? formatCorrelatedProbabilityArtifacts(probabilityModel) : []),
       ["Result", formatSoftTruthValue(result)],
       ["Operator count", formatNumber(treeMetrics(tree).operators)],
     ],
+    ...(probabilityModel ? { extraTables: [formatCorrelatedProbabilityTable(probabilityModel)] } : {}),
   };
 }
 
@@ -25611,9 +25627,11 @@ function isLogicBddQuestion(lower) {
 function isLogicTruthValueQuestion(lower) {
   return lower.startsWith("fuzzy ") ||
     lower.startsWith("soft logic ") ||
+    lower.startsWith("correlated probability ") ||
+    lower.startsWith("correlated probabilistic ") ||
     lower.startsWith("probabilistic logic ") ||
     lower.startsWith("probability logic ") ||
-    /\b(?:fuzzy logic|soft logic|graded truth|truth values?|probabilistic logic|probability logic)\b/.test(lower);
+    /\b(?:fuzzy logic|soft logic|graded truth|truth values?|probabilistic logic|probability logic|correlated probability)\b/.test(lower);
 }
 
 function isLogicQuestion(question) {
@@ -26057,7 +26075,7 @@ function extractLogicBddQuestion(question) {
 
 function extractLogicTruthValueQuestion(question) {
   const lower = question.toLowerCase();
-  const kind = /\b(?:probabilistic logic|probability logic|prob logic|independent probability)\b/.test(lower)
+  const kind = /\b(?:correlated probability|correlated probabilistic|probabilistic logic|probability logic|prob logic|independent probability)\b/.test(lower)
     ? "probability"
     : "fuzzy";
   const interval = kind === "fuzzy" && (
@@ -26065,20 +26083,22 @@ function extractLogicTruthValueQuestion(question) {
     /\b(?:interval[-\s]?valued|interval)\s+(?:fuzzy|truth|graded)\b/.test(lower) ||
     /\b(?:fuzzy|truth|graded)\s+intervals?\b/.test(lower)
   );
+  const dependence = kind === "probability" ? parseProbabilityDependence(question) : null;
   const tNormRequest = kind === "fuzzy"
     ? extractFuzzyTNorm(question)
     : { text: question, tNorm: "minimum" };
   const values = interval
     ? parseIntervalSoftLogicAssignments(question)
     : parseSoftLogicAssignments(question);
-  const expression = stripSoftLogicAssignments(tNormRequest.text)
+  const expression = stripSoftLogicAssignments(stripProbabilityDependenceSpecs(tNormRequest.text))
     .replace(/[?!.]+$/, "")
     .replace(/^(?:evaluate|compute|calculate|find|show)\s+(?:the\s+)?/i, "")
-    .replace(/^(?:(?:interval[-\s]?valued|interval)\s+)?(?:fuzzy\s+logic|fuzzy|soft\s+logic|graded\s+truth|truth\s+values?|probabilistic\s+logic|probability\s+logic|prob\s+logic)\s*:?\s*/i, "")
+    .replace(/^(?:(?:interval[-\s]?valued|interval|correlated)\s+)?(?:fuzzy\s+logic|fuzzy|soft\s+logic|graded\s+truth|truth\s+values?|probabilistic\s+logic|probability\s+logic|prob\s+logic|probability)\s*:?\s*/i, "")
     .replace(/\b(?:using|with|given|where|values?|truth\s+values?|truth\s+intervals?|degrees?)\b/gi, " ")
+    .replace(/\bcorrelated\s+(?:probability|probabilistic)\b/gi, " ")
     .replace(/\b(?:interval[-\s]?valued|interval)\s+(?:fuzzy|truth|graded)\b/gi, " ")
     .replace(/\b(?:fuzzy|truth|graded)\s+intervals?\b/gi, " ")
-    .replace(/\b(?:fuzzy\s+logic|soft\s+logic|fuzzy|graded\s+truth|probabilistic\s+logic|probability\s+logic|prob\s+logic|independent\s+probability)\b/gi, " ")
+    .replace(/\b(?:fuzzy\s+logic|soft\s+logic|fuzzy|graded\s+truth|probabilistic\s+logic|probability\s+logic|prob\s+logic|independent\s+probability|correlated\s+probability\s+logic)\b/gi, " ")
     .replace(/\b(?:logic|boolean|propositional|expression|statement)\b/gi, " ")
     .replace(/^\s*(?:of|for)\s+/i, "")
     .replace(/\s+/g, " ")
@@ -26087,7 +26107,7 @@ function extractLogicTruthValueQuestion(question) {
   if (!expression) {
     throw new Error("Graded logic needs a statement, such as fuzzy logic P and Q with P=0.8 Q=0.4.");
   }
-  return { kind, expression, values, tNorm: tNormRequest.tNorm, interval };
+  return { kind, expression, values, tNorm: tNormRequest.tNorm, interval, dependence };
 }
 
 function extractFuzzyTNorm(question) {
@@ -27873,6 +27893,63 @@ function softLogicIntervalAssignmentPattern() {
   return /\b([A-Za-z_]\w*)\s*(?:=|:)\s*[\[(]\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?\s*,\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?\s*[\])]/gi;
 }
 
+function parseProbabilityDependence(text) {
+  const specs = [];
+  for (const match of text.matchAll(probabilityJointPattern())) {
+    specs.push({
+      kind: "joint",
+      left: match[1],
+      right: match[2],
+      value: parseProbabilityDependenceValue(match[3], match[4], "Joint probability"),
+    });
+  }
+  for (const match of text.matchAll(probabilityCorrelationPattern())) {
+    specs.push({
+      kind: "correlation",
+      left: match[1],
+      right: match[2],
+      value: parseProbabilityCorrelationValue(match[3], match[4]),
+    });
+  }
+
+  if (specs.length > 1) {
+    throw new Error("Correlated probability logic currently accepts one dependence spec, such as joint(P,Q)=0.35 or corr(P,Q)=0.4.");
+  }
+  return specs[0] ?? null;
+}
+
+function stripProbabilityDependenceSpecs(text) {
+  return text
+    .replace(probabilityJointPattern(), " ")
+    .replace(probabilityCorrelationPattern(), " ");
+}
+
+function probabilityJointPattern() {
+  return /\b(?:joint(?:\s+probability)?|p\s*both)\s*\(\s*([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*\)\s*(?:=|:)\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?/gi;
+}
+
+function probabilityCorrelationPattern() {
+  return /\b(?:corr|correlation|rho)\s*\(\s*([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*\)\s*(?:=|:)\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?/gi;
+}
+
+function parseProbabilityDependenceValue(rawText, percentMarker, label) {
+  const raw = Number(rawText);
+  const value = percentMarker ? raw / 100 : raw;
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${label} must be between 0 and 1, or a percent from 0% to 100%.`);
+  }
+  return normalizeNumber(value);
+}
+
+function parseProbabilityCorrelationValue(rawText, percentMarker) {
+  const raw = Number(rawText);
+  const value = percentMarker ? raw / 100 : raw;
+  if (!Number.isFinite(value) || value < -1 || value > 1) {
+    throw new Error("Correlation must be between -1 and 1.");
+  }
+  return normalizeNumber(value);
+}
+
 function resolveSoftLogicAssignments(variables, provided) {
   const assignment = {};
   for (const variable of variables) {
@@ -28057,6 +28134,174 @@ function evaluateProbabilityLogicOperator(operator, left, right) {
     return { value: normalizeSoftTruth(left * right + (1 - left) * (1 - right)), rule: "iff: P(both true) + P(both false)" };
   }
   throw new Error(`Unsupported probability operator '${operator}'.`);
+}
+
+function buildCorrelatedProbabilityModel(variables, assignment, dependence) {
+  if (variables.length !== 2) {
+    throw new Error("Correlated probability logic currently supports exactly two events. Add a single joint(P,Q)=... or corr(P,Q)=... for a two-variable statement.");
+  }
+  const leftName = matchProbabilityVariableName(dependence.left, variables);
+  const rightName = matchProbabilityVariableName(dependence.right, variables);
+  if (!leftName || !rightName || leftName === rightName) {
+    throw new Error("The dependence spec must name the two variables in the probability logic statement.");
+  }
+
+  const leftProbability = assignment[leftName];
+  const rightProbability = assignment[rightName];
+  const frechetLower = Math.max(0, leftProbability + rightProbability - 1);
+  const frechetUpper = Math.min(leftProbability, rightProbability);
+  const denominator = Math.sqrt(
+    leftProbability * (1 - leftProbability) * rightProbability * (1 - rightProbability),
+  );
+  const joint = dependence.kind === "correlation"
+    ? jointFromBernoulliCorrelation(leftProbability, rightProbability, dependence.value, denominator, frechetLower, frechetUpper)
+    : validateJointProbability(dependence.value, frechetLower, frechetUpper, leftName, rightName);
+  const correlation = denominator > EPSILON
+    ? normalizeNumber((joint - leftProbability * rightProbability) / denominator)
+    : Number.NaN;
+
+  const states = [
+    {
+      assignment: { [leftName]: true, [rightName]: true },
+      label: `${leftName}=true, ${rightName}=true`,
+      probability: normalizeSoftTruth(joint),
+    },
+    {
+      assignment: { [leftName]: true, [rightName]: false },
+      label: `${leftName}=true, ${rightName}=false`,
+      probability: normalizeSoftTruth(leftProbability - joint),
+    },
+    {
+      assignment: { [leftName]: false, [rightName]: true },
+      label: `${leftName}=false, ${rightName}=true`,
+      probability: normalizeSoftTruth(rightProbability - joint),
+    },
+    {
+      assignment: { [leftName]: false, [rightName]: false },
+      label: `${leftName}=false, ${rightName}=false`,
+      probability: normalizeSoftTruth(1 - leftProbability - rightProbability + joint),
+    },
+  ];
+
+  return {
+    variables: [leftName, rightName],
+    marginal: {
+      [leftName]: leftProbability,
+      [rightName]: rightProbability,
+    },
+    source: dependence.kind,
+    sourceValue: dependence.value,
+    joint: normalizeSoftTruth(joint),
+    correlation,
+    frechetLower: normalizeSoftTruth(frechetLower),
+    frechetUpper: normalizeSoftTruth(frechetUpper),
+    states,
+  };
+}
+
+function matchProbabilityVariableName(name, variables) {
+  return variables.find((variable) => variable === name)
+    ?? variables.find((variable) => variable.toLowerCase() === name.toLowerCase())
+    ?? null;
+}
+
+function jointFromBernoulliCorrelation(leftProbability, rightProbability, correlation, denominator, lower, upper) {
+  if (denominator <= EPSILON) {
+    if (Math.abs(correlation) <= EPSILON) {
+      return validateJointProbability(leftProbability * rightProbability, lower, upper, "left", "right");
+    }
+    throw new Error("Correlation needs both event probabilities strictly between 0 and 1.");
+  }
+  const joint = leftProbability * rightProbability + correlation * denominator;
+  return validateJointProbability(joint, lower, upper, "left", "right", correlation);
+}
+
+function validateJointProbability(joint, lower, upper, leftName, rightName, requestedCorrelation = Number.NaN) {
+  if (joint < lower - EPSILON || joint > upper + EPSILON) {
+    const correlationNote = Number.isFinite(requestedCorrelation)
+      ? ` That correlation implies an impossible joint probability for ${leftName} and ${rightName}.`
+      : "";
+    throw new Error(`Joint probability for ${leftName} and ${rightName} must be between ${formatNumber(lower)} and ${formatNumber(upper)}.${correlationNote}`);
+  }
+  return normalizeNumber(Math.max(lower, Math.min(upper, joint)));
+}
+
+function evaluateCorrelatedProbabilityLogic(node, model, trace) {
+  if (node.kind === "logicConstant") {
+    const value = node.value ? 1 : 0;
+    trace.push({
+      expression: logicToString(node),
+      rule: "constant probability",
+      value,
+    });
+    return value;
+  }
+  if (node.kind === "logicVariable") {
+    const value = model.marginal[node.name];
+    trace.push({
+      expression: node.name,
+      rule: "marginal probability",
+      value,
+    });
+    return value;
+  }
+  if (node.kind === "logicNot") {
+    const operand = evaluateCorrelatedProbabilityLogic(node.operand, model, trace);
+    const value = correlatedNodeProbability(node, model);
+    trace.push({
+      expression: logicToString(node),
+      rule: `not: 1 - ${formatNumber(operand)}`,
+      value,
+    });
+    return value;
+  }
+
+  evaluateCorrelatedProbabilityLogic(node.left, model, trace);
+  evaluateCorrelatedProbabilityLogic(node.right, model, trace);
+  const value = correlatedNodeProbability(node, model);
+  trace.push({
+    expression: logicToString(node),
+    rule: `${node.operator}: correlated joint distribution sum`,
+    value,
+  });
+  return value;
+}
+
+function correlatedNodeProbability(node, model) {
+  return normalizeSoftTruth(
+    model.states.reduce((sum, state) => (
+      evaluateLogic(node, state.assignment) ? sum + state.probability : sum
+    ), 0),
+  );
+}
+
+function formatCorrelatedProbabilityArtifacts(model) {
+  const [leftName, rightName] = model.variables;
+  return [
+    ["Dependence", formatCorrelatedProbabilityDependence(model)],
+    [`P(${leftName} and ${rightName})`, formatNumber(model.joint)],
+    ["Correlation", Number.isFinite(model.correlation) ? formatNumber(model.correlation) : "undefined"],
+    ["Frechet bounds", `[${formatNumber(model.frechetLower)}, ${formatNumber(model.frechetUpper)}]`],
+  ];
+}
+
+function formatCorrelatedProbabilityDependence(model) {
+  const [leftName, rightName] = model.variables;
+  if (model.source === "correlation") {
+    return `corr(${leftName},${rightName})=${formatNumber(model.sourceValue)}`;
+  }
+  return `joint(${leftName},${rightName})=${formatNumber(model.sourceValue)}`;
+}
+
+function formatCorrelatedProbabilityTable(model) {
+  return {
+    title: "Joint Distribution",
+    headers: ["State", "Probability"],
+    rows: model.states.map((state) => [
+      state.label,
+      formatNumber(state.probability),
+    ]),
+  };
 }
 
 function normalizeSoftTruth(value) {

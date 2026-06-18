@@ -203,6 +203,8 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   const lukasiewicz = analyzeLogicTruthValue("fuzzy logic P and Q with P=0.8 Q=0.6 tnorm=lukasiewicz");
   const interval = analyzeLogicTruthValue("interval fuzzy logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]");
   const intervalProduct = analyzeLogicTruthValue("interval fuzzy product logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]");
+  const correlated = analyzeLogicTruthValue("correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35");
+  const correlatedFromRho = analyzeLogicTruthValue("correlated probability logic P and Q with P=0.6 Q=0.5 corr(P,Q)=0.5");
 
   assert.equal(fuzzy.summary, "Fuzzy logic truth value");
   assert.equal(fuzzy.answer, "fuzzy truth = 0.7");
@@ -239,8 +241,28 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   assert.equal(probability.answer, "probability = 0.6");
   assert.equal(artifactValue(probability, "Semantics"), "independent probability");
   assert.deepEqual(probability.table.rows.slice(-1), [["P or Q", "or: P(A)+P(B)-P(A)P(B)", "0.6"]]);
+
+  assert.equal(correlated.summary, "Correlated probabilistic logic truth value");
+  assert.equal(correlated.answer, "probability = 0.75");
+  assert.equal(artifactValue(correlated, "Semantics"), "correlated probability");
+  assert.equal(artifactValue(correlated, "Dependence"), "joint(P,Q)=0.35");
+  assert.equal(artifactValue(correlated, "P(P and Q)"), "0.35");
+  assert.equal(artifactValue(correlated, "Correlation"), "0.204124");
+  assert.deepEqual(correlated.table.rows.slice(-1), [["P or Q", "or: correlated joint distribution sum", "0.75"]]);
+  assert.deepEqual(correlated.extraTables[0].rows, [
+    ["P=true, Q=true", "0.35"],
+    ["P=true, Q=false", "0.25"],
+    ["P=false, Q=true", "0.15"],
+    ["P=false, Q=false", "0.25"],
+  ]);
+
+  assert.equal(correlatedFromRho.answer, "probability = 0.422474");
+  assert.equal(artifactValue(correlatedFromRho, "Dependence"), "corr(P,Q)=0.5");
+  assert.equal(artifactValue(correlatedFromRho, "P(P and Q)"), "0.422474");
+
   assert.equal(analyzeUniversal("fuzzy logic P and Q with P=0.8 Q=0.6").summary, "Fuzzy logic truth value");
   assert.equal(analyzeUniversal("interval fuzzy logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]").summary, "Interval fuzzy logic truth value");
+  assert.equal(analyzeUniversal("correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35").summary, "Correlated probabilistic logic truth value");
 });
 
 runTest("tree export emits Graphviz DOT", () => {

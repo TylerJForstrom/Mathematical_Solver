@@ -16,8 +16,8 @@ The frontend currently supports:
   don't-care cells
 - Reduced ordered binary decision diagrams for compact Boolean representations
 - Fuzzy truth-value evaluation with min/max, product, Lukasiewicz, and
-  interval-valued t-norms, plus independent-probability truth-value evaluation
-  for propositional statements
+  interval-valued t-norms, plus independent and correlated probability
+  truth-value evaluation for propositional statements
 - Graphviz DOT export for parsed math and logic expression trees
 - Boolean algebra simplification with identity, domination, complement,
   idempotent, absorption, consensus, De Morgan, double-negation, implication,
@@ -302,6 +302,11 @@ The same idea works for algebra and calculus:
   `fuzzy truth interval = [0.4, 0.7]`.
 - `probabilistic logic P or Q with P=0.2 Q=0.5` assumes independent variables
   and applies probability formulas for logical operators.
+- `correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35`
+  builds a two-event joint distribution and returns `probability = 0.75`
+  without assuming independence.
+- `correlated probability logic P and Q with P=0.6 Q=0.5 corr(P,Q)=0.5`
+  converts a Bernoulli correlation into the implied joint probability.
 - `dot tree x^2 + 2x + 1` exports the parsed expression tree as Graphviz DOT
   with node and edge tables.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
@@ -545,8 +550,8 @@ The demo includes:
 - Semantic tableaux / truth-tree proofs through Ask mode
 - Karnaugh-map simplification with optional don't-care cells through Ask mode
 - Reduced ordered BDDs through Ask mode
-- Fuzzy t-norm, interval-valued, and probabilistic truth-value logic through
-  Ask mode
+- Fuzzy t-norm, interval-valued, independent-probability, and
+  correlated-probability truth-value logic through Ask mode
 - Graphviz DOT tree export through Ask mode
 - Number theory and modular arithmetic through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
@@ -651,4 +656,5 @@ These are good ways to make the project more impressive mathematically:
 16. Add one-click SVG or PNG rendering for exported Graphviz parse trees.
 17. Add Boolean operations directly on BDDs, including apply, restrict, and
    variable reordering heuristics.
-18. Extend uncertainty logic with correlated probabilities.
+18. Generalize probabilistic logic to larger joint distributions, Bayesian
+   networks, and conditional-probability tables.
