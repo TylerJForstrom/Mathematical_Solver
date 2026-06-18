@@ -500,6 +500,21 @@ runTest("statistics mode compares logistic growth nonlinear models", () => {
   assert.equal(analyzeUniversal("compare nonlinear regression models x: 0,1,2,3,4,5,6,7,8; y: 1.8,4.7,11.9,26.9,50,73.1,88.1,95.3,98.2 families=linear,logistic").summary, "nonlinear regression model comparison");
 });
 
+runTest("statistics mode fits custom nonlinear regression formulas", () => {
+  const result = analyzeStatistics("custom nonlinear regression formula=a*exp(b*x); x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5; bounds a=0:10,b=0:2");
+
+  assert.equal(result.summary, "custom nonlinear regression");
+  assert.equal(result.answer, "y = a*exp(b*x); a=1, b=0.693147");
+  assert.equal(artifactValue(result, "a bounds"), "[0, 10]");
+  assert.equal(artifactValue(result, "b bounds"), "[0, 2]");
+  assert.equal(artifactValue(result, "R squared"), "1");
+  assert.equal(artifactValue(result, "b estimate"), "0.693147");
+  assert.equal(artifactValue(result, "b 95% CI"), "[0.693147, 0.693147]");
+  assert.deepEqual(result.table.rows[2], ["3", "3", "8", "8", "0"]);
+  assert.equal(result.graph.expression, "Custom nonlinear best fit");
+  assert.equal(analyzeUniversal("custom nonlinear regression formula=a*exp(b*x); x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5").summary, "custom nonlinear regression");
+});
+
 runTest("statistics mode computes multiple linear regression", () => {
   const result = analyzeStatistics("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
 

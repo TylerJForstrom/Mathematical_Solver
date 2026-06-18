@@ -1579,6 +1579,10 @@ export function analyzeStatistics(statement) {
     return analyzePoisson(statement);
   }
 
+  if (isCustomNonlinearRegressionQuestion(lower)) {
+    return analyzeCustomNonlinearRegression(statement);
+  }
+
   if (isNonlinearRegressionModelComparisonQuestion(lower)) {
     return analyzeNonlinearRegressionModelComparison(statement);
   }
@@ -1650,6 +1654,10 @@ export function analyzeStatistics(statement) {
 
   if (isRegressionDiagnosticsQuestion(lower)) {
     return analyzeRegressionDiagnostics(statement);
+  }
+
+  if (isCustomNonlinearRegressionQuestion(lower)) {
+    return analyzeCustomNonlinearRegression(statement);
   }
 
   if (isNonlinearRegressionModelComparisonQuestion(lower)) {
@@ -8099,6 +8107,87 @@ function analyzeNonlinearRegressionModelComparison(statement) {
   };
 }
 
+function analyzeCustomNonlinearRegression(statement) {
+  const request = parseCustomNonlinearRegressionInput(statement);
+  const fit = fitCustomNonlinearRegression(request);
+  const graph = buildNonlinearRegressionFitGraph(request.x, request.y, {
+    label: "Custom nonlinear",
+    predict: (x) => evaluateCustomNonlinearFormula(request.expression, request.variable, request.parameterNames, fit.parameters, x),
+  });
+  const parameterAssignments = request.parameterNames
+    .map((name, index) => `${name}=${formatNumber(fit.parameters[index])}`)
+    .join(", ");
+  const percent = formatNumber(request.level * 100);
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      label: "CUSTOM NLS",
+      children: [
+        statsDatasetNode(request.x, [], "X"),
+        statsDatasetNode(request.y, [], "Y"),
+        ...request.parameterNames.map((name, index) => statsMetricNode(name, fit.parameters[index])),
+      ],
+    },
+    answer: `${request.response} = ${request.formula}; ${parameterAssignments}`,
+    summary: "custom nonlinear regression",
+    details: `${request.x.length} observations, ${request.parameterNames.length} fitted parameters`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.y, request.parameterNames.map((name, index) =>
+      statsMetricNode(name, fit.parameters[index]),
+    ))),
+    steps: [
+      {
+        title: "Read custom model",
+        expression: `${request.response} = ${request.formula}`,
+        detail: `The solver treats ${request.variable} as the input variable and fits ${request.parameterNames.join(", ")}.`,
+      },
+      {
+        title: "Initialize parameters",
+        expression: request.parameterNames.map((name, index) => `${name}=${formatNumber(request.initial[index])}`).join(", "),
+        detail: "Starting values come from the params clause or conservative defaults.",
+      },
+      {
+        title: "Run damped least squares",
+        expression: `iterations = ${formatNumber(fit.iterations)}, SSE = ${formatNumber(fit.sse)}`,
+        detail: "A numerical Jacobian and damped Gauss-Newton steps minimize original-scale squared residuals.",
+      },
+      {
+        title: "Approximate uncertainty",
+        expression: `${percent}% intervals from J'J inverse`,
+        detail: "The parameter covariance is approximated from the final Jacobian and residual mean square error.",
+      },
+    ],
+    table: {
+      headers: ["Obs", request.variable, "Actual", "Fitted", "Residual"],
+      rows: request.y.map((value, index) => [
+        String(index + 1),
+        formatNumber(request.x[index]),
+        formatNumber(value),
+        formatNumber(fit.fitted[index]),
+        formatNumber(fit.residuals[index]),
+      ]),
+    },
+    artifacts: [
+      ["Formula", `${request.response} = ${request.formula}`],
+      ...request.parameterNames.map((name, index) => [`${name} bounds`, formatCustomParameterBound(request.bounds[index])]),
+      ["Iterations", formatNumber(fit.iterations)],
+      ["SSE", formatNumber(fit.sse)],
+      ["R squared", formatNumber(fit.rSquared)],
+      ["AIC", formatNumber(fit.aic)],
+      ["AICc", Number.isFinite(fit.aicc) ? formatNumber(fit.aicc) : "undefined"],
+      ["BIC", formatNumber(fit.bic)],
+      ...fit.inference.flatMap((item) => [
+        [`${item.label} estimate`, formatNumber(item.coefficient)],
+        [`${item.label} SE`, formatFiniteNumber(item.standardError)],
+        [`${item.label} ${percent}% CI`, Number.isFinite(item.lower) ? `[${formatNumber(item.lower)}, ${formatNumber(item.upper)}]` : "undefined"],
+      ]),
+    ],
+    graph,
+  };
+}
+
 function fitPolynomialComparisonModel(xValues, yValues, degree, validation = {}) {
   const coefficients = fitPolynomialCoefficients(xValues, yValues, degree);
   const fitted = xValues.map((x) => polynomialPrediction(coefficients, x));
@@ -8430,6 +8519,187 @@ function logisticGrowthSigmoid(value) {
 
 function formatLogisticGrowthEquation([asymptote, intercept, slope]) {
   return `y = ${formatNumber(asymptote)} / (1 + e^(${formatNumber(-intercept)} ${formatSignedTerm(-slope, "x")}))`;
+}
+
+function fitCustomNonlinearRegression(request) {
+  let parameters = applyCustomParameterBounds([...request.initial], request.bounds);
+  let damping = 1e-3;
+  let fitted = evaluateCustomRegressionFitted(request, parameters);
+  let bestSse = customRegressionSse(request.y, fitted);
+
+  if (!Number.isFinite(bestSse)) {
+    throw new Error("Custom nonlinear regression produced non-finite starting predictions.");
+  }
+
+  let iterations = 0;
+  for (let iteration = 1; iteration <= request.maxIterations; iteration += 1) {
+    iterations = iteration;
+    const jacobian = customRegressionJacobian(request, parameters);
+    const residuals = request.y.map((value, index) => value - fitted[index]);
+    const normalMatrix = Array.from({ length: parameters.length }, () => Array(parameters.length).fill(0));
+    const normalVector = Array(parameters.length).fill(0);
+
+    for (let row = 0; row < request.x.length; row += 1) {
+      for (let i = 0; i < parameters.length; i += 1) {
+        normalVector[i] += jacobian[row][i] * residuals[row];
+        for (let j = 0; j < parameters.length; j += 1) {
+          normalMatrix[i][j] += jacobian[row][i] * jacobian[row][j];
+        }
+      }
+    }
+
+    for (let diagonal = 0; diagonal < parameters.length; diagonal += 1) {
+      normalMatrix[diagonal][diagonal] += damping * (normalMatrix[diagonal][diagonal] || 1);
+    }
+
+    let step;
+    try {
+      step = solveLinearSystem(normalMatrix, normalVector);
+    } catch {
+      damping *= 10;
+      continue;
+    }
+
+    const candidate = applyCustomParameterBounds(
+      parameters.map((value, index) => value + step[index]),
+      request.bounds,
+    );
+    if (candidate.some((value) => !Number.isFinite(value))) {
+      damping *= 10;
+      continue;
+    }
+
+    const candidateFitted = evaluateCustomRegressionFitted(request, candidate);
+    const candidateSse = customRegressionSse(request.y, candidateFitted);
+    if (Number.isFinite(candidateSse) && candidateSse < bestSse) {
+      parameters = candidate;
+      fitted = candidateFitted;
+      if (Math.abs(bestSse - candidateSse) <= request.tolerance * Math.max(1, bestSse)) {
+        bestSse = candidateSse;
+        break;
+      }
+      bestSse = candidateSse;
+      damping = Math.max(damping / 3, 1e-8);
+    } else {
+      damping *= 10;
+    }
+  }
+
+  const normalizedParameters = parameters.map(normalizeNumber);
+  const normalizedFitted = fitted.map(normalizeNumber);
+  const scored = scoreNonlinearRegressionFit({
+    family: "custom",
+    label: "Custom nonlinear",
+    equation: `${request.response} = ${request.formula}`,
+    transformedEquation: `${request.response} = ${request.formula}`,
+    coefficients: normalizedParameters,
+    fitted: normalizedFitted,
+    parameterCount: request.parameterNames.length,
+    status: `fit in ${iterations} iterations`,
+    predict: (x) => evaluateCustomNonlinearFormula(request.expression, request.variable, request.parameterNames, normalizedParameters, x),
+  }, request.y);
+  return {
+    ...scored,
+    parameters: normalizedParameters,
+    iterations,
+    inference: customNonlinearRegressionInference(request, normalizedParameters, scored.sse),
+  };
+}
+
+function evaluateCustomRegressionFitted(request, parameters) {
+  return request.x.map((x) =>
+    evaluateCustomNonlinearFormula(request.expression, request.variable, request.parameterNames, parameters, x),
+  );
+}
+
+function evaluateCustomNonlinearFormula(expression, variable, parameterNames, parameters, x) {
+  const values = { [variable]: x };
+  parameterNames.forEach((name, index) => {
+    values[name] = parameters[index];
+  });
+  const value = evaluateMath(expression, values);
+  return Number.isFinite(value) ? value : Number.NaN;
+}
+
+function customRegressionSse(actual, fitted) {
+  return fitted.reduce((sum, value, index) => {
+    if (!Number.isFinite(value)) {
+      return Number.POSITIVE_INFINITY;
+    }
+    return sum + (actual[index] - value) ** 2;
+  }, 0);
+}
+
+function customRegressionJacobian(request, parameters) {
+  return request.x.map((x) => request.parameterNames.map((_, parameterIndex) => {
+    const center = parameters[parameterIndex];
+    const step = 1e-5 * (Math.abs(center) + 1);
+    const plus = applyCustomParameterBounds(parameters.map((value, index) =>
+      index === parameterIndex ? value + step : value,
+    ), request.bounds);
+    const minus = applyCustomParameterBounds(parameters.map((value, index) =>
+      index === parameterIndex ? value - step : value,
+    ), request.bounds);
+    const plusValue = evaluateCustomNonlinearFormula(request.expression, request.variable, request.parameterNames, plus, x);
+    const minusValue = evaluateCustomNonlinearFormula(request.expression, request.variable, request.parameterNames, minus, x);
+    const denominator = plus[parameterIndex] - minus[parameterIndex];
+    if (!Number.isFinite(plusValue) || !Number.isFinite(minusValue) || Math.abs(denominator) <= EPSILON) {
+      return 0;
+    }
+    return (plusValue - minusValue) / denominator;
+  }));
+}
+
+function applyCustomParameterBounds(parameters, bounds) {
+  return parameters.map((value, index) => {
+    const bound = bounds[index];
+    return Math.min(bound.upper, Math.max(bound.lower, value));
+  });
+}
+
+function customNonlinearRegressionInference(request, parameters, sse) {
+  const degreesFreedom = request.y.length - parameters.length;
+  if (degreesFreedom <= 0) {
+    return request.parameterNames.map((name, index) => ({
+      label: name,
+      coefficient: parameters[index],
+      standardError: Number.NaN,
+      lower: Number.NaN,
+      upper: Number.NaN,
+    }));
+  }
+
+  const jacobian = customRegressionJacobian(request, parameters);
+  const normalMatrix = multiplyMatrices(transposeMatrix(jacobian), jacobian);
+  let inverse;
+  try {
+    inverse = invertMatrixBySolves(normalMatrix);
+  } catch {
+    inverse = null;
+  }
+  const mse = sse / degreesFreedom;
+  const critical = inverseStudentTCdf((1 + request.level) / 2, degreesFreedom);
+
+  return request.parameterNames.map((name, index) => {
+    const variance = inverse ? mse * inverse[index][index] : Number.NaN;
+    const standardError = Number.isFinite(variance) ? Math.sqrt(Math.max(0, variance)) : Number.NaN;
+    return {
+      label: name,
+      coefficient: parameters[index],
+      standardError: normalizeNumber(standardError),
+      lower: normalizeNumber(parameters[index] - critical * standardError),
+      upper: normalizeNumber(parameters[index] + critical * standardError),
+    };
+  });
+}
+
+function invertMatrixBySolves(matrix) {
+  const columns = matrix.map((_, column) => {
+    const basis = Array(matrix.length).fill(0);
+    basis[column] = 1;
+    return solveLinearSystem(matrix, basis);
+  });
+  return transposeMatrix(columns);
 }
 
 function fitPolynomialCoefficients(xValues, yValues, degree) {
@@ -19846,7 +20116,7 @@ function parseXYLists(text) {
 }
 
 function cleanLabeledListChunk(text) {
-  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty|families?|models?|k\s*[- ]?\s*fold|kfold|folds?|holdout|test(?:\s*size)?|validation(?:\s*(?:size|split))?|val\s*split|split)\b/i);
+  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty|families?|models?|formula|equation|params?|starts?|initial|bounds?|k\s*[- ]?\s*fold|kfold|folds?|holdout|test(?:\s*size)?|validation(?:\s*(?:size|split))?|val\s*split|split)\b/i);
   return optionIndex >= 0 ? text.slice(0, optionIndex) : text;
 }
 
@@ -20055,6 +20325,147 @@ function parseNonlinearRegressionModelComparisonInput(text) {
     x: pairs.map((pair) => pair.x),
     y: pairs.map((pair) => pair.y),
   };
+}
+
+function parseCustomNonlinearRegressionInput(text) {
+  const formulaMatch = extractCustomRegressionFormulaMatch(text);
+  if (!formulaMatch) {
+    throw new Error("Custom nonlinear regression needs a formula, such as formula=a*exp(b*x).");
+  }
+  const formulaInfo = parseCustomRegressionFormula(formulaMatch[1]);
+  const dataText = text.slice(0, formulaMatch.index) + text.slice(formulaMatch.index + formulaMatch[0].length);
+  const parsedLists = parseXYLists(dataText);
+  const pairs = parsedLists ? zipPairs(parsedLists.x, parsedLists.y) : parsePairs(dataText);
+  if (pairs.length < 4) {
+    throw new Error("Custom nonlinear regression needs at least four paired observations.");
+  }
+
+  const variable = parseCustomRegressionVariable(text, formulaInfo.expression);
+  const parameterNames = mathVariables(formulaInfo.expression)
+    .filter((name) => name !== variable && !isMathConstantName(name));
+  if (parameterNames.length === 0) {
+    throw new Error("Custom nonlinear regression formula needs at least one parameter besides x.");
+  }
+  if (pairs.length <= parameterNames.length) {
+    throw new Error("Custom nonlinear regression needs more observations than fitted parameters.");
+  }
+
+  const bounds = parseCustomRegressionBounds(text, parameterNames);
+  const initial = parseCustomRegressionInitialParameters(text, parameterNames, bounds);
+  const maxIterations = readNamedNumber(text, ["maxIterations", "maxiterations", "maxIter", "maxiter", "iterations"], 200);
+  const tolerance = readNamedNumber(text, ["tolerance", "tol"], 1e-8);
+  if (!Number.isSafeInteger(maxIterations) || maxIterations < 1 || maxIterations > 1000) {
+    throw new Error("Custom nonlinear regression iterations must be an integer from 1 through 1000.");
+  }
+  if (!(tolerance > 0)) {
+    throw new Error("Custom nonlinear regression tolerance must be positive.");
+  }
+
+  return {
+    response: formulaInfo.response,
+    formula: formulaInfo.formula,
+    expression: formulaInfo.expression,
+    variable,
+    parameterNames,
+    initial,
+    bounds,
+    level: parseConfidenceLevel(text, 0.95),
+    maxIterations,
+    tolerance,
+    x: pairs.map((pair) => pair.x),
+    y: pairs.map((pair) => pair.y),
+  };
+}
+
+function extractCustomRegressionFormulaMatch(text) {
+  return text.match(/\b(?:formula|equation|model)\s*[:=]\s*(.+?)(?=\s*(?:;\s*)?\b(?:x|y|params?|starts?|initial|bounds?|confidence|level|tol|tolerance|iterations|maxiterations|maxiter)\s*[:=]|$)/i);
+}
+
+function parseCustomRegressionFormula(rawFormula) {
+  const trimmed = rawFormula.replace(/;\s*$/, "").trim();
+  const explicit = trimmed.match(/^([A-Za-z_]\w*)\s*=\s*(.+)$/);
+  const response = explicit ? explicit[1] : "y";
+  const formula = explicit ? explicit[2].trim() : trimmed;
+  const parsed = parseMath(formula);
+  if (parsed.kind === "equation") {
+    throw new Error("Custom nonlinear regression formula should contain only the response expression, such as formula=a*exp(b*x).");
+  }
+  return {
+    response,
+    formula,
+    expression: parsed,
+  };
+}
+
+function parseCustomRegressionVariable(text, expression) {
+  const explicit = text.match(/\b(?:variable|var|input)\s*[:=]\s*([A-Za-z_]\w*)\b/i);
+  if (explicit) {
+    return explicit[1];
+  }
+  const names = mathVariables(expression).filter((name) => !isMathConstantName(name));
+  if (names.includes("x")) return "x";
+  if (names.includes("t")) return "t";
+  return "x";
+}
+
+function parseCustomRegressionInitialParameters(text, parameterNames, bounds) {
+  const chunk = extractCustomRegressionOptionChunk(text, "params?|starts?|initial(?:s| guesses?)?");
+  return parameterNames.map((name, index) => {
+    const explicit = chunk ? readNamedNumber(chunk, [name], Number.NaN) : Number.NaN;
+    const fallback = defaultCustomRegressionParameterStart(bounds[index]);
+    return Number.isFinite(explicit)
+      ? Math.min(bounds[index].upper, Math.max(bounds[index].lower, explicit))
+      : fallback;
+  });
+}
+
+function parseCustomRegressionBounds(text, parameterNames) {
+  const chunk = extractCustomRegressionOptionChunk(text, "bounds?");
+  return parameterNames.map((name) => {
+    const fallback = { lower: Number.NEGATIVE_INFINITY, upper: Number.POSITIVE_INFINITY };
+    if (!chunk) {
+      return fallback;
+    }
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const numberPattern = "([-+]?\\d*\\.?\\d+(?:e[-+]?\\d+)?)";
+    const bracket = chunk.match(new RegExp(`\\b${escaped}\\s*=\\s*\\[\\s*${numberPattern}\\s*,\\s*${numberPattern}\\s*\\]`, "i"));
+    const colon = chunk.match(new RegExp(`\\b${escaped}\\s*=\\s*${numberPattern}\\s*(?:\\.\\.|:|,|to)\\s*${numberPattern}`, "i"));
+    const match = bracket ?? colon;
+    if (!match) {
+      return fallback;
+    }
+    const lower = Number(match[1]);
+    const upper = Number(match[2]);
+    if (!(lower < upper)) {
+      throw new Error(`Custom nonlinear regression bounds for ${name} need lower < upper.`);
+    }
+    return { lower, upper };
+  });
+}
+
+function extractCustomRegressionOptionChunk(text, labelPattern) {
+  const optionPattern = "(?:x|y|formula|equation|model|params?|starts?|initial|bounds?|confidence|level|tol|tolerance|iterations|maxiterations|maxiter|variable|var|input)";
+  const match = text.match(new RegExp(`\\b(?:${labelPattern})\\b\\s*[:=]?\\s*(.+?)(?=\\s*(?:;\\s*)?\\b${optionPattern}\\b\\s*[:=]|$)`, "i"));
+  return match ? match[1] : "";
+}
+
+function defaultCustomRegressionParameterStart(bound) {
+  if (Number.isFinite(bound.lower) && Number.isFinite(bound.upper)) {
+    return (bound.lower + bound.upper) / 2;
+  }
+  if (Number.isFinite(bound.lower)) {
+    return bound.lower + 1;
+  }
+  if (Number.isFinite(bound.upper)) {
+    return bound.upper - 1;
+  }
+  return 1;
+}
+
+function formatCustomParameterBound(bound) {
+  const lower = Number.isFinite(bound.lower) ? formatNumber(bound.lower) : "-infinity";
+  const upper = Number.isFinite(bound.upper) ? formatNumber(bound.upper) : "infinity";
+  return `[${lower}, ${upper}]`;
 }
 
 function parseNonlinearRegressionFamilies(text) {
@@ -21967,6 +22378,16 @@ function isNonlinearRegressionModelComparisonQuestion(lower) {
   return wantsComparison && wantsRegression && namesNonlinearFamily;
 }
 
+function isCustomNonlinearRegressionQuestion(lower) {
+  const hasFormula = lower.includes("formula=") ||
+    lower.includes("formula:") ||
+    lower.includes("equation=") ||
+    lower.includes("equation:");
+  return (lower.includes("custom nonlinear regression") || lower.includes("custom regression") ||
+    (lower.includes("nonlinear regression") && hasFormula)) &&
+    hasFormula;
+}
+
 function isRegressionDiagnosticsQuestion(lower) {
   return lower.includes("regression diagnostics") ||
     lower.includes("regression diagnostic") ||
@@ -22445,6 +22866,7 @@ function isStatisticsQuestion(lower) {
     isFisherExactQuestion(lower) ||
     isNormalityQuestion(lower) ||
     isEqualVarianceQuestion(lower) ||
+    isCustomNonlinearRegressionQuestion(lower) ||
     isNonlinearRegressionModelComparisonQuestion(lower) ||
     isRegressionModelComparisonQuestion(lower) ||
     isRegressionDiagnosticsQuestion(lower) ||
