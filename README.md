@@ -17,7 +17,8 @@ The frontend currently supports:
 - Logic normal forms: NNF, CNF, and DNF conversion with truth-table
   equivalence checks
 - Algebra simplification with constants, like terms, Pythagorean identities,
-  reciprocal trig functions, cofunction identities, double-angle rules, and
+  reciprocal trig functions, cofunction identities, double-angle rules,
+  power-reduction/half-angle rewrites, and
   angle-sum/product-to-sum/sum-to-product rules
 - Rational-root polynomial factoring for quadratics, cubics, and higher-degree
   one-variable polynomials with rational roots
@@ -211,6 +212,8 @@ The same idea works for algebra and calculus:
 - `sin(pi/2 - x)` uses a cofunction identity and simplifies to `cos(x)`.
 - `sin(x)*cos(y)` uses a product-to-sum identity and rewrites to
   `0.5 * (sin(x + y) + sin(x - y))`.
+- `power reduce sin(x)^2` and `half angle cos(x/2)` apply power-reduction
+  and half-angle identities without changing the default simplification mode.
 - `factor x^3 - 6x^2 + 11x - 6` uses rational roots and synthetic division
   to produce `(x - 1)(x - 2)(x - 3)`.
 - `10 choose 3` uses exact integer combinatorics and returns `C(10, 3) = 120`.
@@ -524,8 +527,8 @@ These are good ways to make the project more impressive mathematically:
 
 1. Add a formal problem-router grammar for more natural-language questions.
 2. Add broader exact symbolic root output for selected cubic and quartic equations.
-3. Add more trigonometric identities, including power-reduction and
-   half-angle rules.
+3. Add broader inverse-trig identities and verified branch/sign handling for
+   half-angle rewrites.
 4. Add broader substitution, broader integration by parts, and repeated
    irreducible quadratic partial fractions.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.

@@ -108,6 +108,10 @@ runTest("input assistant suggests structured problem formats", () => {
   assert.equal(odeSystem.title, "Linear ODE system");
   assert.ok(odeSystem.examples[0][2].includes("x'=y"));
 
+  const trigRewrite = suggestProblemHelp("power reduce trig identity", "ask", "Need a trig expression.");
+  assert.equal(trigRewrite.title, "Trig identity rewrite");
+  assert.equal(trigRewrite.examples[0][2], "power reduce sin(x)^2");
+
   const arima = suggestProblemHelp("arima forecast", "statistics", "Time-series forecast needs a series.");
   assert.equal(arima.title, "ARIMA forecast");
   assert.ok(arima.examples[0][2].startsWith("arima(2,1,0)"));
@@ -149,6 +153,15 @@ runTest("simplify mode applies trigonometric identities", () => {
   assert.equal(analyzeSimplification("cos(x)-cos(y)").answer, "-2 * sin((x + y) / 2) * sin((x - y) / 2)");
   assert.equal(analyzeSimplification("sin(x)*cos(x)").answer, "sin(x) * cos(x)");
   assert.equal(analyzeSimplification("sin(x)+sin(x)").answer, "sin(x) + sin(x)");
+
+  assert.equal(analyzeSimplification("power reduce sin(x)^2").answer, "(1 - cos(2 * x)) / 2");
+  assert.equal(analyzeSimplification("power reduction of cos(x)^2").answer, "(1 + cos(2 * x)) / 2");
+  assert.equal(analyzeSimplification("power reduce tan(x)^2").answer, "(1 - cos(2 * x)) / (1 + cos(2 * x))");
+  assert.equal(analyzeSimplification("power reduce sin(x)*cos(x)").answer, "0.5 * sin(2 * x)");
+  assert.equal(analyzeSimplification("half angle sin(x/2)").answer, "sqrt((1 - cos(x)) / 2)");
+  assert.equal(analyzeSimplification("half angle cos(x/2)").answer, "sqrt((1 + cos(x)) / 2)");
+  assert.equal(analyzeSimplification("half angle tan(x/2)").answer, "sin(x) / (1 + cos(x))");
+  assert.equal(analyzeUniversal("half angle sin(0.5*x)").answer, "sqrt((1 - cos(x)) / 2)");
 });
 
 runTest("factoring mode factors quadratics over rationals", () => {

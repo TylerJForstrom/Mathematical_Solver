@@ -55,6 +55,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
     },
     {
+      title: "Trig identity rewrite",
+      when: () => /\b(power[-\s]?reduc(?:e|tion)|half[-\s]?angle)\b/.test(lower),
+      reason: "I detected a trigonometric identity rewrite.",
+      needs: [
+        "Use power reduce for squared trig terms",
+        "Use half angle for sin(theta/2), cos(theta/2), or tan(theta/2)",
+      ],
+      examples: [
+        ["Power reduce", "ask", "power reduce sin(x)^2"],
+        ["Half angle", "ask", "half angle cos(x/2)"],
+      ],
+    },
+    {
       title: "Two-sample t-test",
       when: () => wantsStats && /\b(two[-\s]?sample|welch|compare|difference)\b/.test(lower),
       reason: "I detected a comparison between two numeric samples.",
@@ -466,7 +479,8 @@ export function analyzeLogicNormalForm(statement) {
 }
 
 export function analyzeSimplification(statement) {
-  const parsed = parseMath(statement);
+  const trigRequest = extractExplicitTrigIdentityQuestion(statement);
+  const parsed = parseMath(trigRequest?.expression ?? statement);
   if (parsed.kind === "equation") {
     throw new Error("Simplification mode expects an expression, not an equation.");
   }
@@ -478,6 +492,31 @@ export function analyzeSimplification(statement) {
       detail: "The input is converted into an arithmetic expression tree.",
     },
   ];
+
+  if (trigRequest) {
+    const transformed = trigRequest.kind === "power-reduction"
+      ? rewriteTrigPowerReduction(parsed, steps)
+      : rewriteTrigHalfAngle(parsed, steps);
+    if (!transformed) {
+      throw new Error(`${trigRequest.label} needs a supported trig expression, such as ${trigRequest.example}.`);
+    }
+    const answer = formatMath(transformed);
+    return {
+      mode: "simplify",
+      tree: transformed,
+      answer,
+      summary: trigRequest.kind === "power-reduction" ? "trig power-reduction identity" : "trig half-angle identity",
+      details: `${trigRequest.label} rewrite`,
+      variables: mathVariables(parsed),
+      metrics: treeMetrics(transformed),
+      steps,
+      artifacts: [
+        ["Original", formatMath(parsed)],
+        ["Identity family", trigRequest.label],
+        ["Rewritten", answer],
+      ],
+    };
+  }
 
   const simplified = simplifyNode(parsed, steps);
   const polynomial = polynomialFrom(simplified);
@@ -1682,6 +1721,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isOptimizationQuestion(lower)) {
     routed = analyzeOptimization(question);
     routedLabel = "Optimization";
+  } else if (isTrigIdentityQuestion(lower)) {
+    routed = analyzeSimplification(question);
+    routedLabel = "Trig identity";
   } else if (isDifferentialEquationQuestion(lower)) {
     routed = analyzeDifferentialEquation(question);
     routedLabel = "Differential equation";
@@ -21249,7 +21291,14 @@ function isLogicNormalFormQuestion(lower) {
 }
 
 function isSimplifyQuestion(lower) {
-  return lower.includes("simplify") || lower.includes("combine like terms");
+  return isTrigIdentityQuestion(lower) ||
+    lower.includes("simplify") ||
+    lower.includes("combine like terms");
+}
+
+function isTrigIdentityQuestion(lower) {
+  return /\bpower[-\s]?reduc(?:e|tion)\b/.test(lower) ||
+    /\bhalf[-\s]?angle\b/.test(lower);
 }
 
 function isFactorQuestion(lower) {
@@ -21565,6 +21614,32 @@ function cleanSimplifyQuestion(question) {
     .replace(/^(simplify|combine like terms|calculate|compute|what is|find)\s+/i, "")
     .replace(/[?!.]+$/, "")
     .trim();
+}
+
+function extractExplicitTrigIdentityQuestion(statement) {
+  const lower = statement.toLowerCase();
+  const isPowerReduction = /\bpower[-\s]?reduc(?:e|tion)\b/.test(lower);
+  const isHalfAngle = /\bhalf[-\s]?angle\b/.test(lower);
+  if (!isPowerReduction && !isHalfAngle) {
+    return null;
+  }
+
+  const kind = isPowerReduction ? "power-reduction" : "half-angle";
+  const label = isPowerReduction ? "power-reduction identity" : "half-angle identity";
+  const example = isPowerReduction ? "power reduce sin(x)^2" : "half angle sin(x/2)";
+  const expression = statement
+    .replace(/[?!.]+$/, "")
+    .replace(/\b(?:use|using|apply|rewrite|convert|transform|with|by|via|the|identity|identities)\b/gi, " ")
+    .replace(/\bpower[-\s]?reduc(?:e|tion)\b/gi, " ")
+    .replace(/\bhalf[-\s]?angle\b/gi, " ")
+    .replace(/^\s*of\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!expression) {
+    throw new Error(`${label} needs an expression, such as ${example}.`);
+  }
+  return { kind, label, example, expression };
 }
 
 function cleanComplexQuestion(question) {
@@ -23198,6 +23273,145 @@ function squaredTrigArgument(node, name) {
 
 function squaredTrigNode(name, argument) {
   return mathBinary("^", { kind: "mathFunction", name, argument }, mathNumber(2));
+}
+
+function rewriteTrigPowerReduction(node, steps) {
+  const sinArgument = squaredTrigArgument(node, "sin");
+  if (sinArgument) {
+    const result = mathBinary(
+      "/",
+      mathBinary("-", mathNumber(1), trigNode("cos", doubleAngleNode(sinArgument))),
+      mathNumber(2),
+    );
+    steps.push({
+      title: "Apply power-reduction identity",
+      expression: `sin(${formatMath(sinArgument)})^2 = (1 - cos(2theta)) / 2`,
+      detail: "Power-reduction identities replace squared trig functions with first powers of double angles.",
+    });
+    return result;
+  }
+
+  const cosArgument = squaredTrigArgument(node, "cos");
+  if (cosArgument) {
+    const result = mathBinary(
+      "/",
+      mathBinary("+", mathNumber(1), trigNode("cos", doubleAngleNode(cosArgument))),
+      mathNumber(2),
+    );
+    steps.push({
+      title: "Apply power-reduction identity",
+      expression: `cos(${formatMath(cosArgument)})^2 = (1 + cos(2theta)) / 2`,
+      detail: "Power-reduction identities replace squared trig functions with first powers of double angles.",
+    });
+    return result;
+  }
+
+  const tanArgument = squaredTrigArgument(node, "tan");
+  if (tanArgument) {
+    const doubleAngle = doubleAngleNode(tanArgument);
+    const result = mathBinary(
+      "/",
+      mathBinary("-", mathNumber(1), trigNode("cos", doubleAngle)),
+      mathBinary("+", mathNumber(1), trigNode("cos", doubleAngle)),
+    );
+    steps.push({
+      title: "Apply power-reduction identity",
+      expression: `tan(${formatMath(tanArgument)})^2 = (1 - cos(2theta)) / (1 + cos(2theta))`,
+      detail: "The tangent-squared reduction follows from sin-squared over cos-squared reductions.",
+    });
+    return result;
+  }
+
+  const product = matchingSineCosineProduct(node);
+  if (product) {
+    const result = mathBinary("*", mathNumber(0.5), trigNode("sin", doubleAngleNode(product)));
+    steps.push({
+      title: "Apply product power-reduction identity",
+      expression: `sin(${formatMath(product)})cos(${formatMath(product)}) = 0.5sin(2theta)`,
+      detail: "The sine double-angle identity can be rearranged to collapse a matching sine-cosine product.",
+    });
+    return result;
+  }
+
+  return null;
+}
+
+function rewriteTrigHalfAngle(node, steps) {
+  const sinArgument = trigFunctionArgument(node, "sin");
+  const sinBase = sinArgument ? halfAngleBaseArgument(sinArgument) : null;
+  if (sinBase) {
+    const result = trigNode(
+      "sqrt",
+      mathBinary("/", mathBinary("-", mathNumber(1), trigNode("cos", sinBase)), mathNumber(2)),
+    );
+    steps.push({
+      title: "Apply half-angle identity",
+      expression: `sin(${formatMath(sinBase)} / 2) = sqrt((1 - cos(${formatMath(sinBase)})) / 2)`,
+      detail: "The solver reports the principal square-root half-angle form.",
+    });
+    return result;
+  }
+
+  const cosArgument = trigFunctionArgument(node, "cos");
+  const cosBase = cosArgument ? halfAngleBaseArgument(cosArgument) : null;
+  if (cosBase) {
+    const result = trigNode(
+      "sqrt",
+      mathBinary("/", mathBinary("+", mathNumber(1), trigNode("cos", cosBase)), mathNumber(2)),
+    );
+    steps.push({
+      title: "Apply half-angle identity",
+      expression: `cos(${formatMath(cosBase)} / 2) = sqrt((1 + cos(${formatMath(cosBase)})) / 2)`,
+      detail: "The solver reports the principal square-root half-angle form.",
+    });
+    return result;
+  }
+
+  const tanArgument = trigFunctionArgument(node, "tan");
+  const tanBase = tanArgument ? halfAngleBaseArgument(tanArgument) : null;
+  if (tanBase) {
+    const result = mathBinary(
+      "/",
+      trigNode("sin", tanBase),
+      mathBinary("+", mathNumber(1), trigNode("cos", tanBase)),
+    );
+    steps.push({
+      title: "Apply half-angle identity",
+      expression: `tan(${formatMath(tanBase)} / 2) = sin(${formatMath(tanBase)}) / (1 + cos(${formatMath(tanBase)}))`,
+      detail: "This tangent half-angle form avoids an extra square-root branch.",
+    });
+    return result;
+  }
+
+  return null;
+}
+
+function matchingSineCosineProduct(node) {
+  if (node.kind !== "mathBinary" || node.operator !== "*") {
+    return null;
+  }
+  const leftSin = trigFunctionArgument(node.left, "sin");
+  const leftCos = trigFunctionArgument(node.left, "cos");
+  const rightSin = trigFunctionArgument(node.right, "sin");
+  const rightCos = trigFunctionArgument(node.right, "cos");
+  if (leftSin && rightCos && sameMathTree(leftSin, rightCos)) return leftSin;
+  if (leftCos && rightSin && sameMathTree(leftCos, rightSin)) return leftCos;
+  return null;
+}
+
+function halfAngleBaseArgument(argument) {
+  if (argument.kind === "mathBinary" && argument.operator === "/" && isNumericValue(argument.right, 2)) {
+    return argument.left;
+  }
+  if (argument.kind === "mathBinary" && argument.operator === "*") {
+    if (isNumericValue(argument.left, 0.5)) return argument.right;
+    if (isNumericValue(argument.right, 0.5)) return argument.left;
+  }
+  return null;
+}
+
+function doubleAngleNode(argument) {
+  return mathBinary("*", mathNumber(2), argument);
 }
 
 function sameMathTree(left, right) {
