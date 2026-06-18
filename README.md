@@ -32,8 +32,9 @@ The frontend currently supports:
 - Number theory tools: gcd, lcm, prime factorization, modular powers,
   modular inverses, and Chinese remainder theorem systems
 - One-variable polynomial inequalities with sign charts and interval notation
-- Linear, quadratic, and biquadratic quartic equation solving, including exact
-  radical roots and complex quadratic roots
+- Linear, quadratic, rational-root cubic/higher-degree, and biquadratic
+  quartic equation solving, including exact radical roots and complex
+  quadratic roots
 - Complex-number arithmetic and elementary complex functions through Ask mode
 - Numerical real-root approximation for higher-degree one-variable polynomials
 - Systems of linear equations and Newton-style nonlinear systems through
@@ -254,6 +255,10 @@ The same idea works for algebra and calculus:
   `x = sqrt(2), x = -sqrt(2)`.
 - `x^2 + 1 = 0` keeps the quadratic formula in the complex plane and returns
   `x = i, x = -i`.
+- `x^3 - 6x^2 + 11x - 6 = 0` uses rational roots and synthetic division to
+  return `x = 1, x = 2, x = 3`.
+- `x^3 - x^2 - 2x + 2 = 0` finds the rational root, solves the remaining
+  quadratic exactly, and returns `x = -sqrt(2), x = 1, x = sqrt(2)`.
 - `x^4 - 5x^2 + 4 = 0` recognizes biquadratic form, substitutes
   `u = x^2`, and returns `x = -2, x = -1, x = 1, x = 2`.
 - `integrate (2x + 3)/(x^2 + 3x + 2)` decomposes the rational function and
@@ -607,7 +612,8 @@ node web/solver-engine.test.mjs
 These are good ways to make the project more impressive mathematically:
 
 1. Add a formal problem-router grammar for more natural-language questions.
-2. Add broader exact symbolic root output for cubic and non-biquadratic quartic equations.
+2. Add broader exact symbolic root output for irreducible cubics and
+   non-rational quartic equations.
 3. Add broader inverse-trig identities and verified branch/sign handling for
    half-angle rewrites.
 4. Add broader substitution, broader integration by parts, and repeated
@@ -619,7 +625,7 @@ These are good ways to make the project more impressive mathematically:
 8. Add richer nonlinear phase-plane tools, including separatrix tracing,
    parameter sweeps, and styled direction-field arrows.
 9. Add multi-step natural-language explanations for word problems.
-10. Add exact symbolic roots for more higher-degree equations when possible.
+10. Add exact symbolic roots for more higher-degree equations beyond rational-factor reductions.
 11. Add more Boolean algebra simplification rules, including normal-form
    factoring and larger multi-clause reductions.
 12. Extend SAT solving with watched literals, clause learning, and unsat cores.

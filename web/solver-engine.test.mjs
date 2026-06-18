@@ -453,6 +453,24 @@ runTest("equation mode deduplicates repeated biquadratic roots", () => {
   assert.equal(artifactValue(result, "u roots"), "1");
 });
 
+runTest("equation mode solves cubic rational roots exactly", () => {
+  const result = analyzeEquation("x^3 - 6x^2 + 11x - 6 = 0", "x");
+
+  assert.equal(result.summary, "rational-root equation solution");
+  assert.equal(result.answer, "x = 1, x = 2, x = 3");
+  assert.equal(artifactValue(result, "Method"), "rational root theorem + synthetic division");
+  assert.equal(artifactValue(result, "Rational roots"), "1, 2, 3");
+  assert.equal(analyzeUniversal("solve x^3 - 6x^2 + 11x - 6 = 0").summary, "rational-root equation solution");
+});
+
+runTest("equation mode solves rational-root cubics with exact quadratic residuals", () => {
+  const result = analyzeEquation("x^3 - x^2 - 2x + 2 = 0", "x");
+
+  assert.equal(result.answer, "x = -sqrt(2), x = 1, x = sqrt(2)");
+  assert.equal(artifactValue(result, "Residual factor"), "x^2 - 2 = 0");
+  assert.equal(artifactValue(result, "Numeric approximations"), "-1.414214, 1, 1.414214");
+});
+
 runTest("equation mode solves linear equations", () => {
   const result = analyzeEquation("2x + 5 = 17", "x");
 

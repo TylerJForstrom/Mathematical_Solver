@@ -29503,6 +29503,13 @@ function solvePolynomial(poly, variable) {
     }
   }
 
+  if (degree >= 3) {
+    const rationalFactorSolution = solveRationalFactorEquation(coefficients, variable);
+    if (rationalFactorSolution) {
+      return rationalFactorSolution;
+    }
+  }
+
   const numericRoots = approximateRealPolynomialRoots(coefficients);
   return {
     answer: numericRoots.length
@@ -29524,6 +29531,172 @@ function solvePolynomial(poly, variable) {
       },
     ],
   };
+}
+
+function solveRationalFactorEquation(coefficients, variable) {
+  const degree = polynomialDegree(coefficients);
+  const content = polynomialContent(coefficients);
+  let working = trimPolynomialCoefficients(coefficients.map((coefficient) =>
+    normalizeNumber((coefficient ?? 0) / content),
+  ));
+  const rationalRoots = [];
+
+  while (polynomialDegree(working) > 0) {
+    const root = findRationalRoot(working);
+    if (!root) {
+      break;
+    }
+    rationalRoots.push(root);
+    working = syntheticDivide(working, root.value);
+  }
+
+  if (rationalRoots.length === 0) {
+    return null;
+  }
+
+  const residualDegree = polynomialDegree(working);
+  if (residualDegree > 2) {
+    return null;
+  }
+
+  const residualRoots = residualDegree === 2
+    ? quadraticRootEntries(working[2] ?? 0, working[1] ?? 0, working[0] ?? 0)
+    : residualDegree === 1
+      ? [linearRootEntry(working[1] ?? 0, working[0] ?? 0)]
+      : [];
+  const rationalEntries = rationalRoots.map((root) => ({
+    value: root.value,
+    text: formatRationalRootValue(root),
+    approximate: false,
+    exactRadical: false,
+    complex: false,
+  }));
+  const realRoots = uniqueSortedRootEntries(
+    [...rationalEntries, ...residualRoots.filter((root) => !root.complex)],
+  );
+  const complexRoots = uniqueTextRootEntries(residualRoots.filter((root) => root.complex));
+  const roots = [...realRoots, ...complexRoots];
+  if (roots.length === 0) {
+    return null;
+  }
+
+  const hasApproximation = roots.some((root) => root.approximate && !root.complex);
+  const hasExactRadical = roots.some((root) => root.exactRadical);
+  const multiplicities = rationalRootMultiplicities(rationalRoots);
+  const residualText = residualDegree > 0
+    ? `${formatPolynomialFromCoefficients(working, variable)} = 0`
+    : `${formatNumber(working[0] ?? 1)} after extracting all linear factors`;
+
+  return {
+    answer: roots.map((root) => `${variable} ${root.approximate ? "~=" : "="} ${root.text}`).join(", "),
+    summary: "rational-root equation solution",
+    steps: [
+      {
+        title: "Detect polynomial degree",
+        expression: `degree ${degree}`,
+        detail: "For degree three and higher, the solver first checks whether exact rational roots can reduce the equation.",
+      },
+      {
+        title: "Apply rational root theorem",
+        expression: rationalRoots.map((root) => formatRationalRootValue(root)).join(", "),
+        detail: "Candidate rational roots divide the constant term over the leading coefficient.",
+      },
+      {
+        title: "Use synthetic division",
+        expression: residualText,
+        detail: "Each exact rational root is divided out, leaving at most a quadratic residual factor.",
+      },
+      {
+        title: residualDegree === 2 ? "Solve residual quadratic" : "Collect exact roots",
+        expression: roots.map((root) => root.text).join(", "),
+        detail: residualDegree === 2
+          ? "The remaining quadratic is solved with the quadratic formula, preserving radical or complex output when needed."
+          : "All roots came from exact rational factors.",
+      },
+    ],
+    artifacts: [
+      ["Method", "rational root theorem + synthetic division"],
+      ["Rational roots", rationalEntries.length ? rationalEntries.map((root) => root.text).join(", ") : "none"],
+      ["Multiplicities", multiplicities.length ? multiplicities.join(", ") : "none"],
+      ["Residual factor", residualText],
+      ...(hasApproximation || hasExactRadical
+        ? [["Numeric approximations", roots
+          .filter((root) => !root.complex && Number.isFinite(root.value))
+          .map((root) => formatNumber(root.value))
+          .join(", ")]]
+        : []),
+    ],
+  };
+}
+
+function formatRationalRootValue(root) {
+  if (root.denominator === 1) {
+    return formatNumber(root.numerator);
+  }
+  return `${formatNumber(root.numerator)}/${formatNumber(root.denominator)}`;
+}
+
+function linearRootEntry(a, b) {
+  const value = normalizeNumber(-b / a);
+  return {
+    value,
+    text: formatNumber(value),
+    approximate: false,
+    exactRadical: false,
+    complex: false,
+  };
+}
+
+function quadraticRootEntries(a, b, c) {
+  const discriminant = b * b - 4 * a * c;
+  const result = quadraticRootResult(a, b, c, discriminant);
+  if (discriminant < -EPSILON) {
+    return result.roots.map((text) => ({
+      value: Number.NaN,
+      text,
+      approximate: false,
+      exactRadical: false,
+      complex: true,
+    }));
+  }
+
+  const denominator = 2 * a;
+  const values = nearlyEqual(discriminant, 0)
+    ? [normalizeNumber(-b / denominator)]
+    : [
+      normalizeNumber((-b + Math.sqrt(Math.max(0, discriminant))) / denominator),
+      normalizeNumber((-b - Math.sqrt(Math.max(0, discriminant))) / denominator),
+    ];
+  return result.roots.map((text, index) => ({
+    value: values[index],
+    text,
+    approximate: false,
+    exactRadical: result.exactRadicals,
+    complex: false,
+  }));
+}
+
+function rationalRootMultiplicities(roots) {
+  const counts = new Map();
+  for (const root of roots) {
+    const text = formatRationalRootValue(root);
+    counts.set(text, (counts.get(text) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([root, count]) =>
+    count === 1 ? root : `${root} (multiplicity ${count})`,
+  );
+}
+
+function uniqueTextRootEntries(entries) {
+  const seen = new Set();
+  const unique = [];
+  for (const entry of entries) {
+    if (!seen.has(entry.text)) {
+      seen.add(entry.text);
+      unique.push(entry);
+    }
+  }
+  return unique;
 }
 
 function solveBiquadraticEquation(coefficients, variable) {
