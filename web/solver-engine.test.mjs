@@ -205,6 +205,7 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   const intervalProduct = analyzeLogicTruthValue("interval fuzzy product logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]");
   const correlated = analyzeLogicTruthValue("correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35");
   const correlatedFromRho = analyzeLogicTruthValue("correlated probability logic P and Q with P=0.6 Q=0.5 corr(P,Q)=0.5");
+  const conditional = analyzeLogicTruthValue("conditional probability logic P or Q with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3");
 
   assert.equal(fuzzy.summary, "Fuzzy logic truth value");
   assert.equal(fuzzy.answer, "fuzzy truth = 0.7");
@@ -260,9 +261,25 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   assert.equal(artifactValue(correlatedFromRho, "Dependence"), "corr(P,Q)=0.5");
   assert.equal(artifactValue(correlatedFromRho, "P(P and Q)"), "0.422474");
 
+  assert.equal(conditional.summary, "Conditional probabilistic logic truth value");
+  assert.equal(conditional.answer, "probability = 0.72");
+  assert.equal(artifactValue(conditional, "Semantics"), "conditional probability table");
+  assert.equal(artifactValue(conditional, "Assignments"), "P=0.6, Q=0.6");
+  assert.equal(artifactValue(conditional, "Dependence"), "cond(Q|P)=0.8, cond(Q|not P)=0.3");
+  assert.equal(artifactValue(conditional, "P(P and Q)"), "0.48");
+  assert.equal(artifactValue(conditional, "Derived child marginal"), "P(Q)=0.6");
+  assert.deepEqual(conditional.table.rows.slice(-1), [["P or Q", "or: conditional joint distribution sum", "0.72"]]);
+  assert.deepEqual(conditional.extraTables[0].rows, [
+    ["P=true, Q=true", "0.48"],
+    ["P=true, Q=false", "0.12"],
+    ["P=false, Q=true", "0.12"],
+    ["P=false, Q=false", "0.28"],
+  ]);
+
   assert.equal(analyzeUniversal("fuzzy logic P and Q with P=0.8 Q=0.6").summary, "Fuzzy logic truth value");
   assert.equal(analyzeUniversal("interval fuzzy logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]").summary, "Interval fuzzy logic truth value");
   assert.equal(analyzeUniversal("correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35").summary, "Correlated probabilistic logic truth value");
+  assert.equal(analyzeUniversal("conditional probability logic P or Q with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3").summary, "Conditional probabilistic logic truth value");
 });
 
 runTest("tree export emits Graphviz DOT", () => {
