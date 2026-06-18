@@ -478,6 +478,101 @@ export function analyzeLogicNormalForm(statement) {
   };
 }
 
+export function analyzeTreeExport(statement) {
+  const cleaned = cleanTreeExportQuestion(statement);
+  if (!cleaned) {
+    throw new Error("Tree export needs an expression, such as 'graphviz x^2 + 3x' or 'export tree (P and Q) -> R'.");
+  }
+
+  const { tree, kind } = parseExpressionForExport(cleaned);
+  const dot = treeToDot(tree);
+  const metrics = treeMetrics(tree);
+  const display = kind === "logic" ? logicToString(tree) : formatMath(tree);
+  const edges = metrics.nodes - 1;
+
+  return {
+    mode: kind === "logic" ? "logic" : "simplify",
+    tree,
+    answer: `digraph: ${metrics.nodes} nodes, ${edges} edges`,
+    summary: "Graphviz DOT export",
+    details: "Paste the DOT artifact into Graphviz (for example: dot -Tpng tree.dot -o tree.png).",
+    variables: kind === "logic" ? logicVariables(tree) : mathVariables(tree),
+    metrics,
+    steps: [
+      {
+        title: "Parse expression",
+        expression: display,
+        detail: `The input is parsed into a ${kind} expression tree.`,
+      },
+      {
+        title: "Emit Graphviz DOT",
+        expression: `${metrics.nodes} nodes, ${edges} edges`,
+        detail: "Each tree node becomes a DOT node and every parent-child link becomes a directed edge.",
+      },
+    ],
+    artifacts: [
+      ["Expression", display],
+      ["Tree type", kind],
+      ["Nodes", String(metrics.nodes)],
+      ["DOT", dot],
+    ],
+  };
+}
+
+function parseExpressionForExport(expression) {
+  if (isLogicQuestion(expression)) {
+    return { tree: parseLogic(expression), kind: "logic" };
+  }
+  try {
+    return { tree: parseMath(expression), kind: "math" };
+  } catch (mathError) {
+    try {
+      return { tree: parseLogic(expression), kind: "logic" };
+    } catch {
+      throw mathError;
+    }
+  }
+}
+
+function treeToDot(tree) {
+  const lines = [
+    "digraph ExpressionTree {",
+    "  node [shape=box, style=\"rounded,filled\", fontname=\"Helvetica\"];",
+  ];
+  let counter = 0;
+  const walk = (node) => {
+    const id = `n${counter}`;
+    counter += 1;
+    lines.push(`  ${id} [label="${escapeDotLabel(nodeLabel(node))}", fillcolor="${dotToneColor(nodeTone(node))}"];`);
+    for (const child of nodeChildren(node)) {
+      const childId = walk(child);
+      lines.push(`  ${id} -> ${childId};`);
+    }
+    return id;
+  };
+  walk(tree);
+  lines.push("}");
+  return lines.join("\n");
+}
+
+function escapeDotLabel(text) {
+  return String(text).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function dotToneColor(tone) {
+  const palette = {
+    logic: "#dbeafe",
+    statistics: "#dcfce7",
+    matrix: "#fae8ff",
+    equation: "#fef9c3",
+    number: "#e0f2fe",
+    symbol: "#ede9fe",
+    function: "#ffedd5",
+    operator: "#f1f5f9",
+  };
+  return palette[tone] ?? "#f1f5f9";
+}
+
 export function analyzeTableau(statement) {
   const tree = parseLogic(statement);
   const variables = logicVariables(tree);
@@ -1940,7 +2035,10 @@ export function analyzeUniversal(question, values = {}) {
   let routed;
   let routedLabel;
 
-  if (isMarkovQuestion(lower)) {
+  if (isTreeExportQuestion(lower)) {
+    routed = analyzeTreeExport(question);
+    routedLabel = "Tree export";
+  } else if (isMarkovQuestion(lower)) {
     routed = analyzeMarkovChain(question);
     routedLabel = "Markov chain";
   } else if (isLogicNormalFormQuestion(lower)) {
@@ -23522,6 +23620,15 @@ function isTableauQuestion(lower) {
     trimmed.startsWith("smullyan ");
 }
 
+function isTreeExportQuestion(lower) {
+  return lower.includes("graphviz") ||
+    lower.includes("dot export") ||
+    lower.includes("export tree") ||
+    lower.includes("expression tree") ||
+    lower.includes("parse tree") ||
+    /\b(?:as|to|into)\s+dot\b/.test(lower);
+}
+
 function isSimplifyQuestion(lower) {
   return isTrigIdentityQuestion(lower) ||
     lower.includes("simplify") ||
@@ -23793,6 +23900,20 @@ function cleanTableauQuestion(question) {
     .replace(/^(?:tableaux?|truth\s+tree)\b[:\s]*/i, "")
     .replace(/^(?:for|of)\s+/i, "")
     .replace(/[?!.]+$/, "")
+    .trim();
+}
+
+function cleanTreeExportQuestion(question) {
+  return question
+    .replace(/[?]+$/, "")
+    .replace(/\bgraphviz\b/gi, " ")
+    .replace(/\bdot\s+export\b/gi, " ")
+    .replace(/\b(?:as|to|into)\s+(?:a\s+)?dot\b/gi, " ")
+    .replace(/^(?:export|show|give|generate|render|build|draw|convert)\s+(?:me\s+)?/i, "")
+    .replace(/^(?:the\s+)?(?:expression|parse|syntax)?\s*tree\b\s*(?:of|for)?\s*/i, "")
+    .replace(/^(?:dot)\b[:\s]*/i, "")
+    .replace(/^(?:of|for)\s+/i, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 

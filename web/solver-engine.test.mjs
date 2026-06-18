@@ -29,6 +29,7 @@ import {
   analyzeSystem,
   analyzeTableau,
   analyzeTaylor,
+  analyzeTreeExport,
   analyzeUniversal,
   analyzeVector,
   evaluateLogic,
@@ -121,6 +122,35 @@ runTest("universal Ask routes semantic tableau questions", () => {
   assert.equal(routed.answer, "satisfiable");
   assert.equal(analyzeUniversal("semantic tableau P and not P").answer, "unsatisfiable");
   assert.equal(analyzeUniversal("truth tree P or not P").answer, "satisfiable");
+});
+
+runTest("tree export emits Graphviz DOT for math and logic", () => {
+  const math = analyzeTreeExport("graphviz x^2 + 3x");
+  assert.equal(artifactValue(math, "Tree type"), "math");
+  const mathDot = artifactValue(math, "DOT");
+  assert.match(mathDot, /^digraph ExpressionTree \{/);
+  assert.match(mathDot, /\}$/);
+  assert.match(mathDot, /-> n/); // has at least one edge
+  assert.equal((mathDot.match(/->/g) || []).length, math.metrics.nodes - 1);
+
+  const logic = analyzeTreeExport("export tree (P and Q) -> R");
+  assert.equal(artifactValue(logic, "Tree type"), "logic");
+  const logicDot = artifactValue(logic, "DOT");
+  assert.match(logicDot, /label="IMPLIES"/);
+  assert.match(logicDot, /label="AND"/);
+
+  // Labels with quotes/backslashes must be escaped so the DOT stays valid.
+  const escaped = analyzeTreeExport('graphviz x = 2');
+  assert.match(artifactValue(escaped, "DOT"), /label="="/);
+});
+
+runTest("universal Ask routes tree export without colliding with graph or dot product", () => {
+  assert.equal(analyzeUniversal("graphviz x^2 + 3x").summary, "Graphviz DOT export");
+  assert.equal(analyzeUniversal("dot export P or Q").summary, "Graphviz DOT export");
+  assert.equal(analyzeUniversal("convert x^2 - 1 to dot").summary, "Graphviz DOT export");
+  // Existing routes must keep working.
+  assert.equal(analyzeUniversal("dot [1,2,3] [4,5,6]").summary, "dot product");
+  assert.equal(analyzeUniversal("graph x^2 from -2 to 2").summary, "function graph");
 });
 
 runTest("input assistant suggests structured problem formats", () => {

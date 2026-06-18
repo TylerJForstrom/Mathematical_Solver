@@ -175,6 +175,8 @@ The frontend currently supports:
   root-finding graphs
 - Simpson's rule and trapezoidal-rule numerical integration
 - Expression-tree visualization for every mode
+- Graphviz DOT export for math and logic expression trees, ready to paste into
+  any Graphviz renderer
 - Step-by-step explanations for the transformations being applied
 
 The Python command line solver supports propositional logic:
@@ -267,6 +269,10 @@ The same idea works for algebra and calculus:
   classification against the truth table. `semantic tableau` and `truth tree`
   are accepted as aliases, and a formula such as `tableau P and not P` closes
   every branch and is reported unsatisfiable.
+- `graphviz x^2 + 3x` (or `export tree (P and Q) -> R`) emits a Graphviz DOT
+  description of the parse tree as a copyable artifact. It auto-detects math
+  vs. logic input and accepts `dot export`, `parse tree`, and `... to dot`
+  phrasings.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
 - `solve nonlinear system x^2 + y^2 = 25; x - y = 1 guess x=3 y=2`
   numerically solves a square nonlinear system with Newton iterations.
@@ -589,7 +595,6 @@ These are good ways to make the project more impressive mathematically:
 13. Generate formal proof steps for tautologies using natural deduction or
    sequent calculus.
 14. Add Karnaugh maps for statements with two to four variables.
-15. Export expression trees to Graphviz DOT so the parse tree can be visualized.
-16. Add binary decision diagrams to represent equivalent formulas compactly.
-17. Add probability or fuzzy truth values so statements can evaluate beyond
+15. Add binary decision diagrams to represent equivalent formulas compactly.
+16. Add probability or fuzzy truth values so statements can evaluate beyond
     simple true/false logic.
