@@ -938,10 +938,10 @@ export function analyzeLogicTruthValue(statement) {
   const variables = logicVariables(tree);
   const assignment = resolveSoftLogicAssignments(variables, request.values);
   const trace = [];
-  const result = evaluateSoftLogic(tree, assignment, request.kind, trace);
+  const result = evaluateSoftLogic(tree, assignment, request.kind, trace, request.tNorm);
   const semantics = request.kind === "probability"
     ? "independent probability"
-    : "fuzzy min/max";
+    : formatFuzzySemantics(request.tNorm);
   const answer = request.kind === "probability"
     ? `probability = ${formatNumber(result)}`
     : `fuzzy truth = ${formatNumber(result)}`;
@@ -971,7 +971,7 @@ export function analyzeLogicTruthValue(statement) {
         expression: answer,
         detail: request.kind === "probability"
           ? "Assuming independent variables, AND multiplies probabilities and OR uses inclusion-exclusion."
-          : "Fuzzy logic uses min for AND, max for OR, and 1 - x for NOT.",
+          : fuzzyEvaluationDetail(request.tNorm),
       },
     ],
     table: {
@@ -985,6 +985,7 @@ export function analyzeLogicTruthValue(statement) {
     artifacts: [
       ["Original", logicToString(tree)],
       ["Semantics", semantics],
+      ...(request.kind === "fuzzy" ? [["T-norm", request.tNorm]] : []),
       ["Assignments", formatSoftAssignment(assignment)],
       ["Result", formatNumber(result)],
       ["Operator count", formatNumber(treeMetrics(tree).operators)],
@@ -26043,8 +26044,11 @@ function extractLogicTruthValueQuestion(question) {
   const kind = /\b(?:probabilistic logic|probability logic|prob logic|independent probability)\b/.test(lower)
     ? "probability"
     : "fuzzy";
+  const tNormRequest = kind === "fuzzy"
+    ? extractFuzzyTNorm(question)
+    : { text: question, tNorm: "minimum" };
   const values = parseSoftLogicAssignments(question);
-  const expression = question
+  const expression = tNormRequest.text
     .replace(/[?!.]+$/, "")
     .replace(/\b[A-Za-z_]\w*\s*(?:=|:)\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?\s*%?/gi, " ")
     .replace(/^(?:evaluate|compute|calculate|find|show)\s+(?:the\s+)?/i, "")
@@ -26059,7 +26063,74 @@ function extractLogicTruthValueQuestion(question) {
   if (!expression) {
     throw new Error("Graded logic needs a statement, such as fuzzy logic P and Q with P=0.8 Q=0.4.");
   }
-  return { kind, expression, values };
+  return { kind, expression, values, tNorm: tNormRequest.tNorm };
+}
+
+function extractFuzzyTNorm(question) {
+  let text = question;
+  let tNorm = "minimum";
+  const replacements = [
+    {
+      pattern: /\bfuzzy\s+(minimum|min|max|godel|goedel|product|algebraic|lukasiewicz|bounded)\s+logic\b/i,
+      replace: (match, name) => {
+        tNorm = normalizeFuzzyTNormName(name);
+        return "fuzzy logic";
+      },
+    },
+    {
+      pattern: /\b(?:t-?norm|tnorm|semantics)\s*(?:=|:)\s*(minimum|min|max|godel|goedel|product|algebraic|lukasiewicz|bounded)\b/i,
+      replace: (match, name) => {
+        tNorm = normalizeFuzzyTNormName(name);
+        return " ";
+      },
+    },
+    {
+      pattern: /\b(?:using|with|via)\s+(?:the\s+)?(minimum|min|max|godel|goedel|product|algebraic|lukasiewicz|bounded)(?:\s+(?:t-?norm|tnorm|semantics))\b/i,
+      replace: (match, name) => {
+        tNorm = normalizeFuzzyTNormName(name);
+        return " ";
+      },
+    },
+  ];
+
+  for (const replacement of replacements) {
+    text = text.replace(replacement.pattern, replacement.replace);
+  }
+  return { text, tNorm };
+}
+
+function normalizeFuzzyTNormName(name) {
+  const clean = name.toLowerCase();
+  if (["minimum", "min", "max", "godel", "goedel"].includes(clean)) {
+    return "minimum";
+  }
+  if (["product", "algebraic"].includes(clean)) {
+    return "product";
+  }
+  if (["lukasiewicz", "bounded"].includes(clean)) {
+    return "lukasiewicz";
+  }
+  return "minimum";
+}
+
+function formatFuzzySemantics(tNorm) {
+  if (tNorm === "product") {
+    return "fuzzy product t-norm";
+  }
+  if (tNorm === "lukasiewicz") {
+    return "fuzzy Lukasiewicz t-norm";
+  }
+  return "fuzzy min/max";
+}
+
+function fuzzyEvaluationDetail(tNorm) {
+  if (tNorm === "product") {
+    return "Product fuzzy logic multiplies AND, uses the product s-norm for OR, and keeps 1 - x for NOT.";
+  }
+  if (tNorm === "lukasiewicz") {
+    return "Lukasiewicz fuzzy logic uses max(0, a + b - 1) for AND, min(1, a + b) for OR, and 1 - x for NOT.";
+  }
+  return "Fuzzy logic uses min for AND, max for OR, and 1 - x for NOT.";
 }
 
 function extractTreeExportQuestion(question) {
@@ -27752,7 +27823,7 @@ function resolveSoftLogicAssignments(variables, provided) {
   return assignment;
 }
 
-function evaluateSoftLogic(node, assignment, kind, trace) {
+function evaluateSoftLogic(node, assignment, kind, trace, tNorm = "minimum") {
   if (node.kind === "logicConstant") {
     const value = node.value ? 1 : 0;
     trace.push({
@@ -27772,7 +27843,7 @@ function evaluateSoftLogic(node, assignment, kind, trace) {
     return value;
   }
   if (node.kind === "logicNot") {
-    const operand = evaluateSoftLogic(node.operand, assignment, kind, trace);
+    const operand = evaluateSoftLogic(node.operand, assignment, kind, trace, tNorm);
     const value = normalizeSoftTruth(1 - operand);
     trace.push({
       expression: logicToString(node),
@@ -27782,11 +27853,11 @@ function evaluateSoftLogic(node, assignment, kind, trace) {
     return value;
   }
 
-  const left = evaluateSoftLogic(node.left, assignment, kind, trace);
-  const right = evaluateSoftLogic(node.right, assignment, kind, trace);
+  const left = evaluateSoftLogic(node.left, assignment, kind, trace, tNorm);
+  const right = evaluateSoftLogic(node.right, assignment, kind, trace, tNorm);
   const { value, rule } = kind === "probability"
     ? evaluateProbabilityLogicOperator(node.operator, left, right)
-    : evaluateFuzzyLogicOperator(node.operator, left, right);
+    : evaluateFuzzyLogicOperator(node.operator, left, right, tNorm);
   trace.push({
     expression: logicToString(node),
     rule,
@@ -27795,7 +27866,10 @@ function evaluateSoftLogic(node, assignment, kind, trace) {
   return value;
 }
 
-function evaluateFuzzyLogicOperator(operator, left, right) {
+function evaluateFuzzyLogicOperator(operator, left, right, tNorm = "minimum") {
+  if (tNorm !== "minimum") {
+    return evaluateCustomFuzzyLogicOperator(operator, left, right, tNorm);
+  }
   if (operator === "and") {
     return { value: Math.min(left, right), rule: `and: min(${formatNumber(left)}, ${formatNumber(right)})` };
   }
@@ -27812,6 +27886,74 @@ function evaluateFuzzyLogicOperator(operator, left, right) {
     return { value: normalizeSoftTruth(1 - Math.abs(left - right)), rule: `iff: 1 - abs(${formatNumber(left)} - ${formatNumber(right)})` };
   }
   throw new Error(`Unsupported fuzzy operator '${operator}'.`);
+}
+
+function evaluateCustomFuzzyLogicOperator(operator, left, right, tNorm) {
+  if (operator === "and") {
+    const value = fuzzyTNorm(left, right, tNorm);
+    return { value, rule: `and: ${formatFuzzyTNormRule(left, right, tNorm)}` };
+  }
+  if (operator === "or") {
+    const value = fuzzySNorm(left, right, tNorm);
+    return { value, rule: `or: ${formatFuzzySNormRule(left, right, tNorm)}` };
+  }
+  if (operator === "xor") {
+    const leftOnly = fuzzyTNorm(left, 1 - right, tNorm);
+    const rightOnly = fuzzyTNorm(1 - left, right, tNorm);
+    const value = fuzzySNorm(leftOnly, rightOnly, tNorm);
+    return { value, rule: "xor: (A and not B) or (not A and B)" };
+  }
+  if (operator === "implies") {
+    const value = fuzzySNorm(1 - left, right, tNorm);
+    return { value, rule: `implies: not A or B using ${tNorm}` };
+  }
+  if (operator === "iff") {
+    const bothTrue = fuzzyTNorm(left, right, tNorm);
+    const bothFalse = fuzzyTNorm(1 - left, 1 - right, tNorm);
+    const value = fuzzySNorm(bothTrue, bothFalse, tNorm);
+    return { value, rule: "iff: (A and B) or (not A and not B)" };
+  }
+  throw new Error(`Unsupported fuzzy operator '${operator}'.`);
+}
+
+function fuzzyTNorm(left, right, tNorm) {
+  if (tNorm === "product") {
+    return normalizeSoftTruth(left * right);
+  }
+  if (tNorm === "lukasiewicz") {
+    return normalizeSoftTruth(Math.max(0, left + right - 1));
+  }
+  return Math.min(left, right);
+}
+
+function fuzzySNorm(left, right, tNorm) {
+  if (tNorm === "product") {
+    return normalizeSoftTruth(left + right - left * right);
+  }
+  if (tNorm === "lukasiewicz") {
+    return normalizeSoftTruth(Math.min(1, left + right));
+  }
+  return Math.max(left, right);
+}
+
+function formatFuzzyTNormRule(left, right, tNorm) {
+  if (tNorm === "product") {
+    return `product ${formatNumber(left)} * ${formatNumber(right)}`;
+  }
+  if (tNorm === "lukasiewicz") {
+    return `max(0, ${formatNumber(left)} + ${formatNumber(right)} - 1)`;
+  }
+  return `min(${formatNumber(left)}, ${formatNumber(right)})`;
+}
+
+function formatFuzzySNormRule(left, right, tNorm) {
+  if (tNorm === "product") {
+    return `${formatNumber(left)} + ${formatNumber(right)} - ${formatNumber(left)}*${formatNumber(right)}`;
+  }
+  if (tNorm === "lukasiewicz") {
+    return `min(1, ${formatNumber(left)} + ${formatNumber(right)})`;
+  }
+  return `max(${formatNumber(left)}, ${formatNumber(right)})`;
 }
 
 function evaluateProbabilityLogicOperator(operator, left, right) {

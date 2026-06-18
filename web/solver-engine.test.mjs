@@ -199,15 +199,28 @@ runTest("logic mode builds reduced ordered BDDs", () => {
 runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   const fuzzy = analyzeLogicTruthValue("fuzzy logic (P and Q) or not R with P=0.8 Q=0.6 R=0.3");
   const probability = analyzeLogicTruthValue("probabilistic logic P or Q with P=0.2 Q=0.5");
+  const product = analyzeLogicTruthValue("fuzzy product logic P or Q with P=0.8 Q=0.6");
+  const lukasiewicz = analyzeLogicTruthValue("fuzzy logic P and Q with P=0.8 Q=0.6 tnorm=lukasiewicz");
 
   assert.equal(fuzzy.summary, "Fuzzy logic truth value");
   assert.equal(fuzzy.answer, "fuzzy truth = 0.7");
   assert.equal(artifactValue(fuzzy, "Semantics"), "fuzzy min/max");
+  assert.equal(artifactValue(fuzzy, "T-norm"), "minimum");
   assert.equal(artifactValue(fuzzy, "Assignments"), "P=0.8, Q=0.6, R=0.3");
   assert.deepEqual(fuzzy.table.rows.slice(-2), [
     ["not R", "not: 1 - 0.3", "0.7"],
     ["P and Q or not R", "or: max(0.6, 0.7)", "0.7"],
   ]);
+
+  assert.equal(product.answer, "fuzzy truth = 0.92");
+  assert.equal(artifactValue(product, "Semantics"), "fuzzy product t-norm");
+  assert.equal(artifactValue(product, "T-norm"), "product");
+  assert.deepEqual(product.table.rows.slice(-1), [["P or Q", "or: 0.8 + 0.6 - 0.8*0.6", "0.92"]]);
+
+  assert.equal(lukasiewicz.answer, "fuzzy truth = 0.4");
+  assert.equal(artifactValue(lukasiewicz, "Semantics"), "fuzzy Lukasiewicz t-norm");
+  assert.equal(artifactValue(lukasiewicz, "T-norm"), "lukasiewicz");
+  assert.deepEqual(lukasiewicz.table.rows.slice(-1), [["P and Q", "and: max(0, 0.8 + 0.6 - 1)", "0.4"]]);
 
   assert.equal(probability.summary, "Probabilistic logic truth value");
   assert.equal(probability.answer, "probability = 0.6");

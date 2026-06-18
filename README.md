@@ -15,7 +15,8 @@ The frontend currently supports:
 - Karnaugh maps for two- to four-variable Boolean minimization with optional
   don't-care cells
 - Reduced ordered binary decision diagrams for compact Boolean representations
-- Fuzzy and independent-probability truth-value evaluation for propositional
+- Fuzzy truth-value evaluation with min/max, product, and Lukasiewicz t-norms,
+  plus independent-probability truth-value evaluation for propositional
   statements
 - Graphviz DOT export for parsed math and logic expression trees
 - Boolean algebra simplification with identity, domination, complement,
@@ -292,6 +293,10 @@ The same idea works for algebra and calculus:
   diagram with merged subgraphs, satisfying paths, and Graphviz DOT output.
 - `fuzzy logic (P and Q) or not R with P=0.8 Q=0.6 R=0.3` evaluates a
   propositional tree with graded truth values instead of only true/false.
+- `fuzzy product logic P or Q with P=0.8 Q=0.6` switches to the product
+  t-norm and product s-norm, returning `fuzzy truth = 0.92`.
+- `fuzzy logic P and Q with P=0.8 Q=0.6 tnorm=lukasiewicz` uses the
+  Lukasiewicz t-norm and returns `fuzzy truth = 0.4`.
 - `probabilistic logic P or Q with P=0.2 Q=0.5` assumes independent variables
   and applies probability formulas for logical operators.
 - `dot tree x^2 + 2x + 1` exports the parsed expression tree as Graphviz DOT
@@ -537,7 +542,7 @@ The demo includes:
 - Semantic tableaux / truth-tree proofs through Ask mode
 - Karnaugh-map simplification with optional don't-care cells through Ask mode
 - Reduced ordered BDDs through Ask mode
-- Fuzzy and probabilistic truth-value logic through Ask mode
+- Fuzzy t-norm and probabilistic truth-value logic through Ask mode
 - Graphviz DOT tree export through Ask mode
 - Number theory and modular arithmetic through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
@@ -642,5 +647,4 @@ These are good ways to make the project more impressive mathematically:
 16. Add one-click SVG or PNG rendering for exported Graphviz parse trees.
 17. Add Boolean operations directly on BDDs, including apply, restrict, and
    variable reordering heuristics.
-18. Extend uncertainty logic with custom t-norms, correlated probabilities,
-    and interval-valued truth values.
+18. Extend uncertainty logic with correlated probabilities and interval-valued truth values.
