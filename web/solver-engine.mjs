@@ -8160,6 +8160,7 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
     weightedViable,
     request.validation,
   );
+  const bootstrapGraphs = buildCustomNonlinearBootstrapGraphs(bootstrap, request);
 
   return {
     mode: "statistics",
@@ -8245,7 +8246,7 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
       ] : []),
     ],
     graph: bestGraph,
-    graphs: [bestGraph, averagedGraph, criterionGraph, loocvGraph, ...requestedValidationGraphs].filter(Boolean),
+    graphs: [bestGraph, averagedGraph, criterionGraph, loocvGraph, ...requestedValidationGraphs, ...bootstrapGraphs].filter(Boolean),
     extraTables: [
       {
         title: "Model-averaged fitted values",
@@ -9096,6 +9097,72 @@ function customNonlinearBootstrapExtraTables(bootstrap) {
       formatFiniteNumber(row.meanWeight),
     ]),
   }];
+}
+
+function buildCustomNonlinearBootstrapGraphs(bootstrap, request) {
+  if (!bootstrap) {
+    return [];
+  }
+
+  const modelPoints = bootstrap.modelRows.map((row, index) => ({
+    x: index + 1,
+    y: row.selectionRate,
+  })).filter((point) => Number.isFinite(point.y));
+  const weightPoints = bootstrap.modelRows.map((row, index) => ({
+    x: index + 1,
+    y: row.meanWeight,
+  })).filter((point) => Number.isFinite(point.y));
+  const graphs = [];
+
+  if (modelPoints.length || weightPoints.length) {
+    graphs.push({
+      expression: "Bootstrap custom model uncertainty",
+      kind: "regression-diagnostic",
+      scatterLabel: "Selection rate",
+      xMin: 1,
+      xMax: Math.max(1, bootstrap.modelRows.length),
+      yMin: 0,
+      yMax: 1,
+      scatter: modelPoints,
+      lines: [
+        modelPoints.length ? { label: "Selection rate", points: modelPoints, className: "graph-line-accent" } : null,
+        weightPoints.length ? { label: "Mean weight", points: weightPoints, className: "graph-line-muted" } : null,
+      ].filter(Boolean),
+    });
+  }
+
+  if (bootstrap.prediction) {
+    const halfWidth = Math.max(0.5, Math.abs(request.prediction) * 0.04);
+    graphs.push({
+      expression: `Bootstrap ${formatNumber(request.level * 100)}% averaged prediction interval`,
+      kind: "regression-diagnostic",
+      scatterLabel: "Mean averaged prediction",
+      xMin: request.prediction - halfWidth * 1.6,
+      xMax: request.prediction + halfWidth * 1.6,
+      yMin: bootstrap.prediction.lower,
+      yMax: bootstrap.prediction.upper,
+      scatter: [{ x: request.prediction, y: bootstrap.prediction.mean }],
+      areas: [{
+        label: "Bootstrap interval",
+        points: [
+          { x: request.prediction - halfWidth, y: bootstrap.prediction.lower },
+          { x: request.prediction + halfWidth, y: bootstrap.prediction.lower },
+          { x: request.prediction + halfWidth, y: bootstrap.prediction.upper },
+          { x: request.prediction - halfWidth, y: bootstrap.prediction.upper },
+        ],
+      }],
+      lines: [{
+        label: "Mean",
+        className: "graph-line-accent",
+        points: [
+          { x: request.prediction - halfWidth, y: bootstrap.prediction.mean },
+          { x: request.prediction + halfWidth, y: bootstrap.prediction.mean },
+        ],
+      }],
+    });
+  }
+
+  return graphs;
 }
 
 function customNonlinearWeightedPrediction(models, x) {

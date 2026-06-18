@@ -95,7 +95,7 @@ The frontend currently supports:
   confidence intervals, requested prediction intervals, optimizer diagnostics,
   multi-start search, optimizer trace tables, custom-formula comparison,
   leave-one-out/k-fold/holdout validation, bootstrap model-selection
-  uncertainty, model-averaged prediction intervals, and best-fit plots
+  uncertainty, model-averaged prediction interval visuals, and best-fit plots
 - Ridge regression for regularized linear modeling with an unpenalized intercept,
   shrinkage penalty, objective value, fitted values, residuals, and prediction
 - LASSO regression for sparse feature selection with standardized coordinate
@@ -350,7 +350,8 @@ The same idea works for algebra and calculus:
 - `compare custom nonlinear regression models formulas=a*exp(b*x) | c*x^d; x: 1,2,3,4,5,6; y: 2.1,3.9,8.2,15.7,32.4,63.5; params a=1,b=0.5,c=1,d=2; bounds a=0:10,b=0:2,c=0:10,d=0:4; multistart=3; kfold=3 holdout=0.33; bootstrap=60 seed=11; predict x=7`
   fits multiple custom formulas, ranks them by AICc/AIC/BIC, computes model
   weights, runs leave-one-out/k-fold/holdout validation, and bootstraps
-  model-selection uncertainty plus model-averaged prediction intervals.
+  model-selection uncertainty plus model-averaged prediction intervals with
+  visual diagnostics.
 - `ridge regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a regularized model that shrinks predictor coefficients.
 - `lasso regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
@@ -507,8 +508,8 @@ The demo includes:
   regression model comparison with LOOCV, k-fold, and holdout metrics,
   nonlinear regression family comparison including logistic growth,
   custom nonlinear regression formulas with prediction intervals, optimizer
-  traces, formula comparison, cross-validation, bootstrap uncertainty, and
-  model averaging,
+  traces, formula comparison, cross-validation, bootstrap uncertainty graphs,
+  and model averaging,
   ridge regression,
   LASSO regression,
   Bayesian linear regression,
@@ -576,8 +577,8 @@ These are good ways to make the project more impressive mathematically:
    irreducible quadratic partial fractions.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
-7. Add richer custom nonlinear residual/bootstrap diagnostics and
-   model-averaged interval visualizations.
+7. Add richer custom nonlinear residual diagnostics, parameter stability views,
+   and bootstrap trace exports.
 8. Add nonlinear systems of differential equations, nullclines, and richer
    phase-plane plotting.
 9. Add multi-step natural-language explanations for word problems.

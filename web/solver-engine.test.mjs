@@ -575,6 +575,10 @@ runTest("statistics mode bootstraps custom nonlinear model comparisons", () => {
   assert.deepEqual(result.table.rows[0], ["Model 1", "y = a*exp(b*x)", "a=1.031596, b=0.686926", "0.373683", "0.999865", "-12.656641", "-8.656641", "-13.073122", "0", "0.999989", "0.793464", "0.556051", "1.066253", "0.696957", "2.28306", "2.179814", "126.417261", "fit in 11 iterations"]);
   assert.equal(result.extraTables[1].title, "Bootstrap model uncertainty");
   assert.deepEqual(result.extraTables[1].rows, [["Model 1", "60", "1", "0.991611"], ["Model 2", "0", "0", "0.008389"]]);
+  assert.deepEqual(result.graphs.slice(-2).map((graph) => graph.expression), ["Bootstrap custom model uncertainty", "Bootstrap 95% averaged prediction interval"]);
+  assert.deepEqual(result.graphs.at(-2).lines.map((series) => series.label), ["Selection rate", "Mean weight"]);
+  assert.equal(result.graphs.at(-1).areas[0].label, "Bootstrap interval");
+  assert.equal(result.graphs.at(-1).scatter[0].x, 7);
   assert.equal(result.steps.at(-2).title, "Bootstrap model uncertainty");
   assert.equal(analyzeUniversal(statement).summary, "custom nonlinear model comparison");
 });
