@@ -561,6 +561,11 @@ input {
   stroke-width: 4;
 }
 
+.graph-line-accent {
+  stroke: var(--violet);
+  stroke-dasharray: 8 7;
+}
+
 .graph-area {
   fill: rgba(98, 87, 165, 0.24);
   stroke: none;

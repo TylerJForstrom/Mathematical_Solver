@@ -60,7 +60,7 @@ The frontend currently supports:
 - Polynomial critical points and local max/min classification
 - Two-variable linear programming with feasible-vertex enumeration and
   constrained objective optimization
-- Function graphing with sampled SVG plots
+- Function graphing with sampled SVG plots and tangent-line overlays
 - Fourier series partial sums with numerically integrated sine/cosine
   coefficients and plotted approximations
 - Differential equations: exponential growth/decay, Newton cooling, logistic
@@ -287,6 +287,8 @@ The same idea works for algebra and calculus:
 - `linear programming maximize 3x + 2y subject to x + y <= 4; x <= 2; y <= 3; x >= 0; y >= 0`
   enumerates feasible vertices and returns the constrained optimum.
 - `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
+- `graph tangent line x^2 at x=2 from 0 to 4` differentiates the function,
+  finds the tangent slope, and overlays the line `y = 4x - 4`.
 - `fourier series x from -pi to pi order=5` estimates Fourier coefficients
   and plots the fifth-order partial sum.
 - `simpson integrate sin(x) from 0 to pi n=100` approximates a definite
@@ -500,8 +502,8 @@ The demo includes:
   bases, complex 2x2 eigenvectors, symmetric eigenvalue/eigenvector
   approximation, and dominant eigenpair approximation,
   polynomial/elementary integrals, optimization, linear programming,
-  vector geometry, geometry formulas, sequences/series, graphing, differential
-  equations, numerical roots, numerical integration, and numerical ODEs
+  vector geometry, geometry formulas, sequences/series, graphing with tangent
+  overlays, differential equations, numerical roots, numerical integration, and numerical ODEs
   through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
@@ -533,7 +535,7 @@ These are good ways to make the project more impressive mathematically:
    irreducible quadratic partial fractions.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
-7. Add graphing for tangent lines, root-finding iterations, and more regression diagnostics.
+7. Add graphing for root-finding iterations and more regression diagnostics.
 8. Add nonlinear systems of differential equations, nullclines, and richer
    phase-plane plotting.
 9. Add multi-step natural-language explanations for word problems.

@@ -1353,6 +1353,19 @@ runTest("graph mode samples functions", () => {
   assert.equal(result.graph.points.length, 121);
 });
 
+runTest("graph mode overlays tangent lines", () => {
+  const result = analyzeGraph("graph tangent line x^2 at x=2 from 0 to 4");
+
+  assert.equal(result.summary, "tangent line graph");
+  assert.equal(result.answer, "tangent line: y = 4x - 4");
+  assert.equal(artifactValue(result, "Derivative"), "2x");
+  assert.equal(artifactValue(result, "Tangency point"), "(2, 4)");
+  assert.equal(artifactValue(result, "Slope"), "4");
+  assert.equal(result.graph.lines.length, 2);
+  assert.equal(result.graph.lines[1].className, "graph-line-accent");
+  assert.deepEqual(result.table.rows.find((row) => row[0] === "2"), ["2", "4", "4"]);
+});
+
 runTest("fourier mode computes partial series coefficients", () => {
   const result = analyzeFourierSeries("fourier series x from -pi to pi order=5");
 
@@ -1477,6 +1490,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("maximize -x^2 + 4x + 1").summary, "critical points");
   assert.equal(analyzeUniversal("linear programming maximize 3x + 2y subject to x + y <= 4; x <= 2; y <= 3; x >= 0; y >= 0").summary, "linear programming");
   assert.equal(analyzeUniversal("graph x^2 from -1 to 1").summary, "function graph");
+  assert.equal(analyzeUniversal("tangent line x^2 at x=2").summary, "tangent line graph");
   assert.equal(analyzeUniversal("fourier series x from -pi to pi order=5").summary, "Fourier series");
   assert.equal(analyzeUniversal("newton x^3 - x - 2 guess=1").summary, "Newton root");
   assert.equal(analyzeUniversal("simpson integrate sin(x) from 0 to pi n=100").summary, "simpson numerical integration");

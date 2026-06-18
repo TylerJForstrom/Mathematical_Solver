@@ -316,7 +316,8 @@ function renderGraph(graph) {
   const lineMarkup = lineSeries
     .map((series) => {
       const points = series.points.map((point) => `${mapX(point.x).toFixed(2)},${mapY(point.y).toFixed(2)}`).join(" ");
-      return `<polyline class="graph-line" points="${points}"></polyline>`;
+      const className = ["graph-line", series.className].filter(Boolean).join(" ");
+      return `<polyline class="${escapeHtml(className)}" points="${points}"></polyline>`;
     })
     .join("");
   const areaMarkup = areaSeries

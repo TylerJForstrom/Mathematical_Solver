@@ -3462,43 +3462,114 @@ export function analyzeGraph(statement) {
     throw new Error("Could not sample enough finite graph points.");
   }
 
+  const functionLabel = `y = ${formatMath(expression)}`;
+  const lineSeries = [{ label: functionLabel, points }];
+  const steps = [
+    {
+      title: "Parse function",
+      expression: functionLabel,
+      detail: "The graph uses the parsed expression tree as a function.",
+    },
+    {
+      title: "Sample points",
+      expression: `${points.length} finite points`,
+      detail: "The solver evaluates the function over the requested x-range.",
+    },
+  ];
+  const artifacts = [
+    ["Function", functionLabel],
+    ["Domain", `[${formatNumber(xMin)}, ${formatNumber(xMax)}]`],
+  ];
+  let answer = `graph ${functionLabel}`;
+  let summary = "function graph";
+  let details = `${variable} from ${formatNumber(xMin)} to ${formatNumber(xMax)}`;
+  let graphExpression = functionLabel;
+  let table = {
+    headers: [variable, "y"],
+    rows: points
+      .filter((_, index) => index % 20 === 0)
+      .map((point) => [formatNumber(point.x), formatNumber(point.y)]),
+  };
   const yValues = points.map((point) => point.y);
+
+  if (request.tangentAt !== null) {
+    const derivative = symbolicDerivative(expression, variable);
+    const slope = safeEvaluateMath(derivative.node, { [variable]: request.tangentAt });
+    const tangentY = safeEvaluateMath(expression, { [variable]: request.tangentAt });
+    if (!Number.isFinite(slope) || !Number.isFinite(tangentY)) {
+      throw new Error("Tangent graph needs a finite function value and derivative at the tangent point.");
+    }
+
+    const intercept = normalizeNumber(tangentY - slope * request.tangentAt);
+    const tangentLine = formatLinearExpression([slope], [variable], intercept);
+    const tangentPoints = [
+      { x: normalizeNumber(xMin), y: normalizeNumber(slope * xMin + intercept) },
+      { x: normalizeNumber(xMax), y: normalizeNumber(slope * xMax + intercept) },
+    ];
+    lineSeries.push({
+      label: "tangent line",
+      className: "graph-line-accent",
+      points: tangentPoints,
+    });
+    yValues.push(...tangentPoints.map((point) => point.y));
+    answer = `tangent line: y = ${tangentLine}`;
+    summary = "tangent line graph";
+    details = `tangent at ${variable} = ${formatNumber(request.tangentAt)}; ${variable} from ${formatNumber(xMin)} to ${formatNumber(xMax)}`;
+    graphExpression = `${functionLabel}; tangent y = ${tangentLine}`;
+    steps.push(
+      {
+        title: "Differentiate for slope",
+        expression: `f'(${variable}) = ${derivative.answer}`,
+        detail: "A tangent line uses the derivative as its slope at the chosen point.",
+      },
+      {
+        title: "Build tangent line",
+        expression: `y = ${tangentLine}`,
+        detail: `At ${variable} = ${formatNumber(request.tangentAt)}, f(${variable}) = ${formatNumber(tangentY)} and slope = ${formatNumber(slope)}.`,
+      },
+    );
+    artifacts.push(
+      ["Derivative", derivative.answer],
+      ["Tangency point", `(${formatNumber(request.tangentAt)}, ${formatNumber(tangentY)})`],
+      ["Slope", formatNumber(slope)],
+      ["Tangent line", `y = ${tangentLine}`],
+    );
+    table = {
+      headers: [variable, "f(x)", "tangent"],
+      rows: points
+        .filter((_, index) => index % 20 === 0)
+        .map((point) => [
+          formatNumber(point.x),
+          formatNumber(point.y),
+          formatNumber(slope * point.x + intercept),
+        ]),
+    };
+  }
+
   const yMin = Math.min(...yValues);
   const yMax = Math.max(...yValues);
+  artifacts.push(["Range shown", `[${formatNumber(yMin)}, ${formatNumber(yMax)}]`]);
+  steps.push({
+    title: "Scale axes",
+    expression: `x: [${formatNumber(xMin)}, ${formatNumber(xMax)}], y: [${formatNumber(yMin)}, ${formatNumber(yMax)}]`,
+    detail: "The output panel maps sampled points into an SVG plot.",
+  });
 
   return {
     mode: "graph",
     tree: expression,
-    answer: `graph y = ${formatMath(expression)}`,
-    summary: "function graph",
-    details: `${variable} from ${formatNumber(xMin)} to ${formatNumber(xMax)}`,
+    answer,
+    summary,
+    details,
     variables: mathVariables(expression),
     metrics: treeMetrics(expression),
-    steps: [
-      {
-        title: "Parse function",
-        expression: `y = ${formatMath(expression)}`,
-        detail: "The graph uses the parsed expression tree as a function.",
-      },
-      {
-        title: "Sample points",
-        expression: `${points.length} finite points`,
-        detail: "The solver evaluates the function over the requested x-range.",
-      },
-      {
-        title: "Scale axes",
-        expression: `x: [${formatNumber(xMin)}, ${formatNumber(xMax)}], y: [${formatNumber(yMin)}, ${formatNumber(yMax)}]`,
-        detail: "The output panel maps sampled points into an SVG plot.",
-      },
-    ],
-    artifacts: [
-      ["Function", `y = ${formatMath(expression)}`],
-      ["Domain", `[${formatNumber(xMin)}, ${formatNumber(xMax)}]`],
-      ["Range shown", `[${formatNumber(yMin)}, ${formatNumber(yMax)}]`],
-    ],
+    steps,
+    artifacts,
+    table,
     graph: {
-      expression: `y = ${formatMath(expression)}`,
+      expression: graphExpression,
       points,
+      ...(lineSeries.length > 1 ? { lines: lineSeries } : {}),
       xMin,
       xMax,
       yMin,
@@ -14166,9 +14237,14 @@ function extractGraphQuestion(statement) {
     .replace(/^(graph|plot|draw)\s+/i, "")
     .replace(/[?!.]+$/, "")
     .trim();
+  const tangentMode = /^(?:the\s+)?(?:tangent(?:\s+line)?|linearization)\b/i.test(text);
+  text = text
+    .replace(/^(?:the\s+)?(?:tangent(?:\s+line)?|linearization)\s+(?:of\s+)?/i, "")
+    .trim();
   let xMin = -10;
   let xMax = 10;
   let variable = "x";
+  let tangentAt = null;
 
   const rangeMatch = text.match(/\b(?:from|range)\s+([-+]?\d*\.?\d+)\s+(?:to|,)\s+([-+]?\d*\.?\d+)/i);
   if (rangeMatch) {
@@ -14177,17 +14253,32 @@ function extractGraphQuestion(statement) {
     text = text.replace(rangeMatch[0], "").trim();
   }
 
-  const variableMatch = text.match(/\bfor\s+([A-Za-z_]\w*)\b/i);
+  const variableMatch = text.match(/\b(?:for|with respect to|wrt)\s+([A-Za-z_]\w*)\b/i);
   if (variableMatch) {
     variable = variableMatch[1];
     text = text.replace(variableMatch[0], "").trim();
   }
 
+  if (tangentMode) {
+    const tangentMatch = text.match(/\bat\s+(?:([A-Za-z_]\w*)\s*=\s*)?(.+)$/i);
+    if (!tangentMatch) {
+      throw new Error("Tangent graph mode needs a point, such as tangent line x^2 at x=2.");
+    }
+    if (tangentMatch[1]) {
+      variable = tangentMatch[1];
+    }
+    tangentAt = evaluateBoundExpression(tangentMatch[2]);
+    text = text.slice(0, tangentMatch.index).trim();
+  }
+
   text = text.replace(/^y\s*=\s*/i, "").trim();
+  if (tangentMode && !text) {
+    throw new Error("Tangent graph mode needs a function expression, such as tangent line x^2 at x=2.");
+  }
   if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || xMin >= xMax) {
     throw new Error("Graph mode needs a valid range, such as from -5 to 5.");
   }
-  return { expression: text, variable, xMin, xMax };
+  return { expression: text, variable, xMin, xMax, tangentAt };
 }
 
 function extractFourierSeriesQuestion(statement) {
@@ -20863,7 +20954,12 @@ function isSequenceQuestion(lower) {
 }
 
 function isGraphQuestion(lower) {
-  return lower.startsWith("graph ") || lower.startsWith("plot ") || lower.startsWith("draw ");
+  return lower.startsWith("graph ") ||
+    lower.startsWith("plot ") ||
+    lower.startsWith("draw ") ||
+    lower.startsWith("tangent line ") ||
+    lower.startsWith("tangent ") ||
+    lower.startsWith("linearization ");
 }
 
 function isFourierQuestion(lower) {
