@@ -87,6 +87,9 @@ The frontend currently supports:
 - Regression model comparison for polynomial families with SSE, adjusted R
   squared, AIC, AICc, BIC, leave-one-out, k-fold, and holdout validation
   RMSE/MAE, and comparison plots
+- Nonlinear regression family comparison for linear, exponential,
+  logarithmic, and power-law models with original-scale SSE/R squared,
+  AIC/AICc/BIC, best-fit plots, and family criterion plots
 - Ridge regression for regularized linear modeling with an unpenalized intercept,
   shrinkage penalty, objective value, fitted values, residuals, and prediction
 - LASSO regression for sparse feature selection with standardized coordinate
@@ -329,6 +332,9 @@ The same idea works for algebra and calculus:
 - `compare regression models y: 2,3,5,8,13,21; x: 1,2,3,4,5,6 degrees=1,2,3 kfold=3 holdout=0.33`
   compares polynomial models with AIC/AICc/BIC plus leave-one-out, k-fold,
   and holdout validation error.
+- `compare nonlinear regression models x: 1,2,3,4,5; y: 2,4,8,16,32 families=linear,exponential,logarithmic,power`
+  compares transformed nonlinear model families on the original response
+  scale and plots the best fitted curve.
 - `ridge regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a regularized model that shrinks predictor coefficients.
 - `lasso regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
@@ -483,6 +489,7 @@ The demo includes:
   coefficient inference for linear models,
   regression diagnostics with visual residual and influence plots,
   regression model comparison with LOOCV, k-fold, and holdout metrics,
+  nonlinear regression family comparison,
   ridge regression,
   LASSO regression,
   Bayesian linear regression,
@@ -550,8 +557,8 @@ These are good ways to make the project more impressive mathematically:
    irreducible quadratic partial fractions.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
-7. Add nonlinear regression model families for comparison, such as
-   exponential, logarithmic, power-law, and logistic growth models.
+7. Add iterative nonlinear least-squares fitting for logistic growth and
+   custom user-supplied model formulas.
 8. Add nonlinear systems of differential equations, nullclines, and richer
    phase-plane plotting.
 9. Add multi-step natural-language explanations for word problems.

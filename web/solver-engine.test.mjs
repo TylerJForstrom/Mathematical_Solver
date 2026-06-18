@@ -474,6 +474,20 @@ runTest("statistics mode compares regression models with requested validation", 
   assert.equal(result.graphs[3].expression, "Holdout RMSE by polynomial degree");
 });
 
+runTest("statistics mode compares nonlinear regression model families", () => {
+  const result = analyzeStatistics("compare nonlinear regression models x: 1,2,3,4,5; y: 2,4,8,16,32 families=linear,exponential,logarithmic,power");
+
+  assert.equal(result.summary, "nonlinear regression model comparison");
+  assert.equal(result.answer, "best exponential model by AICc: y = 1 * e^(0.693147x)");
+  assert.equal(artifactValue(result, "Best family"), "Exponential");
+  assert.equal(artifactValue(result, "Best AICc"), "-105.129255");
+  assert.deepEqual(result.table.rows[1], ["Exponential", "y = 1 * e^(0.693147x)", "0", "1", "-111.129255", "-105.129255", "-111.910379", "fit"]);
+  assert.equal(result.graphs.length, 2);
+  assert.equal(result.graphs[0].expression, "Exponential best fit");
+  assert.equal(result.graphs[1].expression, "AICc by nonlinear regression family");
+  assert.equal(analyzeUniversal("compare nonlinear regression models x: 1,2,3,4,5; y: 2,4,8,16,32").summary, "nonlinear regression model comparison");
+});
+
 runTest("statistics mode computes multiple linear regression", () => {
   const result = analyzeStatistics("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
 

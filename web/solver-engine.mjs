@@ -1579,6 +1579,10 @@ export function analyzeStatistics(statement) {
     return analyzePoisson(statement);
   }
 
+  if (isNonlinearRegressionModelComparisonQuestion(lower)) {
+    return analyzeNonlinearRegressionModelComparison(statement);
+  }
+
   if (lower.includes("exponential")) {
     return analyzeExponential(statement);
   }
@@ -1646,6 +1650,10 @@ export function analyzeStatistics(statement) {
 
   if (isRegressionDiagnosticsQuestion(lower)) {
     return analyzeRegressionDiagnostics(statement);
+  }
+
+  if (isNonlinearRegressionModelComparisonQuestion(lower)) {
+    return analyzeNonlinearRegressionModelComparison(statement);
   }
 
   if (isRegressionModelComparisonQuestion(lower)) {
@@ -8006,6 +8014,91 @@ function analyzeRegressionModelComparison(statement) {
   };
 }
 
+function analyzeNonlinearRegressionModelComparison(statement) {
+  const request = parseNonlinearRegressionModelComparisonInput(statement);
+  const models = request.families.map((family) =>
+    fitNonlinearRegressionFamily(request.x, request.y, family),
+  );
+  const viableModels = models.filter((model) => model.viable);
+  if (viableModels.length < 2) {
+    throw new Error("Nonlinear regression model comparison needs at least two valid model families for the supplied x and y data.");
+  }
+
+  const criterion = viableModels.every((model) => Number.isFinite(model.aicc)) ? "AICc" : "AIC";
+  const best = pickBestNonlinearRegressionModel(viableModels, criterion);
+  const criterionGraph = buildNonlinearRegressionCriterionGraph(viableModels, criterion);
+  const fitGraph = buildNonlinearRegressionFitGraph(request.x, request.y, best);
+  const familyOrder = viableModels.map((model, index) => `${index + 1}=${model.label}`).join(", ");
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      label: "NONLINEAR CMP",
+      children: [
+        statsDatasetNode(request.x, [], "X"),
+        statsDatasetNode(request.y, [], "Y"),
+        ...viableModels.map((model) => statsMetricNode(model.family, nonlinearRegressionCriterionValue(model, criterion))),
+      ],
+    },
+    answer: `best ${best.label.toLowerCase()} model by ${criterion}: ${best.equation}`,
+    summary: "nonlinear regression model comparison",
+    details: `${request.x.length} observations, families ${models.map((model) => model.label).join(", ")}`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.y, viableModels.map((model) =>
+      statsMetricNode(model.family, nonlinearRegressionCriterionValue(model, criterion)),
+    ))),
+    steps: [
+      {
+        title: "Read candidate families",
+        expression: models.map((model) => model.label).join(", "),
+        detail: "The solver compares nonlinear families that can be fit by a transparent transformed least-squares model.",
+      },
+      {
+        title: "Transform eligible models",
+        expression: viableModels.map((model) => `${model.label}: ${model.transformedEquation}`).join("; "),
+        detail: "Exponential and power-law models use log-response transforms; logarithmic models transform x.",
+      },
+      {
+        title: "Score on original scale",
+        expression: viableModels.map((model) => `${model.label}: SSE=${formatNumber(model.sse)}`).join("; "),
+        detail: "Each fitted curve is converted back to original y values before SSE, R squared, AIC, AICc, and BIC are computed.",
+      },
+      {
+        title: "Select best family",
+        expression: `${criterion} minimum: ${best.label}`,
+        detail: `${criterion} penalizes extra error while keeping the comparison on the same response scale.`,
+      },
+    ],
+    table: {
+      headers: ["Family", "Equation", "SSE", "R squared", "AIC", "AICc", "BIC", "Status"],
+      rows: models.map((model) => [
+        model.label,
+        model.equation,
+        formatFiniteNumber(model.sse),
+        formatFiniteNumber(model.rSquared),
+        formatFiniteNumber(model.aic),
+        formatFiniteNumber(model.aicc),
+        formatFiniteNumber(model.bic),
+        model.status,
+      ]),
+    },
+    artifacts: [
+      ["Criterion", criterion],
+      ["Best family", best.label],
+      ["Best equation", best.equation],
+      ["Best SSE", formatNumber(best.sse)],
+      ["Best R squared", formatNumber(best.rSquared)],
+      ["Best AIC", formatNumber(best.aic)],
+      ["Best AICc", Number.isFinite(best.aicc) ? formatNumber(best.aicc) : "undefined"],
+      ["Best BIC", formatNumber(best.bic)],
+      ["Graph family order", familyOrder],
+    ],
+    graph: fitGraph,
+    graphs: [fitGraph, criterionGraph].filter(Boolean),
+  };
+}
+
 function fitPolynomialComparisonModel(xValues, yValues, degree, validation = {}) {
   const coefficients = fitPolynomialCoefficients(xValues, yValues, degree);
   const fitted = xValues.map((x) => polynomialPrediction(coefficients, x));
@@ -8058,6 +8151,128 @@ function fitPolynomialComparisonModel(xValues, yValues, degree, validation = {})
     holdoutPredictions: holdout?.predictions ?? [],
     equation: formatPolynomialRegressionEquation(coefficients, "x"),
   };
+}
+
+function fitNonlinearRegressionFamily(xValues, yValues, family) {
+  const definition = nonlinearRegressionFamilyDefinition(family);
+  if (!definition.domain(xValues, yValues)) {
+    return {
+      family,
+      label: definition.label,
+      equation: "undefined",
+      transformedEquation: definition.transformedEquation,
+      status: definition.domainMessage,
+      viable: false,
+      sse: Number.NaN,
+      rSquared: Number.NaN,
+      aic: Number.NaN,
+      aicc: Number.NaN,
+      bic: Number.NaN,
+      fitted: [],
+      residuals: [],
+    };
+  }
+
+  const transformedX = xValues.map(definition.transformX);
+  const transformedY = yValues.map(definition.transformY);
+  const coefficients = fitPolynomialCoefficients(transformedX, transformedY, 1);
+  const fitted = xValues.map((x) => normalizeNumber(definition.predict(coefficients, x)));
+  if (fitted.some((value) => !Number.isFinite(value))) {
+    return {
+      family,
+      label: definition.label,
+      equation: "undefined",
+      transformedEquation: definition.transformedEquation,
+      status: "produced non-finite fitted values",
+      viable: false,
+      sse: Number.NaN,
+      rSquared: Number.NaN,
+      aic: Number.NaN,
+      aicc: Number.NaN,
+      bic: Number.NaN,
+      fitted: [],
+      residuals: [],
+    };
+  }
+
+  const residuals = yValues.map((value, index) => normalizeNumber(value - fitted[index]));
+  const sse = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const meanY = mean(yValues);
+  const tss = yValues.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
+  const rSquared = nearlyEqual(tss, 0) ? 1 : 1 - sse / tss;
+  const n = yValues.length;
+  const parameterCount = 2;
+  const varianceEstimate = Math.max(sse / n, EPSILON);
+  const aic = n * Math.log(varianceEstimate) + 2 * parameterCount;
+  const aiccDenominator = n - parameterCount - 1;
+  const aicc = aiccDenominator > 0
+    ? aic + (2 * parameterCount * (parameterCount + 1)) / aiccDenominator
+    : Number.NaN;
+  const bic = n * Math.log(varianceEstimate) + parameterCount * Math.log(n);
+
+  return {
+    family,
+    label: definition.label,
+    equation: definition.formatEquation(coefficients),
+    transformedEquation: definition.transformedEquation,
+    coefficients,
+    fitted,
+    residuals,
+    sse: normalizeNumber(sse),
+    rSquared: normalizeNumber(rSquared),
+    aic: normalizeNumber(aic),
+    aicc: Number.isFinite(aicc) ? normalizeNumber(aicc) : Number.NaN,
+    bic: normalizeNumber(bic),
+    status: "fit",
+    viable: true,
+    predict: (x) => normalizeNumber(definition.predict(coefficients, x)),
+  };
+}
+
+function nonlinearRegressionFamilyDefinition(family) {
+  const definitions = {
+    linear: {
+      label: "Linear",
+      transformedEquation: "y = a + bx",
+      domain: () => true,
+      domainMessage: "",
+      transformX: (x) => x,
+      transformY: (y) => y,
+      predict: ([intercept, slope], x) => intercept + slope * x,
+      formatEquation: ([intercept, slope]) => `y = ${formatNumber(slope)}x ${formatSigned(intercept)}`,
+    },
+    exponential: {
+      label: "Exponential",
+      transformedEquation: "ln(y) = a + bx",
+      domain: (_xValues, yValues) => yValues.every((value) => value > 0),
+      domainMessage: "requires y > 0",
+      transformX: (x) => x,
+      transformY: (y) => Math.log(y),
+      predict: ([intercept, slope], x) => Math.exp(intercept + slope * x),
+      formatEquation: ([intercept, slope]) => `y = ${formatNumber(Math.exp(intercept))} * e^(${formatNumber(slope)}x)`,
+    },
+    logarithmic: {
+      label: "Logarithmic",
+      transformedEquation: "y = a + b ln(x)",
+      domain: (xValues) => xValues.every((value) => value > 0),
+      domainMessage: "requires x > 0",
+      transformX: (x) => Math.log(x),
+      transformY: (y) => y,
+      predict: ([intercept, slope], x) => intercept + slope * Math.log(x),
+      formatEquation: ([intercept, slope]) => `y = ${formatNumber(intercept)} ${formatSignedTerm(slope, "ln(x)")}`,
+    },
+    power: {
+      label: "Power-law",
+      transformedEquation: "ln(y) = a + b ln(x)",
+      domain: (xValues, yValues) => xValues.every((value) => value > 0) && yValues.every((value) => value > 0),
+      domainMessage: "requires x > 0 and y > 0",
+      transformX: (x) => Math.log(x),
+      transformY: (y) => Math.log(y),
+      predict: ([intercept, slope], x) => Math.exp(intercept) * x ** slope,
+      formatEquation: ([intercept, slope]) => `y = ${formatNumber(Math.exp(intercept))} * x^${formatNumber(slope)}`,
+    },
+  };
+  return definitions[family];
 }
 
 function fitPolynomialCoefficients(xValues, yValues, degree) {
@@ -8338,6 +8553,74 @@ function buildRegressionValidationMetricGraph(models, metricKey, expression, sca
       {
         label: scatterLabel,
         points,
+      },
+    ],
+  };
+}
+
+function pickBestNonlinearRegressionModel(models, criterion) {
+  return [...models].sort((left, right) =>
+    nonlinearRegressionCriterionValue(left, criterion) - nonlinearRegressionCriterionValue(right, criterion) ||
+    left.bic - right.bic ||
+    left.label.localeCompare(right.label),
+  )[0];
+}
+
+function nonlinearRegressionCriterionValue(model, criterion) {
+  return criterion === "AICc" ? model.aicc : model.aic;
+}
+
+function buildNonlinearRegressionCriterionGraph(models, criterion) {
+  const points = models.map((model, index) => ({
+    x: index + 1,
+    y: nonlinearRegressionCriterionValue(model, criterion),
+  }));
+  const [yMin, yMax] = paddedNumericRange(points.map((point) => point.y));
+  return {
+    expression: `${criterion} by nonlinear regression family`,
+    kind: "regression-diagnostic",
+    scatterLabel: criterion,
+    xMin: 1,
+    xMax: points.length,
+    yMin,
+    yMax,
+    scatter: points,
+    lines: [
+      {
+        label: criterion,
+        points,
+      },
+    ],
+  };
+}
+
+function buildNonlinearRegressionFitGraph(xValues, yValues, model) {
+  const xMin = Math.min(...xValues);
+  const xMax = Math.max(...xValues);
+  const samples = Array.from({ length: 80 }, (_, index) => {
+    const ratio = index / 79;
+    const x = xMin + (xMax - xMin) * ratio;
+    return {
+      x,
+      y: model.predict(x),
+    };
+  }).filter((point) => Number.isFinite(point.y));
+  const scatter = xValues.map((x, index) => ({ x, y: yValues[index] }));
+  const allY = [...yValues, ...samples.map((point) => point.y)];
+  const [yMin, yMax] = paddedNumericRange(allY);
+  return {
+    expression: `${model.label} best fit`,
+    kind: "scatter-fit",
+    scatterLabel: "Data",
+    xMin,
+    xMax,
+    yMin,
+    yMax,
+    scatter,
+    lines: [
+      {
+        label: model.label,
+        points: samples,
       },
     ],
   };
@@ -19406,7 +19689,7 @@ function parseXYLists(text) {
 }
 
 function cleanLabeledListChunk(text) {
-  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty|k\s*[- ]?\s*fold|kfold|folds?|holdout|test(?:\s*size)?|validation(?:\s*(?:size|split))?|val\s*split|split)\b/i);
+  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty|families?|models?|k\s*[- ]?\s*fold|kfold|folds?|holdout|test(?:\s*size)?|validation(?:\s*(?:size|split))?|val\s*split|split)\b/i);
   return optionIndex >= 0 ? text.slice(0, optionIndex) : text;
 }
 
@@ -19596,6 +19879,49 @@ function parseRegressionModelComparisonInput(text) {
     x: pairs.map((pair) => pair.x),
     y: pairs.map((pair) => pair.y),
   };
+}
+
+function parseNonlinearRegressionModelComparisonInput(text) {
+  const parsedLists = parseXYLists(text);
+  const pairs = parsedLists ? zipPairs(parsedLists.x, parsedLists.y) : parsePairs(text);
+  if (pairs.length < 4) {
+    throw new Error("Nonlinear regression model comparison needs at least four paired observations.");
+  }
+
+  const distinctX = new Set(pairs.map((pair) => formatNumber(pair.x)));
+  if (distinctX.size < 2) {
+    throw new Error("Nonlinear regression model comparison needs at least two distinct x values.");
+  }
+
+  return {
+    families: parseNonlinearRegressionFamilies(text),
+    x: pairs.map((pair) => pair.x),
+    y: pairs.map((pair) => pair.y),
+  };
+}
+
+function parseNonlinearRegressionFamilies(text) {
+  const explicit = text.match(/\b(?:families|family|models)\s*[:=]\s*([^;]+)/i);
+  const source = explicit ? explicit[1].toLowerCase() : text.toLowerCase();
+  const families = [];
+  const addFamily = (family) => {
+    if (!families.includes(family)) {
+      families.push(family);
+    }
+  };
+
+  if (/\blinear\b/.test(source)) addFamily("linear");
+  if (/\b(?:exponential|exp)\b/.test(source)) addFamily("exponential");
+  if (/\b(?:logarithmic|log)\b/.test(source)) addFamily("logarithmic");
+  if (/\b(?:power[-\s]?law|power)\b/.test(source)) addFamily("power");
+
+  if (!explicit && families.length < 2) {
+    return ["linear", "exponential", "logarithmic", "power"];
+  }
+  if (families.length < 2) {
+    throw new Error("Nonlinear regression model comparison needs at least two families, such as families=linear,exponential,power.");
+  }
+  return families;
 }
 
 function parseRegressionModelComparisonValidation(text, observationCount) {
@@ -21461,6 +21787,26 @@ function isRegressionModelComparisonQuestion(lower) {
     (lower.includes("model comparison") && lower.includes("regression"));
 }
 
+function isNonlinearRegressionModelComparisonQuestion(lower) {
+  const wantsComparison = lower.includes("compare") ||
+    lower.includes("model comparison") ||
+    lower.includes("best model") ||
+    lower.includes("select model");
+  const wantsRegression = lower.includes("regression") ||
+    lower.includes("curve fit") ||
+    lower.includes("curve fitting");
+  const namesNonlinearFamily = lower.includes("nonlinear") ||
+    lower.includes("families") ||
+    lower.includes("family=") ||
+    lower.includes("families=") ||
+    lower.includes("exponential") ||
+    lower.includes("logarithmic") ||
+    /\blog model\b/.test(lower) ||
+    lower.includes("power-law") ||
+    lower.includes("power law");
+  return wantsComparison && wantsRegression && namesNonlinearFamily;
+}
+
 function isRegressionDiagnosticsQuestion(lower) {
   return lower.includes("regression diagnostics") ||
     lower.includes("regression diagnostic") ||
@@ -21939,6 +22285,7 @@ function isStatisticsQuestion(lower) {
     isFisherExactQuestion(lower) ||
     isNormalityQuestion(lower) ||
     isEqualVarianceQuestion(lower) ||
+    isNonlinearRegressionModelComparisonQuestion(lower) ||
     isRegressionModelComparisonQuestion(lower) ||
     isRegressionDiagnosticsQuestion(lower) ||
     isPearsonQuestion(lower) ||
