@@ -71,6 +71,9 @@ The frontend currently supports:
   classification
 - Numerical ODE solvers: Euler's method and fourth-order Runge-Kutta for
   first-order differential equations
+- Nonlinear 2D ODE systems simulated with Euler/RK4, returning a trajectory
+  table, a phase-plane trajectory plot with approximated nullclines, sampled
+  direction-field vectors, and Newton-located equilibria
 - Smart input assistance for incomplete math/statistics questions, including
   detected problem type, missing data requirements, and clickable examples
 - Descriptive statistics: mean, median, mode, range, quartiles, variance, and standard deviation
@@ -330,6 +333,10 @@ The same idea works for algebra and calculus:
   and samples direction-field vectors.
 - `rk4 dy/dt = t + y y0=1 from t=0 to 1 h=0.25` approximates a first-order
   ODE with fourth-order Runge-Kutta.
+- `ode nonlinear x'=x-y-x^3; y'=x+y; x0=1 y0=0 t=5 h=0.1` simulates a 2D
+  nonlinear system with RK4 (add `euler` for Euler stepping), returning a
+  trajectory table, phase-plane plot with approximated nullclines, and the
+  equilibria located by Newton iteration.
 - `regression for (1,2), (2,3), (3,5), (4,8); predict x=5` becomes a statistical model tree
   with coefficient standard errors, t tests, p-values, confidence intervals,
   mean-response intervals, prediction intervals, and a fitted-line scatterplot.
@@ -549,7 +556,8 @@ The demo includes:
   approximation, and dominant eigenpair approximation,
   polynomial/elementary integrals, optimization, linear programming,
   vector geometry, geometry formulas, sequences/series, graphing with tangent
-  overlays, differential equations, numerical roots with iteration graphs,
+  overlays, differential equations, nonlinear 2D ODE systems with phase-plane
+  plots, numerical roots with iteration graphs,
   numerical integration, and numerical ODEs
   through Ask mode
 - Step-by-step explanation cards

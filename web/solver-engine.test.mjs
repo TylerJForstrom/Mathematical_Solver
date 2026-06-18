@@ -1602,6 +1602,41 @@ runTest("differential equation mode analyzes linear ODE systems", () => {
   assert.equal(matrixInput.answer, equationInput.answer);
 });
 
+runTest("differential equation mode simulates nonlinear ODE systems", () => {
+  const damped = analyzeDifferentialEquation("ode nonlinear x'=y; y'=-x - 0.5*y; x0=2 y0=0 t=10 h=0.05");
+  assert.equal(damped.summary, "nonlinear ODE system");
+  assert.equal(artifactValue(damped, "Method"), "Runge-Kutta 4");
+  assert.ok(!damped.answer.includes("diverged"));
+  // A damped oscillator settles to the origin equilibrium.
+  assert.equal(artifactValue(damped, "Equilibria"), "(0, 0)");
+  assert.equal(damped.table.headers.join(","), "Step,t,x,y");
+  assert.ok(damped.graph.lines[0].points.length > 1);
+
+  // Newton from a grid recovers the analytic equilibria of the cubic system:
+  // x - y - x^3 = 0, x + y = 0  =>  (0,0) and (+-sqrt2, -+sqrt2).
+  const cubic = analyzeDifferentialEquation("ode nonlinear x'=x-y-x^3; y'=x+y; x0=1 y0=0 t=5 h=0.1");
+  const equilibria = artifactValue(cubic, "Equilibria");
+  assert.ok(equilibria.includes("(0, 0)"));
+  assert.ok(equilibria.includes("1.414214"));
+
+  // Euler stepping is selectable and uses the requested step count.
+  const euler = analyzeDifferentialEquation("ode nonlinear euler x'=y; y'=-x; x0=1 y0=0 t=1 h=0.25");
+  assert.equal(artifactValue(euler, "Method"), "Euler method");
+  assert.equal(artifactValue(euler, "Steps"), "4");
+});
+
+runTest("universal Ask routes nonlinear ODE systems without colliding with algebraic systems", () => {
+  assert.equal(
+    analyzeUniversal("ode nonlinear x'=y; y'=-x - 0.5*y; x0=2 y0=0 t=10").summary,
+    "nonlinear ODE system",
+  );
+  // The algebraic nonlinear system (no derivatives) must still route to the Newton solver.
+  assert.equal(
+    analyzeUniversal("solve nonlinear system x^2 + y^2 = 25; x - y = 1 guess x=3 y=2").summary,
+    "nonlinear system",
+  );
+});
+
 runTest("equation mode approximates higher-degree real roots", () => {
   const result = analyzeEquation("x^3 - x - 2 = 0", "x");
 

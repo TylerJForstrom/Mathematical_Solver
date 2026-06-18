@@ -4135,6 +4135,10 @@ function analyzeNumericalIntegration(request, expression) {
 
 export function analyzeDifferentialEquation(statement) {
   const lower = statement.toLowerCase();
+  if (isNonlinearOdeSystemQuestion(lower)) {
+    return analyzeNonlinearOdeSystem(statement);
+  }
+
   if (isLinearOdeSystemQuestion(lower)) {
     return analyzeLinearOdeSystem(statement);
   }
@@ -4440,6 +4444,336 @@ function analyzeLinearOdeSystem(statement) {
       rows: fieldRows.map((row) => row.map(formatNumber)),
     },
   };
+}
+
+function analyzeNonlinearOdeSystem(statement) {
+  const equations = extractLinearOdeSystemEquations(statement);
+  if (equations.length !== 2) {
+    throw new Error("Nonlinear ODE systems need two equations, such as ode nonlinear x'=x-y-x^3; y'=x+y; x0=1 y0=0 t=5.");
+  }
+
+  const variable = equations.find((entry) => entry.independent)?.independent ?? "t";
+  if (equations.some((entry) => entry.independent && entry.independent !== variable)) {
+    throw new Error("Both ODE system equations must use the same independent variable.");
+  }
+  const stateVariables = equations.map((entry) => entry.state);
+  if (new Set(stateVariables).size !== 2) {
+    throw new Error("Nonlinear ODE systems need two different state variables.");
+  }
+  const expressions = stateVariables.map((state) => {
+    const entry = equations.find((candidate) => candidate.state === state);
+    const parsed = parseMath(entry.expression);
+    if (parsed.kind === "equation") {
+      throw new Error(`The equation for ${state}' must be an expression, not an equality.`);
+    }
+    return parsed;
+  });
+
+  const time = readLinearOdeTimeWindow(statement, variable);
+  const initial = readLinearOdeInitialState(statement, stateVariables, time.initialTime);
+  const method = /\beuler\b/i.test(statement) ? "euler" : "rk4";
+  const span = time.target - time.initialTime;
+  const direction = Math.sign(span) || 1;
+  const requestedStep = readNamedNumber(statement, ["h", "step", "dt"], Number.NaN);
+  let stepSize = Number.isFinite(requestedStep) && requestedStep > 0 ? requestedStep : Math.abs(span) / 100;
+  if (!(stepSize > 0)) {
+    throw new Error("Nonlinear ODE step size must be positive.");
+  }
+  let steps = Math.max(1, Math.round(Math.abs(span) / stepSize));
+  if (steps > 5000) {
+    steps = 5000;
+    stepSize = Math.abs(span) / steps;
+  }
+
+  const field = (point) => {
+    const values = { [stateVariables[0]]: point[0], [stateVariables[1]]: point[1] };
+    return [safeEvaluateMath(expressions[0], values), safeEvaluateMath(expressions[1], values)];
+  };
+
+  const simulation = simulateNonlinearOdeSystem(field, initial.state, time.initialTime, direction * stepSize, steps, method);
+  const window = nonlinearOdeWindow(simulation.rows);
+  const nullclines = approximateNonlinearNullclines(field, window);
+  const equilibria = findNonlinearOdeEquilibria(field, window);
+  const phaseField = sampleNonlinearPhaseField(field, window);
+
+  const equationText = stateVariables
+    .map((state, index) => `${state}' = ${formatMath(expressions[index])}`)
+    .join("; ");
+  const methodName = method === "rk4" ? "Runge-Kutta 4" : "Euler method";
+  const finalText = `(${formatNumber(simulation.finalState[0])}, ${formatNumber(simulation.finalState[1])})`;
+  const answer = simulation.diverged
+    ? `solution diverged before ${variable} = ${formatNumber(time.target)}`
+    : `(${stateVariables[0]}, ${stateVariables[1]})(${variable}=${formatNumber(time.target)}) ~= ${finalText}`;
+
+  const tree = {
+    kind: "statsDistribution",
+    label: "NONLINEAR ODE",
+    children: [
+      vectorNode("initial", initial.state),
+      vectorNode("state", simulation.finalState),
+      statsMetricNode("h", stepSize),
+      statsMetricNode("steps", steps),
+    ],
+  };
+
+  const trajectoryPoints = downsamplePoints(
+    simulation.rows.map((row) => ({ x: row.x, y: row.y })),
+    300,
+  );
+  const nullclinePoints = [...nullclines.first, ...nullclines.second];
+
+  const steps_ = [
+    {
+      title: "Read nonlinear system",
+      expression: equationText,
+      detail: "Each right-hand side is parsed into an expression tree of the two state variables.",
+    },
+    {
+      title: "Set initial state and step",
+      expression: `(${stateVariables[0]}, ${stateVariables[1]})(${formatNumber(time.initialTime)}) = ${formatVector(initial.state)}, h = ${formatNumber(stepSize)}`,
+      detail: "The integrator advances from the start time to the target with equal steps.",
+    },
+    {
+      title: `Integrate with ${methodName}`,
+      expression: simulation.diverged
+        ? `diverged after ${simulation.rows.length - 1} steps`
+        : `${finalText} after ${steps} steps`,
+      detail: method === "rk4"
+        ? "RK4 combines four slope estimates per step for both state variables."
+        : "Euler's method advances each variable with the slope at the start of the step.",
+    },
+    {
+      title: "Approximate nullclines and equilibria",
+      expression: `${nullclines.first.length}+${nullclines.second.length} nullcline points, ${equilibria.length} equilibria`,
+      detail: "Sign changes of each rate along grid lines trace the nullclines; Newton iterations from a grid locate equilibria where both rates vanish.",
+    },
+  ];
+
+  return {
+    mode: "ode",
+    tree,
+    answer,
+    summary: "nonlinear ODE system",
+    details: `${methodName} phase-plane simulation${simulation.diverged ? " (diverged)" : ""}`,
+    variables: [variable, ...stateVariables],
+    metrics: treeMetrics(tree),
+    steps: steps_,
+    graph: {
+      expression: `${stateVariables[0]}-${stateVariables[1]} phase trajectory`,
+      xMin: window.xMin,
+      xMax: window.xMax,
+      yMin: window.yMin,
+      yMax: window.yMax,
+      lines: [{ label: "trajectory", points: trajectoryPoints }],
+      scatter: nullclinePoints,
+    },
+    phaseField,
+    table: {
+      headers: ["Step", variable, stateVariables[0], stateVariables[1]],
+      rows: buildTrajectoryDisplayRows(simulation.rows),
+    },
+    artifacts: [
+      ["System", equationText],
+      ["Method", methodName],
+      ["Initial state", `${formatVector(initial.state)} at ${variable}=${formatNumber(time.initialTime)}`],
+      ["Target", `${variable}=${formatNumber(time.target)}`],
+      ["Step size", formatNumber(stepSize)],
+      ["Steps", String(steps)],
+      ["Final state", simulation.diverged ? "diverged" : formatVector(simulation.finalState)],
+      ["Equilibria", equilibria.length ? equilibria.map((point) => `(${formatNumber(point[0])}, ${formatNumber(point[1])})`).join("; ") : "none found in window"],
+      ["Nullcline samples", `${nullclines.first.length} for ${stateVariables[0]}', ${nullclines.second.length} for ${stateVariables[1]}'`],
+      ["Phase-field samples", String(phaseField.length)],
+      ["Initial state defaulted", initial.provided ? "no" : "yes"],
+    ],
+  };
+}
+
+function simulateNonlinearOdeSystem(field, initialState, initialTime, signedStep, steps, method) {
+  const rows = [{ step: 0, t: initialTime, x: initialState[0], y: initialState[1] }];
+  let state = [...initialState];
+  let time = initialTime;
+  let diverged = false;
+  const limit = 1e6;
+
+  for (let index = 1; index <= steps; index += 1) {
+    const next = method === "euler"
+      ? eulerStepSystem(field, state, signedStep)
+      : rk4StepSystem(field, state, signedStep);
+    if (!next.every(Number.isFinite) || next.some((value) => Math.abs(value) > limit)) {
+      diverged = true;
+      break;
+    }
+    state = next;
+    time += signedStep;
+    rows.push({ step: index, t: time, x: state[0], y: state[1] });
+  }
+
+  return { rows, finalState: state, finalTime: time, diverged };
+}
+
+function eulerStepSystem(field, state, step) {
+  const slope = field(state);
+  return [state[0] + step * slope[0], state[1] + step * slope[1]];
+}
+
+function rk4StepSystem(field, state, step) {
+  const k1 = field(state);
+  const k2 = field([state[0] + (step / 2) * k1[0], state[1] + (step / 2) * k1[1]]);
+  const k3 = field([state[0] + (step / 2) * k2[0], state[1] + (step / 2) * k2[1]]);
+  const k4 = field([state[0] + step * k3[0], state[1] + step * k3[1]]);
+  return [
+    state[0] + (step / 6) * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]),
+    state[1] + (step / 6) * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]),
+  ];
+}
+
+function nonlinearOdeWindow(rows) {
+  const xs = rows.map((row) => row.x).filter(Number.isFinite);
+  const ys = rows.map((row) => row.y).filter(Number.isFinite);
+  let xMin = Math.min(...xs);
+  let xMax = Math.max(...xs);
+  let yMin = Math.min(...ys);
+  let yMax = Math.max(...ys);
+  const padX = (xMax - xMin) * 0.25 || 1;
+  const padY = (yMax - yMin) * 0.25 || 1;
+  return {
+    xMin: xMin - padX,
+    xMax: xMax + padX,
+    yMin: yMin - padY,
+    yMax: yMax + padY,
+  };
+}
+
+function approximateNonlinearNullclines(field, window, lines = 21, samples = 90) {
+  const { xMin, xMax, yMin, yMax } = window;
+  const first = []; // points where the first rate vanishes
+  const second = []; // points where the second rate vanishes
+
+  for (let i = 0; i <= lines; i += 1) {
+    const x = xMin + (i / lines) * (xMax - xMin);
+    let previous = null;
+    for (let j = 0; j <= samples; j += 1) {
+      const y = yMin + (j / samples) * (yMax - yMin);
+      const value = field([x, y])[0];
+      const root = nullclineRoot(previous, { coord: y, value });
+      if (root !== null) first.push({ x, y: root });
+      previous = { coord: y, value };
+    }
+  }
+
+  for (let j = 0; j <= lines; j += 1) {
+    const y = yMin + (j / lines) * (yMax - yMin);
+    let previous = null;
+    for (let i = 0; i <= samples; i += 1) {
+      const x = xMin + (i / samples) * (xMax - xMin);
+      const value = field([x, y])[1];
+      const root = nullclineRoot(previous, { coord: x, value });
+      if (root !== null) second.push({ x: root, y });
+      previous = { coord: x, value };
+    }
+  }
+
+  return { first, second };
+}
+
+function nullclineRoot(previous, current) {
+  if (!previous || !Number.isFinite(previous.value) || !Number.isFinite(current.value)) {
+    return null;
+  }
+  if (current.value === 0) return current.coord;
+  if (previous.value * current.value < 0) {
+    const t = previous.value / (previous.value - current.value);
+    return previous.coord + t * (current.coord - previous.coord);
+  }
+  return null;
+}
+
+function findNonlinearOdeEquilibria(field, window, maxResults = 6) {
+  const { xMin, xMax, yMin, yMax } = window;
+  const grid = 6;
+  const found = [];
+  for (let i = 0; i <= grid; i += 1) {
+    for (let j = 0; j <= grid; j += 1) {
+      const start = [xMin + (i / grid) * (xMax - xMin), yMin + (j / grid) * (yMax - yMin)];
+      const root = newtonNonlinearEquilibrium(field, start);
+      if (!root) continue;
+      if (root[0] < xMin || root[0] > xMax || root[1] < yMin || root[1] > yMax) continue;
+      if (!found.some((point) => Math.hypot(point[0] - root[0], point[1] - root[1]) < 1e-4)) {
+        found.push(root);
+      }
+    }
+  }
+  return found.sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, maxResults);
+}
+
+function newtonNonlinearEquilibrium(field, start) {
+  let point = [...start];
+  for (let iteration = 0; iteration < 60; iteration += 1) {
+    const value = field(point);
+    if (!value.every(Number.isFinite)) return null;
+    if (Math.hypot(value[0], value[1]) < 1e-11) return point.map(normalizeNumber);
+    const jacobian = numericalJacobian2(field, point);
+    const det = jacobian[0][0] * jacobian[1][1] - jacobian[0][1] * jacobian[1][0];
+    if (Math.abs(det) < 1e-12) return null;
+    const dx = (jacobian[1][1] * value[0] - jacobian[0][1] * value[1]) / det;
+    const dy = (-jacobian[1][0] * value[0] + jacobian[0][0] * value[1]) / det;
+    point = [point[0] - dx, point[1] - dy];
+    if (!point.every(Number.isFinite) || Math.abs(point[0]) > 1e6 || Math.abs(point[1]) > 1e6) {
+      return null;
+    }
+  }
+  const value = field(point);
+  return Math.hypot(value[0], value[1]) < 1e-8 ? point.map(normalizeNumber) : null;
+}
+
+function numericalJacobian2(field, point) {
+  const h = 1e-6;
+  const base = field(point);
+  const dX = field([point[0] + h, point[1]]);
+  const dY = field([point[0], point[1] + h]);
+  return [
+    [(dX[0] - base[0]) / h, (dY[0] - base[0]) / h],
+    [(dX[1] - base[1]) / h, (dY[1] - base[1]) / h],
+  ];
+}
+
+function sampleNonlinearPhaseField(field, window, gridSize = 7) {
+  const { xMin, xMax, yMin, yMax } = window;
+  const samples = [];
+  for (let i = 0; i <= gridSize; i += 1) {
+    for (let j = 0; j <= gridSize; j += 1) {
+      const x = xMin + (i / gridSize) * (xMax - xMin);
+      const y = yMin + (j / gridSize) * (yMax - yMin);
+      const slope = field([x, y]);
+      if (slope.every(Number.isFinite)) {
+        samples.push({ x, y, dx: slope[0], dy: slope[1] });
+      }
+    }
+  }
+  return samples;
+}
+
+function downsamplePoints(points, maxPoints) {
+  if (points.length <= maxPoints) return points;
+  const step = Math.ceil(points.length / maxPoints);
+  const reduced = [];
+  for (let index = 0; index < points.length; index += step) {
+    reduced.push(points[index]);
+  }
+  if (reduced[reduced.length - 1] !== points[points.length - 1]) {
+    reduced.push(points[points.length - 1]);
+  }
+  return reduced;
+}
+
+function buildTrajectoryDisplayRows(rows) {
+  const format = (row) => [String(row.step), formatNumber(row.t), formatNumber(row.x), formatNumber(row.y)];
+  if (rows.length <= 22) {
+    return rows.map(format);
+  }
+  const head = rows.slice(0, 11).map(format);
+  const tail = rows.slice(-10).map(format);
+  return [...head, ["...", "...", "...", "..."], ...tail];
 }
 
 function analyzeHypothesisTest(statement) {
@@ -23247,6 +23581,13 @@ function isLinearOdeSystemQuestion(lower) {
     lower.includes("system of differential equations") ||
     lower.includes("linear ode system") ||
     ((lower.includes("x'") || lower.includes("dx/d")) && (lower.includes("y'") || lower.includes("dy/d")));
+}
+
+function isNonlinearOdeSystemQuestion(lower) {
+  if (!lower.includes("nonlinear")) return false;
+  const primeEquations = (lower.match(/[a-z]\s*'\s*=/g) || []).length;
+  const leibnizEquations = (lower.match(/d[a-z]\s*\/\s*d[a-z]/g) || []).length;
+  return primeEquations + leibnizEquations >= 2;
 }
 
 function isNumericalOdeQuestion(lower) {
