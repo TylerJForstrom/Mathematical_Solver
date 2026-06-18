@@ -42,6 +42,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
 
   const suggestions = [
     {
+      title: "Semantic tableau",
+      when: () => activeMode === "ask" && /\b(?:semantic tableaux?|tableaux?|truth tree|valid|tautology|countermodel)\b/.test(lower),
+      reason: "I detected a proof-tree logic question.",
+      needs: [
+        "A propositional statement using and, or, not, ->, xor, or iff",
+        "Use tableau or truth tree to request a branch-by-branch proof",
+      ],
+      examples: [
+        ["Validity proof", "ask", "tableau P -> P"],
+        ["Satisfiability", "ask", "tableau satisfiable (P or Q) and (not P or R)"],
+      ],
+    },
+    {
       title: "SAT solver",
       when: () => activeMode === "ask" && /\b(?:sat solver|satisfiable|satisfiability|dpll)\b/.test(lower),
       reason: "I detected a propositional satisfiability question.",
@@ -563,6 +576,113 @@ export function analyzeLogicSat(statement) {
       ["Unit propagations", formatNumber(result.stats.unitPropagations)],
       ["Pure literal assignments", formatNumber(result.stats.pureLiteralAssignments)],
       ["Search nodes", formatNumber(result.stats.nodes)],
+    ],
+  };
+}
+
+export function analyzeLogicTableau(statement) {
+  const request = extractLogicTableauQuestion(statement);
+  const tree = parseLogic(request.expression);
+  const primitive = eliminateLogicDerivedOperators(tree);
+  const nnf = logicNegationNormalForm(primitive);
+  const steps = [
+    {
+      title: "Parse logic statement",
+      expression: logicToString(tree),
+      detail: "The statement becomes a propositional expression tree.",
+    },
+    {
+      title: "Eliminate derived connectives",
+      expression: logicToString(primitive),
+      detail: "Semantic tableaux use AND, OR, and NOT expansion rules, so implication, IFF, and XOR are rewritten first.",
+    },
+    {
+      title: "Build tableau root",
+      expression: request.goal === "validity" ? `F ${logicToString(nnf)}` : `T ${logicToString(nnf)}`,
+      detail: request.goal === "validity"
+        ? "To prove validity, the tableau tries to make the statement false; if every branch closes, the statement is valid."
+        : "To test satisfiability, the tableau tries to make the statement true; an open branch gives a model.",
+    },
+  ];
+  const rootFormula = {
+    sign: request.goal !== "validity",
+    node: nnf,
+  };
+  const result = solveSemanticTableau(rootFormula, logicVariables(tree));
+  const modelText = result.model ? formatAssignment(result.model) : "none";
+  let answer;
+  let summary;
+  let details;
+
+  if (request.goal === "validity") {
+    answer = result.allClosed
+      ? "valid: every countermodel branch closes"
+      : `not valid: countermodel ${modelText}`;
+    summary = result.allClosed ? "tableau valid" : "tableau refutable";
+    details = "Semantic tableau validity proof";
+  } else if (request.goal === "unsatisfiable") {
+    answer = result.allClosed
+      ? "unsatisfiable: every truth branch closes"
+      : `not unsatisfiable: model ${modelText}`;
+    summary = result.allClosed ? "tableau unsatisfiable" : "tableau satisfiable";
+    details = "Semantic tableau contradiction proof";
+  } else {
+    answer = result.allClosed
+      ? "unsatisfiable: every truth branch closes"
+      : `satisfiable: ${modelText}`;
+    summary = result.allClosed ? "tableau unsatisfiable" : "tableau satisfiable";
+    details = "Semantic tableau satisfiability proof";
+  }
+
+  steps.push({
+    title: "Close contradictory branches",
+    expression: `${result.closedBranches}/${result.branchCount} branches closed`,
+    detail: result.allClosed
+      ? "Every branch contains a contradiction or impossible constant assertion."
+      : "At least one branch remains open, so its literals describe a consistent assignment.",
+  });
+
+  return {
+    mode: "logic",
+    tree: nnf,
+    answer,
+    summary,
+    details,
+    variables: result.variables,
+    assignment: result.model ?? {},
+    metrics: treeMetrics(nnf),
+    steps,
+    table: {
+      headers: ["Branch", "Status", "Literals", "Reason"],
+      rows: result.branches.map((branch) => [
+        String(branch.id),
+        branch.closed ? "closed" : "open",
+        formatTableauBranchLiterals(branch),
+        branch.closed ? branch.reason : `model ${formatAssignment(tableauBranchModel(branch, result.variables))}`,
+      ]),
+    },
+    extraTables: [{
+      title: "Tableau expansion",
+      headers: ["Step", "Branch", "Rule", "Result"],
+      rows: result.trace.map((entry, index) => [
+        String(index + 1),
+        String(entry.branchId),
+        entry.rule,
+        entry.result,
+      ]),
+    }],
+    artifacts: [
+      ["Original", logicToString(tree)],
+      ["Primitive", logicToString(primitive)],
+      ["NNF", logicToString(nnf)],
+      ["Tableau goal", request.goal],
+      ["Root formula", formatSignedFormula(rootFormula)],
+      ["Result", summary],
+      ["Branches", formatNumber(result.branchCount)],
+      ["Closed branches", formatNumber(result.closedBranches)],
+      ["Open branches", formatNumber(result.openBranches)],
+      ["Model or countermodel", modelText],
+      ["Expansions", formatNumber(result.expansions)],
     ],
   };
 }
@@ -1809,6 +1929,9 @@ export function analyzeUniversal(question, values = {}) {
   if (isMarkovQuestion(lower)) {
     routed = analyzeMarkovChain(question);
     routedLabel = "Markov chain";
+  } else if (isLogicTableauQuestion(lower)) {
+    routed = analyzeLogicTableau(question);
+    routedLabel = "Semantic tableau";
   } else if (isLogicSatQuestion(lower)) {
     routed = analyzeLogicSat(question);
     routedLabel = "SAT solver";
@@ -25095,6 +25218,15 @@ function isLogicNormalFormQuestion(lower) {
     lower.startsWith("normal forms ");
 }
 
+function isLogicTableauQuestion(lower) {
+  return lower.startsWith("tableau ") ||
+    lower.startsWith("tableaux ") ||
+    lower.startsWith("truth tree ") ||
+    lower.includes("semantic tableau") ||
+    lower.includes("semantic tableaux") ||
+    /\b(?:tableaux?|truth tree)\b/.test(lower);
+}
+
 function isLogicSatQuestion(lower) {
   return lower.startsWith("sat ") ||
     lower.startsWith("sat(") ||
@@ -25376,7 +25508,7 @@ function extractLogicNormalFormQuestion(question) {
     .replace(/\b(?:logic|boolean|propositional)\b/gi, " ")
     .replace(new RegExp(`\\b(?:to|in|as|into)\\s+${formPattern}\\b`, "gi"), " ")
     .replace(new RegExp(`\\b${formPattern}\\b`, "gi"), " ")
-    .replace(/^\s*of\s+/i, "")
+    .replace(/^\s*(?:of|for)\s+/i, "")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -25395,7 +25527,7 @@ function extractLogicSatQuestion(question) {
     .replace(/^(?:dpll|sat(?:\s+solver)?|boolean\s+sat|propositional\s+sat|satisfiability|satisfiable)\s*:?\s*/i, "")
     .replace(/\b(?:is|are)\s+satisfiable\b/gi, " ")
     .replace(/\b(?:sat\s+solver|satisfiability|satisfiable|dpll)\b/gi, " ")
-    .replace(/^\s*of\s+/i, "")
+    .replace(/^\s*(?:of|for)\s+/i, "")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -25403,6 +25535,32 @@ function extractLogicSatQuestion(question) {
     throw new Error("SAT mode needs a logic statement, such as sat (P or Q) and not R.");
   }
   return { expression };
+}
+
+function extractLogicTableauQuestion(question) {
+  const lower = question.toLowerCase();
+  const goal = /\b(?:unsatisfiable|inconsistent|contradiction|contradictory)\b/.test(lower)
+    ? "unsatisfiable"
+    : /\b(?:satisfiable|satisfiability|sat|model|consistent)\b/.test(lower)
+      ? "satisfiable"
+      : "validity";
+  const expression = question
+    .replace(/[?!.]+$/, "")
+    .replace(/\b(?:using|with|via)\s+(?:semantic\s+)?tableaux?\b/gi, " ")
+    .replace(/^(?:check|determine|decide|test|solve|find|show|prove)\s+(?:if|whether)?\s*/i, "")
+    .replace(/^(?:is|whether)\s+/i, "")
+    .replace(/^(?:(?:semantic\s+)?tableaux?|truth\s+tree)\s*:?\s*/i, "")
+    .replace(/\b(?:semantic\s+)?tableaux?\b/gi, " ")
+    .replace(/\btruth\s+tree\b/gi, " ")
+    .replace(/\b(?:valid|invalid|tautology|satisfiable|satisfiability|sat|model|consistent|unsatisfiable|inconsistent|contradiction|contradictory|countermodel)\b/gi, " ")
+    .replace(/^\s*(?:of|for)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!expression) {
+    throw new Error("Tableau mode needs a logic statement, such as tableau P -> P.");
+  }
+  return { goal, expression };
 }
 
 function readLogicNormalFormTarget(question) {
@@ -26369,6 +26527,249 @@ function formatDpllClause(clause) {
 
 function formatDpllLiteral(literal) {
   return literal.positive ? literal.name : `not ${literal.name}`;
+}
+
+function solveSemanticTableau(rootFormula, variables) {
+  const branches = [{
+    id: 1,
+    formulas: [{ ...rootFormula, expanded: false }],
+    closed: false,
+    reason: "",
+  }];
+  const trace = [];
+  let nextBranchId = 2;
+  let expansions = 0;
+  let guard = 0;
+
+  while (guard < 160) {
+    guard += 1;
+    const branch = branches.find((candidate) => !candidate.closed && selectTableauFormula(candidate));
+    if (!branch) {
+      break;
+    }
+
+    const selected = selectTableauFormula(branch);
+    selected.expanded = true;
+    const rule = decomposeTableauFormula(selected);
+    if (rule.kind === "literal" || rule.kind === "noop") {
+      const closure = closeTableauBranchIfNeeded(branch);
+      if (closure) {
+        addTableauTrace(trace, branch.id, "close", closure);
+      }
+      continue;
+    }
+    if (rule.kind === "close") {
+      branch.closed = true;
+      branch.reason = rule.reason;
+      addTableauTrace(trace, branch.id, "close", rule.reason);
+      continue;
+    }
+
+    expansions += 1;
+    if (rule.kind === "alpha") {
+      for (const formula of rule.formulas) {
+        addTableauFormula(branch, formula);
+      }
+      addTableauTrace(
+        trace,
+        branch.id,
+        rule.label,
+        rule.formulas.map(formatSignedFormula).join("; "),
+      );
+      const closure = closeTableauBranchIfNeeded(branch);
+      if (closure) {
+        addTableauTrace(trace, branch.id, "close", closure);
+      }
+      continue;
+    }
+
+    const baseFormulas = branch.formulas.map((formula) => ({ ...formula }));
+    const createdIds = [branch.id];
+    for (const [index, formulas] of rule.branches.entries()) {
+      const target = index === 0
+        ? branch
+        : {
+            id: nextBranchId++,
+            formulas: baseFormulas.map((formula) => ({ ...formula })),
+            closed: false,
+            reason: "",
+          };
+      for (const formula of formulas) {
+        addTableauFormula(target, formula);
+      }
+      const closure = closeTableauBranchIfNeeded(target);
+      if (closure) {
+        addTableauTrace(trace, target.id, "close", closure);
+      }
+      if (index > 0) {
+        branches.push(target);
+      }
+      createdIds[index] = target.id;
+    }
+    addTableauTrace(
+      trace,
+      branch.id,
+      rule.label,
+      rule.branches
+        .map((formulas, index) => `B${createdIds[index]}: ${formulas.map(formatSignedFormula).join("; ")}`)
+        .join(" | "),
+    );
+  }
+
+  for (const branch of branches) {
+    if (!branch.closed) {
+      closeTableauBranchIfNeeded(branch);
+    }
+  }
+
+  const openBranches = branches.filter((branch) => !branch.closed);
+  const model = openBranches.length
+    ? tableauBranchModel(openBranches[0], variables)
+    : null;
+  return {
+    branches: branches.sort((left, right) => left.id - right.id),
+    branchCount: branches.length,
+    closedBranches: branches.length - openBranches.length,
+    openBranches: openBranches.length,
+    allClosed: openBranches.length === 0,
+    model,
+    variables,
+    trace,
+    expansions,
+  };
+}
+
+function selectTableauFormula(branch) {
+  return branch.formulas.find((formula) => !formula.expanded);
+}
+
+function decomposeTableauFormula(formula) {
+  const { sign, node } = formula;
+  if (node.kind === "logicConstant") {
+    if ((sign && !node.value) || (!sign && node.value)) {
+      return { kind: "close", reason: `${formatSignedFormula(formula)} is impossible` };
+    }
+    return { kind: "noop" };
+  }
+  if (node.kind === "logicVariable") {
+    return { kind: "literal" };
+  }
+  if (node.kind === "logicNot") {
+    return {
+      kind: "alpha",
+      label: `${formatSignedFormula(formula)} negation`,
+      formulas: [{ sign: !sign, node: node.operand }],
+    };
+  }
+  if (node.kind === "logicBinary" && node.operator === "and") {
+    return sign
+      ? {
+          kind: "alpha",
+          label: `${formatSignedFormula(formula)} alpha`,
+          formulas: [
+            { sign: true, node: node.left },
+            { sign: true, node: node.right },
+          ],
+        }
+      : {
+          kind: "beta",
+          label: `${formatSignedFormula(formula)} beta`,
+          branches: [
+            [{ sign: false, node: node.left }],
+            [{ sign: false, node: node.right }],
+          ],
+        };
+  }
+  if (node.kind === "logicBinary" && node.operator === "or") {
+    return sign
+      ? {
+          kind: "beta",
+          label: `${formatSignedFormula(formula)} beta`,
+          branches: [
+            [{ sign: true, node: node.left }],
+            [{ sign: true, node: node.right }],
+          ],
+        }
+      : {
+          kind: "alpha",
+          label: `${formatSignedFormula(formula)} alpha`,
+          formulas: [
+            { sign: false, node: node.left },
+            { sign: false, node: node.right },
+          ],
+        };
+  }
+  throw new Error("Tableau expansion expects primitive logic operators.");
+}
+
+function addTableauFormula(branch, formula) {
+  const key = tableauFormulaKey(formula);
+  if (branch.formulas.some((candidate) => tableauFormulaKey(candidate) === key)) {
+    return;
+  }
+  branch.formulas.push({ ...formula, expanded: false });
+}
+
+function closeTableauBranchIfNeeded(branch) {
+  const assignments = new Map();
+  for (const formula of branch.formulas) {
+    if (formula.node.kind === "logicConstant") {
+      if ((formula.sign && !formula.node.value) || (!formula.sign && formula.node.value)) {
+        branch.closed = true;
+        branch.reason = `${formatSignedFormula(formula)} is impossible`;
+        return branch.reason;
+      }
+      continue;
+    }
+    if (formula.node.kind !== "logicVariable") {
+      continue;
+    }
+    const existing = assignments.get(formula.node.name);
+    if (existing !== undefined && existing !== formula.sign) {
+      branch.closed = true;
+      branch.reason = `${formula.node.name} is both true and false`;
+      return branch.reason;
+    }
+    assignments.set(formula.node.name, formula.sign);
+  }
+  return "";
+}
+
+function tableauBranchModel(branch, variables) {
+  const assignment = {};
+  for (const formula of branch.formulas) {
+    if (formula.node.kind === "logicVariable") {
+      assignment[formula.node.name] = formula.sign;
+    }
+  }
+  const completed = {};
+  for (const name of variables) {
+    completed[name] = Boolean(assignment[name] ?? false);
+  }
+  return completed;
+}
+
+function formatTableauBranchLiterals(branch) {
+  const literals = branch.formulas
+    .filter((formula) => formula.node.kind === "logicVariable")
+    .sort((left, right) => left.node.name.localeCompare(right.node.name) || Number(right.sign) - Number(left.sign))
+    .map(formatSignedFormula);
+  return literals.length ? literals.join(", ") : "none";
+}
+
+function formatSignedFormula(formula) {
+  return `${formula.sign ? "T" : "F"} ${logicToString(formula.node)}`;
+}
+
+function tableauFormulaKey(formula) {
+  return `${formula.sign ? "T" : "F"}:${logicToString(formula.node)}`;
+}
+
+function addTableauTrace(trace, branchId, rule, result) {
+  if (trace.length >= 60) {
+    return;
+  }
+  trace.push({ branchId, rule, result });
 }
 
 function eliminateLogicDerivedOperators(node) {

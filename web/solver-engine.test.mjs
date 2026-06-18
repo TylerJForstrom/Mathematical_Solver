@@ -18,6 +18,7 @@ import {
   analyzeLogicNormalForm,
   analyzeLogicSat,
   analyzeLogicSimplification,
+  analyzeLogicTableau,
   analyzeMatrix,
   analyzeMarkovChain,
   analyzeMultivariable,
@@ -102,7 +103,33 @@ runTest("logic mode solves SAT with DPLL", () => {
   assert.equal(analyzeUniversal("sat (P or Q) and (not P or not Q)").summary, "SAT satisfiable");
 });
 
+runTest("logic mode proves statements with semantic tableaux", () => {
+  const valid = analyzeLogicTableau("tableau P -> P");
+  const satisfiable = analyzeLogicTableau("tableau satisfiable (P or Q) and not P");
+  const unsatisfiable = analyzeLogicTableau("tableau unsatisfiable P and not P");
+
+  assert.equal(valid.summary, "tableau valid");
+  assert.equal(valid.answer, "valid: every countermodel branch closes");
+  assert.equal(artifactValue(valid, "Closed branches"), "1");
+  assert.equal(valid.table.rows[0][1], "closed");
+  assert.ok(valid.extraTables[0].rows.some((row) => row[2].includes("alpha")));
+
+  assert.equal(satisfiable.summary, "tableau satisfiable");
+  assert.equal(satisfiable.answer, "satisfiable: P=false, Q=true");
+  assert.equal(artifactValue(satisfiable, "Open branches"), "1");
+  assert.ok(satisfiable.table.rows.some((row) => row[1] === "open" && row[2].includes("T Q")));
+
+  assert.equal(unsatisfiable.summary, "tableau unsatisfiable");
+  assert.equal(unsatisfiable.answer, "unsatisfiable: every truth branch closes");
+  assert.equal(artifactValue(unsatisfiable, "Open branches"), "0");
+  assert.equal(analyzeUniversal("tableau P -> P").summary, "tableau valid");
+});
+
 runTest("input assistant suggests structured problem formats", () => {
+  const tableauHelp = suggestProblemHelp("truth tree valid?", "ask", "Need a logic statement.");
+  assert.equal(tableauHelp.title, "Semantic tableau");
+  assert.equal(tableauHelp.examples[0][2], "tableau P -> P");
+
   const satHelp = suggestProblemHelp("is this satisfiable?", "ask", "Need a logic statement.");
   assert.equal(satHelp.title, "SAT solver");
   assert.equal(satHelp.examples[0][2], "sat (P or Q) and (not P or R) and (not Q or R)");
