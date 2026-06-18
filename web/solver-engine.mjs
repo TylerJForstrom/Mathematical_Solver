@@ -8143,6 +8143,16 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
     criterion,
     `${criterion} by custom nonlinear model`,
   );
+  const loocvGraph = buildCustomNonlinearValidationMetricGraph(
+    weightedViable,
+    "loocvRmse",
+    "LOOCV RMSE by custom nonlinear model",
+    "LOOCV RMSE",
+  );
+  const requestedValidationGraphs = buildRequestedCustomNonlinearValidationGraphs(
+    weightedViable,
+    request.validation,
+  );
 
   return {
     mode: "statistics",
@@ -8157,7 +8167,7 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
     },
     answer: `best ${best.label} by ${criterion}: ${best.equation}${prediction ? `; averaged prediction = ${formatNumber(prediction.yHat)}` : ""}`,
     summary: "custom nonlinear model comparison",
-    details: `${request.x.length} observations, ${request.entries.length} custom formulas`,
+    details: customNonlinearComparisonDetails(request),
     variables: [],
     metrics: treeMetrics(statsDatasetNode(request.y, weightedViable.map((model) =>
       statsMetricNode(model.label, nonlinearRegressionCriterionValue(model, criterion)),
@@ -8178,6 +8188,12 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
         expression: weightedViable.map((model) => `${model.label}: ${criterion}=${formatNumber(nonlinearRegressionCriterionValue(model, criterion))}, weight=${formatNumber(model.weight)}`).join("; "),
         detail: "Akaike-style weights are computed from criterion deltas so close models can contribute to an averaged prediction.",
       },
+      {
+        title: "Cross-validate candidates",
+        expression: weightedViable.map((model) => `${model.label}: LOOCV RMSE=${formatFiniteNumber(model.loocvRmse)}`).join("; "),
+        detail: "Leave-one-out cross-validation refits each custom formula after holding out one observation and scores held-out prediction error.",
+      },
+      ...requestedCustomNonlinearValidationSteps(weightedViable, request.validation),
       ...(prediction
         ? [{
             title: "Average requested prediction",
@@ -8192,7 +8208,7 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
       },
     ],
     table: {
-      headers: ["Model", "Formula", "Parameters", "SSE", "R squared", "AIC", "AICc", "BIC", "Delta", "Weight", "Prediction", "Status"],
+      headers: customNonlinearComparisonTableHeaders(request.validation),
       rows: weightedModels.map((model) => customNonlinearComparisonTableRow(model, request)),
     },
     artifacts: [
@@ -8203,6 +8219,10 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
       ["Best R squared", formatNumber(best.rSquared)],
       ["Best weight", formatNumber(best.weight)],
       ["Model weights", weightedViable.map((model) => `${model.label}=${formatNumber(model.weight)}`).join(", ")],
+      ["LOOCV best model", pickBestCustomNonlinearMetricModel(weightedViable, "loocvRmse", "loocvMae")?.label ?? "undefined"],
+      ["LOOCV best RMSE", formatFiniteNumber(pickBestCustomNonlinearMetricModel(weightedViable, "loocvRmse", "loocvMae")?.loocvRmse)],
+      ["LOOCV best MAE", formatFiniteNumber(pickBestCustomNonlinearMetricModel(weightedViable, "loocvRmse", "loocvMae")?.loocvMae)],
+      ...requestedCustomNonlinearValidationArtifacts(weightedViable, request.validation),
       ...(prediction ? [
         ["Prediction x", formatNumber(prediction.x)],
         ["Best model prediction", formatFiniteNumber(best.prediction?.yHat)],
@@ -8210,7 +8230,7 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
       ] : []),
     ],
     graph: bestGraph,
-    graphs: [bestGraph, averagedGraph, criterionGraph].filter(Boolean),
+    graphs: [bestGraph, averagedGraph, criterionGraph, loocvGraph, ...requestedValidationGraphs].filter(Boolean),
     extraTables: [{
       title: "Model-averaged fitted values",
       headers: ["Obs", request.variable, "Actual", "Averaged fitted", "Residual"],
@@ -8659,6 +8679,13 @@ function fitCustomNonlinearComparisonModel(request, entry, modelIndex) {
     const prediction = Number.isFinite(request.prediction)
       ? customNonlinearRegressionPrediction(modelRequest, fit.parameters, fit.covariance, request.prediction)
       : null;
+    const loocv = leaveOneOutCustomNonlinearValidation(modelRequest);
+    const kFold = request.validation.kFold
+      ? kFoldCustomNonlinearValidation(modelRequest, request.validation.kFold)
+      : null;
+    const holdout = request.validation.holdoutCount
+      ? holdoutCustomNonlinearValidation(modelRequest, request.validation.holdoutCount)
+      : null;
     return {
       ...fit,
       modelIndex,
@@ -8668,6 +8695,18 @@ function fitCustomNonlinearComparisonModel(request, entry, modelIndex) {
       request: modelRequest,
       parameterNames: modelRequest.parameterNames,
       prediction,
+      loocvRmse: loocv.rmse,
+      loocvMae: loocv.mae,
+      loocvErrors: loocv.errors,
+      loocvPredictions: loocv.predictions,
+      kFoldRmse: kFold?.rmse ?? Number.NaN,
+      kFoldMae: kFold?.mae ?? Number.NaN,
+      kFoldErrors: kFold?.errors ?? [],
+      kFoldPredictions: kFold?.predictions ?? [],
+      holdoutRmse: holdout?.rmse ?? Number.NaN,
+      holdoutMae: holdout?.mae ?? Number.NaN,
+      holdoutErrors: holdout?.errors ?? [],
+      holdoutPredictions: holdout?.predictions ?? [],
       status: fit.converged
         ? `fit in ${fit.iterations} iterations`
         : `stopped after ${fit.iterations} iterations`,
@@ -8730,6 +8769,12 @@ function invalidCustomNonlinearComparisonModel(entry, modelIndex, status) {
     delta: Number.NaN,
     weight: Number.NaN,
     prediction: null,
+    loocvRmse: Number.NaN,
+    loocvMae: Number.NaN,
+    kFoldRmse: Number.NaN,
+    kFoldMae: Number.NaN,
+    holdoutRmse: Number.NaN,
+    holdoutMae: Number.NaN,
     status: `invalid: ${status}`,
   };
 }
@@ -8772,8 +8817,35 @@ function applyNonlinearComparisonWeights(models, criterion) {
   });
 }
 
-function customNonlinearComparisonTableRow(model, request) {
+function customNonlinearComparisonDetails(request) {
+  const validationDetails = [];
+  if (request.validation.kFold) {
+    validationDetails.push(`${request.validation.kFold}-fold CV`);
+  }
+  if (request.validation.holdoutCount) {
+    validationDetails.push(`${request.validation.holdoutCount}-point holdout`);
+  }
   return [
+    `${request.x.length} observations`,
+    `${request.entries.length} custom formulas`,
+    ...validationDetails,
+  ].join(", ");
+}
+
+function customNonlinearComparisonTableHeaders(validation) {
+  const headers = ["Model", "Formula", "Parameters", "SSE", "R squared", "AIC", "AICc", "BIC", "Delta", "Weight", "LOOCV RMSE", "LOOCV MAE"];
+  if (validation.kFold) {
+    headers.push("K-fold RMSE", "K-fold MAE");
+  }
+  if (validation.holdoutCount) {
+    headers.push("Holdout RMSE", "Holdout MAE");
+  }
+  headers.push("Prediction", "Status");
+  return headers;
+}
+
+function customNonlinearComparisonTableRow(model, request) {
+  const row = [
     model.label,
     model.equation,
     model.viable ? formatCustomParameterVector(model.parameters, model.parameterNames) : "undefined",
@@ -8784,9 +8856,111 @@ function customNonlinearComparisonTableRow(model, request) {
     formatFiniteNumber(model.bic),
     formatFiniteNumber(model.delta),
     formatFiniteNumber(model.weight),
+    formatFiniteNumber(model.loocvRmse),
+    formatFiniteNumber(model.loocvMae),
+  ];
+  if (request.validation.kFold) {
+    row.push(formatFiniteNumber(model.kFoldRmse), formatFiniteNumber(model.kFoldMae));
+  }
+  if (request.validation.holdoutCount) {
+    row.push(formatFiniteNumber(model.holdoutRmse), formatFiniteNumber(model.holdoutMae));
+  }
+  row.push(
     Number.isFinite(request.prediction) ? formatFiniteNumber(model.prediction?.yHat) : "",
     model.status,
-  ];
+  );
+  return row;
+}
+
+function pickBestCustomNonlinearMetricModel(models, rmseKey, maeKey) {
+  const candidates = models.filter((model) => Number.isFinite(model[rmseKey]));
+  return [...candidates].sort((left, right) =>
+    left[rmseKey] - right[rmseKey] ||
+    left[maeKey] - right[maeKey] ||
+    left.modelIndex - right.modelIndex,
+  )[0] ?? null;
+}
+
+function requestedCustomNonlinearValidationSteps(models, validation) {
+  const steps = [];
+  if (validation.kFold) {
+    steps.push({
+      title: "Run k-fold validation",
+      expression: models.map((model) => `${model.label}: RMSE=${formatFiniteNumber(model.kFoldRmse)}`).join("; "),
+      detail: `${validation.kFold}-fold validation assigns observations to deterministic round-robin folds and scores held-out custom-model predictions.`,
+    });
+  }
+  if (validation.holdoutCount) {
+    steps.push({
+      title: "Run holdout validation",
+      expression: models.map((model) => `${model.label}: RMSE=${formatFiniteNumber(model.holdoutRmse)}`).join("; "),
+      detail: `The solver trains custom formulas on the first ${models[0].fitted.length - validation.holdoutCount} observations and tests on the final ${validation.holdoutCount}.`,
+    });
+  }
+  return steps;
+}
+
+function requestedCustomNonlinearValidationArtifacts(models, validation) {
+  const artifacts = [];
+  if (validation.kFold) {
+    const best = pickBestCustomNonlinearMetricModel(models, "kFoldRmse", "kFoldMae");
+    artifacts.push(
+      ["K-fold count", formatNumber(validation.kFold)],
+      ["K-fold best model", best ? best.label : "undefined"],
+      ["K-fold best RMSE", formatFiniteNumber(best?.kFoldRmse)],
+      ["K-fold best MAE", formatFiniteNumber(best?.kFoldMae)],
+    );
+  }
+  if (validation.holdoutCount) {
+    const best = pickBestCustomNonlinearMetricModel(models, "holdoutRmse", "holdoutMae");
+    artifacts.push(
+      ["Holdout count", formatNumber(validation.holdoutCount)],
+      ["Holdout best model", best ? best.label : "undefined"],
+      ["Holdout best RMSE", formatFiniteNumber(best?.holdoutRmse)],
+      ["Holdout best MAE", formatFiniteNumber(best?.holdoutMae)],
+    );
+  }
+  return artifacts;
+}
+
+function buildRequestedCustomNonlinearValidationGraphs(models, validation) {
+  return [
+    validation.kFold
+      ? buildCustomNonlinearValidationMetricGraph(models, "kFoldRmse", `${validation.kFold}-fold RMSE by custom nonlinear model`, "K-fold RMSE")
+      : null,
+    validation.holdoutCount
+      ? buildCustomNonlinearValidationMetricGraph(models, "holdoutRmse", "Holdout RMSE by custom nonlinear model", "Holdout RMSE")
+      : null,
+  ].filter(Boolean);
+}
+
+function buildCustomNonlinearValidationMetricGraph(models, metricKey, expression, scatterLabel) {
+  const points = models
+    .filter((model) => Number.isFinite(model[metricKey]))
+    .map((model, index) => ({
+      x: index + 1,
+      y: model[metricKey],
+    }));
+  if (points.length === 0) {
+    return null;
+  }
+  const [yMin, yMax] = paddedNumericRange(points.map((point) => point.y));
+  return {
+    expression,
+    kind: "regression-diagnostic",
+    scatterLabel,
+    xMin: 1,
+    xMax: points.length,
+    yMin,
+    yMax,
+    scatter: points,
+    lines: [
+      {
+        label: scatterLabel,
+        points,
+      },
+    ],
+  };
 }
 
 function customNonlinearWeightedPrediction(models, x) {
@@ -8824,6 +8998,96 @@ function customNonlinearModelAveragedRows(models, request) {
       formatFiniteNumber(residual),
     ];
   });
+}
+
+function leaveOneOutCustomNonlinearValidation(request) {
+  const splits = Array.from({ length: request.y.length }, (_, heldOut) => ({
+    train: complementIndices(request.y.length, [heldOut]),
+    test: [heldOut],
+  }));
+  return scoreCustomNonlinearValidationSplits(request, splits);
+}
+
+function kFoldCustomNonlinearValidation(request, kFold) {
+  const folds = Array.from({ length: kFold }, () => []);
+  for (let index = 0; index < request.y.length; index += 1) {
+    folds[index % kFold].push(index);
+  }
+  const splits = folds
+    .filter((fold) => fold.length > 0)
+    .map((fold) => ({
+      train: complementIndices(request.y.length, fold),
+      test: fold,
+    }));
+  return scoreCustomNonlinearValidationSplits(request, splits);
+}
+
+function holdoutCustomNonlinearValidation(request, holdoutCount) {
+  const test = Array.from(
+    { length: holdoutCount },
+    (_, index) => request.y.length - holdoutCount + index,
+  );
+  return scoreCustomNonlinearValidationSplits(request, [
+    {
+      train: complementIndices(request.y.length, test),
+      test,
+    },
+  ]);
+}
+
+function scoreCustomNonlinearValidationSplits(request, splits) {
+  const predictions = [];
+  const errors = [];
+
+  for (const split of splits) {
+    if (split.train.length <= request.parameterNames.length) {
+      return emptyValidationScore();
+    }
+    const trainRequest = {
+      ...request,
+      prediction: Number.NaN,
+      x: split.train.map((index) => request.x[index]),
+      y: split.train.map((index) => request.y[index]),
+    };
+    let fit;
+    try {
+      fit = fitCustomNonlinearRegression(trainRequest);
+    } catch {
+      return emptyValidationScore();
+    }
+
+    for (const testIndex of split.test) {
+      const prediction = evaluateCustomNonlinearFormula(
+        request.expression,
+        request.variable,
+        request.parameterNames,
+        fit.parameters,
+        request.x[testIndex],
+      );
+      if (!Number.isFinite(prediction)) {
+        return emptyValidationScore();
+      }
+      const normalizedPrediction = normalizeNumber(prediction);
+      predictions.push(normalizedPrediction);
+      errors.push(normalizeNumber(request.y[testIndex] - normalizedPrediction));
+    }
+  }
+
+  if (errors.length === 0) {
+    return emptyValidationScore();
+  }
+  const mse = mean(errors.map((error) => error ** 2));
+  const mae = mean(errors.map((error) => Math.abs(error)));
+  return {
+    predictions,
+    errors,
+    rmse: normalizeNumber(Math.sqrt(mse)),
+    mae: normalizeNumber(mae),
+  };
+}
+
+function emptyValidationScore() {
+  return { predictions: [], errors: [], rmse: Number.NaN, mae: Number.NaN };
 }
 
 function fitCustomNonlinearRegression(request) {
@@ -20907,6 +21171,7 @@ function parseCustomNonlinearRegressionModelComparisonInput(text) {
     response: formulaInfos[0].formulaInfo.response,
     variable,
     criterion: parseCustomComparisonCriterion(text),
+    validation: parseRegressionModelComparisonValidation(text, pairs.length),
     level: parseConfidenceLevel(text, 0.95),
     maxIterations,
     tolerance,

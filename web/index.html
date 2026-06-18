@@ -106,7 +106,7 @@
           <button type="button" data-sample-mode="statistics" data-sample="multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0">MultiReg</button>
           <button type="button" data-sample-mode="statistics" data-sample="regression diagnostics y: 2, 3, 5, 8, 13, 21; x: 1, 2, 3, 4, 5, 6">RegDiag</button>
           <button type="button" data-sample-mode="statistics" data-sample="compare regression models y: 2, 3, 5, 8, 13, 21; x: 1, 2, 3, 4, 5, 6 degrees=1,2,3">Compare</button>
-          <button type="button" data-sample-mode="statistics" data-sample="compare custom nonlinear regression models formulas=a*exp(b*x) | c*x^d; x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5,c=1,d=2; bounds a=0:10,b=0:2,c=0:10,d=0:4; multistart=3; predict x=6">CustomCmp</button>
+          <button type="button" data-sample-mode="statistics" data-sample="compare custom nonlinear regression models formulas=a*exp(b*x) | c*x^d; x: 1,2,3,4,5,6; y: 2,4,8,16,32,64; params a=1,b=0.5,c=1,d=2; bounds a=0:10,b=0:2,c=0:10,d=0:4; multistart=3; kfold=3 holdout=0.33; predict x=7">CustomCmp</button>
           <button type="button" data-sample-mode="statistics" data-sample="ridge regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0">Ridge</button>
           <button type="button" data-sample-mode="statistics" data-sample="lasso regression lambda=1 y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0">Lasso</button>
           <button type="button" data-sample-mode="statistics" data-sample="bayesian linear regression y: 4, 7, 9, 12, 15; x: 1, 2, 3, 4, 5; priorMean=0 priorSd=10 sigma=1 predict x=6">BayesReg</button>

@@ -536,13 +536,29 @@ runTest("statistics mode compares custom nonlinear regression formulas", () => {
   assert.equal(artifactValue(result, "Best model"), "Model 1");
   assert.equal(artifactValue(result, "Best weight"), "1");
   assert.equal(artifactValue(result, "Model weights"), "Model 1=1, Model 2=0");
+  assert.equal(artifactValue(result, "LOOCV best model"), "Model 1");
+  assert.equal(artifactValue(result, "LOOCV best RMSE"), "0");
   assert.equal(artifactValue(result, "Model-averaged prediction"), "64");
-  assert.deepEqual(result.table.rows[0], ["Model 1", "y = a*exp(b*x)", "a=1, b=0.693147", "0", "1", "-111.129255", "-105.129255", "-111.910379", "0", "1", "64", "fit in 11 iterations"]);
-  assert.deepEqual(result.table.rows[1], ["Model 2", "y = c*x^d", "c=0.405279, d=2.704563", "6.148024", "0.989671", "5.033464", "11.033464", "4.25234", "116.162719", "0", "51.560077", "fit in 7 iterations"]);
+  assert.deepEqual(result.table.rows[0], ["Model 1", "y = a*exp(b*x)", "a=1, b=0.693147", "0", "1", "-111.129255", "-105.129255", "-111.910379", "0", "1", "0", "0", "64", "fit in 11 iterations"]);
+  assert.deepEqual(result.table.rows[1], ["Model 2", "y = c*x^d", "c=0.405279, d=2.704563", "6.148024", "0.989671", "5.033464", "11.033464", "4.25234", "116.162719", "0", "3.548939", "2.581835", "51.560077", "fit in 7 iterations"]);
   assert.equal(result.extraTables[0].title, "Model-averaged fitted values");
   assert.deepEqual(result.extraTables[0].rows[2], ["3", "3", "8", "8", "0"]);
-  assert.deepEqual(result.graphs.map((graph) => graph.expression), ["Model 1 best fit", "Model-averaged custom best fit", "AICc by custom nonlinear model"]);
+  assert.deepEqual(result.graphs.map((graph) => graph.expression), ["Model 1 best fit", "Model-averaged custom best fit", "AICc by custom nonlinear model", "LOOCV RMSE by custom nonlinear model"]);
   assert.equal(analyzeUniversal("compare custom nonlinear regression models formulas=a*exp(b*x) | c*x^d; x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5,c=1,d=2").summary, "custom nonlinear model comparison");
+});
+
+runTest("statistics mode validates custom nonlinear regression formula comparisons", () => {
+  const result = analyzeStatistics("compare custom nonlinear regression models formulas=a*exp(b*x) | c*x^d; x: 1,2,3,4,5,6; y: 2,4,8,16,32,64; params a=1,b=0.5,c=1,d=2; bounds a=0:10,b=0:2,c=0:10,d=0:4; multistart=3; kfold=3 holdout=0.33; predict x=7");
+
+  assert.equal(result.details, "6 observations, 2 custom formulas, 3-fold CV, 2-point holdout");
+  assert.equal(artifactValue(result, "K-fold count"), "3");
+  assert.equal(artifactValue(result, "K-fold best model"), "Model 1");
+  assert.equal(artifactValue(result, "K-fold best RMSE"), "0");
+  assert.equal(artifactValue(result, "Holdout count"), "2");
+  assert.equal(artifactValue(result, "Holdout best model"), "Model 1");
+  assert.equal(artifactValue(result, "Holdout best RMSE"), "0");
+  assert.deepEqual(result.table.rows[1], ["Model 2", "y = c*x^d", "c=0.14667, d=3.384881", "18.345778", "0.993481", "10.70584", "14.70584", "10.289359", "144.860946", "0", "5.532237", "3.816537", "5.272062", "3.286053", "20.550785", "17.703461", "106.388971", "fit in 22 iterations"]);
+  assert.deepEqual(result.graphs.map((graph) => graph.expression), ["Model 1 best fit", "Model-averaged custom best fit", "AICc by custom nonlinear model", "LOOCV RMSE by custom nonlinear model", "3-fold RMSE by custom nonlinear model", "Holdout RMSE by custom nonlinear model"]);
 });
 
 runTest("statistics mode computes multiple linear regression", () => {
