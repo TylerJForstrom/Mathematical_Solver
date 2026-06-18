@@ -3812,7 +3812,15 @@ function analyzeNumericalIntegration(request, expression) {
 export function analyzeDifferentialEquation(statement) {
   const lower = statement.toLowerCase();
   if (isLinearOdeSystemQuestion(lower)) {
-    return analyzeLinearOdeSystem(statement);
+    try {
+      return analyzeLinearOdeSystem(statement);
+    } catch (linearError) {
+      try {
+        return analyzeNonlinearOdeSystem(statement);
+      } catch {
+        throw linearError;
+      }
+    }
   }
 
   if (isNumericalOdeQuestion(lower)) {
@@ -4115,6 +4123,123 @@ function analyzeLinearOdeSystem(statement) {
       ],
       rows: fieldRows.map((row) => row.map(formatNumber)),
     },
+  };
+}
+
+function analyzeNonlinearOdeSystem(statement) {
+  const request = extractNonlinearOdeSystem(statement);
+  const trajectory = integrateNonlinearOdeSystem(request);
+  const equilibria = findNonlinearOdeEquilibria(request);
+  const fieldRows = sampleNonlinearPhasePlaneField(request);
+  const nullclineRows = sampleNonlinearNullclines(request);
+  const equilibriumText = formatNonlinearOdeEquilibria(equilibria);
+  const equationText = formatNonlinearOdeSystemEquations(request);
+  const finalState = trajectory.rows.at(-1).state;
+  const trajectoryGraph = buildNonlinearOdeTrajectoryGraph(request, trajectory, equilibria);
+  const nullclineGraph = buildNonlinearOdeNullclineGraph(request, nullclineRows);
+
+  const tree = {
+    kind: "statsDistribution",
+    label: "NONLINEAR ODE",
+    children: [
+      statsMetricNode(request.stateVariables[0], finalState[0]),
+      statsMetricNode(request.stateVariables[1], finalState[1]),
+      statsMetricNode("equilibria", equilibria.length),
+      statsMetricNode("steps", request.steps),
+    ],
+  };
+
+  return {
+    mode: "ode",
+    tree,
+    answer: `state(${formatNumber(request.target)}) ~= ${formatVector(finalState)}; equilibria: ${equilibriumText}`,
+    summary: "nonlinear ODE system",
+    details: "2D autonomous system with numeric equilibria, nullclines, and RK4 trajectory",
+    variables: [request.variable, ...request.stateVariables],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read nonlinear system",
+        expression: equationText,
+        detail: "The solver treats the equations as an autonomous two-variable phase-plane system.",
+      },
+      {
+        title: "Find equilibria",
+        expression: equilibriumText,
+        detail: "Equilibria are roots of both right-hand sides; the solver runs damped Newton iterations from a grid of starting points.",
+      },
+      {
+        title: "Linearize equilibria",
+        expression: equilibria.map((entry) => `${formatVector(entry.point)}: ${entry.classification}`).join("; ") || "none found",
+        detail: "The Jacobian at each equilibrium gives the local trace-determinant phase portrait classification.",
+      },
+      {
+        title: "Sample nullclines",
+        expression: `${nullclineRows.length} approximate nullcline points`,
+        detail: "The solver scans the phase plane for sign changes in each component of the vector field.",
+      },
+      {
+        title: "Advance trajectory",
+        expression: `${request.steps} RK4 steps, h=${formatNumber(trajectory.stepSize)}`,
+        detail: "A fourth-order Runge-Kutta update approximates the requested trajectory from the initial state.",
+      },
+    ],
+    artifacts: [
+      ["System", equationText],
+      ["Initial state", `${formatVector(request.initialState)} at ${request.variable}=${formatNumber(request.initialTime)}`],
+      ["Target", `${request.variable}=${formatNumber(request.target)}`],
+      ["RK4 step size", formatNumber(trajectory.stepSize)],
+      ["RK4 steps", formatNumber(request.steps)],
+      ["Equilibria found", formatNumber(equilibria.length)],
+      ["Equilibria", equilibriumText],
+      ["Nullcline samples", formatNumber(nullclineRows.length)],
+      ["State at target", formatVector(finalState)],
+      ["Initial state defaulted", request.initialProvided ? "no" : "yes"],
+    ],
+    graph: trajectoryGraph,
+    graphs: [trajectoryGraph, nullclineGraph].filter(Boolean),
+    table: {
+      headers: [
+        request.stateVariables[0],
+        request.stateVariables[1],
+        `${request.stateVariables[0]}'`,
+        `${request.stateVariables[1]}'`,
+        "speed",
+      ],
+      rows: fieldRows.map((row) => row.map(formatNumber)),
+    },
+    extraTables: [
+      {
+        title: "Equilibria and local linearization",
+        headers: [request.stateVariables[0], request.stateVariables[1], "Trace", "Determinant", "Classification"],
+        rows: equilibria.map((entry) => [
+          formatNumber(entry.point[0]),
+          formatNumber(entry.point[1]),
+          formatNumber(entry.trace),
+          formatNumber(entry.determinant),
+          entry.classification,
+        ]),
+      },
+      {
+        title: "Approximate nullcline samples",
+        headers: ["Component", request.stateVariables[0], request.stateVariables[1]],
+        rows: nullclineRows.map((row) => [
+          row.component,
+          formatNumber(row.point[0]),
+          formatNumber(row.point[1]),
+        ]),
+      },
+      {
+        title: "Trajectory samples",
+        headers: ["Step", request.variable, request.stateVariables[0], request.stateVariables[1]],
+        rows: compactTrajectoryRows(trajectory.rows).map((row) => [
+          String(row.step),
+          formatNumber(row.time),
+          formatNumber(row.state[0]),
+          formatNumber(row.state[1]),
+        ]),
+      },
+    ],
   };
 }
 
@@ -17894,6 +18019,385 @@ function samplePhasePlaneField(matrix, variables) {
       derivative[1],
     ];
   });
+}
+
+function extractNonlinearOdeSystem(statement) {
+  const equations = extractLinearOdeSystemEquations(statement);
+  if (equations.length !== 2) {
+    throw new Error("Nonlinear ODE systems need two equations, such as phase plane x'=x-x*y; y'=-y+x*y; x0=2 y0=1 t=1.");
+  }
+
+  const variable = equations.find((entry) => entry.independent)?.independent ?? "t";
+  if (equations.some((entry) => entry.independent && entry.independent !== variable)) {
+    throw new Error("Both nonlinear ODE system equations must use the same independent variable.");
+  }
+  const stateVariables = equations.map((entry) => entry.state);
+  if (new Set(stateVariables).size !== 2) {
+    throw new Error("Nonlinear ODE systems need two different state variables.");
+  }
+
+  const expressions = equations.map((entry) => {
+    const expression = parseMath(entry.expression);
+    if (expression.kind === "equation") {
+      throw new Error("Nonlinear ODE system right-hand sides must be expressions, not equations.");
+    }
+    return expression;
+  });
+  for (const expression of expressions) {
+    const names = mathVariables(expression).filter((name) => !isMathConstantName(name));
+    const unsupported = names.filter((name) => !stateVariables.includes(name));
+    if (unsupported.includes(variable)) {
+      throw new Error("Nonlinear phase-plane systems must be autonomous; omit explicit time from the right-hand sides.");
+    }
+    if (unsupported.length > 0) {
+      throw new Error(`Unknown variable in nonlinear ODE system: ${unsupported[0]}.`);
+    }
+  }
+
+  const time = readLinearOdeTimeWindow(statement, variable);
+  const initial = readLinearOdeInitialState(statement, stateVariables, time.initialTime);
+  const steps = readNonlinearOdeSteps(statement);
+
+  return {
+    expressions,
+    stateVariables,
+    variable,
+    initialTime: time.initialTime,
+    target: time.target,
+    initialState: initial.state,
+    initialProvided: initial.provided,
+    steps,
+  };
+}
+
+function readNonlinearOdeSteps(text) {
+  const steps = readNamedNumber(text, ["steps"], 80);
+  if (!Number.isSafeInteger(steps) || steps < 4 || steps > 5000) {
+    throw new Error("Nonlinear ODE system steps must be an integer from 4 through 5000.");
+  }
+  return steps;
+}
+
+function formatNonlinearOdeSystemEquations(request) {
+  return request.stateVariables
+    .map((variable, index) => `${variable}' = ${formatMath(request.expressions[index])}`)
+    .join("; ");
+}
+
+function integrateNonlinearOdeSystem(request) {
+  const stepSize = (request.target - request.initialTime) / request.steps;
+  let time = request.initialTime;
+  let state = [...request.initialState];
+  const rows = [{
+    step: 0,
+    time: normalizeNumber(time),
+    state: state.map(normalizeNumber),
+  }];
+
+  for (let step = 1; step <= request.steps; step += 1) {
+    state = nonlinearOdeRk4Step(request, state, time, stepSize);
+    time += stepSize;
+    rows.push({
+      step,
+      time: normalizeNumber(time),
+      state: state.map(normalizeNumber),
+    });
+  }
+
+  return {
+    stepSize: normalizeNumber(stepSize),
+    rows,
+  };
+}
+
+function nonlinearOdeRk4Step(request, state, time, stepSize) {
+  const k1 = evaluateNonlinearOdeVector(request, state, time);
+  const k2 = evaluateNonlinearOdeVector(
+    request,
+    state.map((value, index) => value + (stepSize * k1[index]) / 2),
+    time + stepSize / 2,
+  );
+  const k3 = evaluateNonlinearOdeVector(
+    request,
+    state.map((value, index) => value + (stepSize * k2[index]) / 2),
+    time + stepSize / 2,
+  );
+  const k4 = evaluateNonlinearOdeVector(
+    request,
+    state.map((value, index) => value + stepSize * k3[index]),
+    time + stepSize,
+  );
+  return state.map((value, index) =>
+    normalizeNumber(value + (stepSize / 6) * (k1[index] + 2 * k2[index] + 2 * k3[index] + k4[index])),
+  );
+}
+
+function evaluateNonlinearOdeVector(request, state, time = request.initialTime) {
+  const values = {
+    [request.variable]: time,
+    [request.stateVariables[0]]: state[0],
+    [request.stateVariables[1]]: state[1],
+  };
+  const vector = request.expressions.map((expression) => safeEvaluateMath(expression, values));
+  if (!vector.every(Number.isFinite)) {
+    throw new Error("Nonlinear ODE system produced a non-finite vector field value.");
+  }
+  return vector;
+}
+
+function findNonlinearOdeEquilibria(request) {
+  const seeds = nonlinearOdeSeedPoints(request);
+  const equilibria = [];
+
+  for (const seed of seeds) {
+    try {
+      const result = solveNonlinearSystemNewton(request.expressions, request.stateVariables, {
+        initialGuess: seed,
+        tolerance: 1e-9,
+        maxIterations: 60,
+      });
+      if (!result.converged || result.residualNorm > 1e-7 || !result.solution.every(Number.isFinite)) {
+        continue;
+      }
+      if (equilibria.some((entry) => vectorMagnitude(entry.point.map((value, index) => value - result.solution[index])) < 1e-5)) {
+        continue;
+      }
+      equilibria.push(classifyNonlinearOdeEquilibrium(request, result.solution));
+    } catch {
+      // Some seeds may land outside the basin of an equilibrium; other seeds can still succeed.
+    }
+  }
+
+  return equilibria.sort((left, right) =>
+    left.point[0] - right.point[0] ||
+    left.point[1] - right.point[1],
+  );
+}
+
+function nonlinearOdeSeedPoints(request) {
+  const range = nonlinearOdePhaseRange(request);
+  const xValues = evenlySpacedValues(range.xMin, range.xMax, 5);
+  const yValues = evenlySpacedValues(range.yMin, range.yMax, 5);
+  const seeds = [
+    request.initialState,
+    [0, 0],
+    ...xValues.flatMap((x) => yValues.map((y) => [x, y])),
+  ];
+  return uniquePointList(seeds, 1e-8);
+}
+
+function classifyNonlinearOdeEquilibrium(request, point) {
+  const jacobian = approximateSystemJacobian(request.expressions, request.stateVariables, point);
+  const normalizedJacobian = jacobian.map((row) => row.map(normalizeNumber));
+  const trace = normalizeNumber(traceMatrix(normalizedJacobian));
+  const determinantValue = normalizeNumber(determinant(normalizedJacobian));
+  return {
+    point: point.map(normalizeNumber),
+    jacobian: normalizedJacobian,
+    trace,
+    determinant: determinantValue,
+    classification: classifyLinearOdeSystem(normalizedJacobian),
+  };
+}
+
+function formatNonlinearOdeEquilibria(equilibria) {
+  if (equilibria.length === 0) {
+    return "none found";
+  }
+  return equilibria
+    .map((entry) => `${formatVector(entry.point)} ${entry.classification}`)
+    .join("; ");
+}
+
+function sampleNonlinearPhasePlaneField(request) {
+  const range = nonlinearOdePhaseRange(request);
+  const xValues = evenlySpacedValues(range.xMin, range.xMax, 5);
+  const yValues = evenlySpacedValues(range.yMin, range.yMax, 5);
+  const rows = [];
+  for (const y of yValues) {
+    for (const x of xValues) {
+      try {
+        const derivative = evaluateNonlinearOdeVector(request, [x, y]);
+        rows.push([
+          normalizeNumber(x),
+          normalizeNumber(y),
+          normalizeNumber(derivative[0]),
+          normalizeNumber(derivative[1]),
+          normalizeNumber(vectorMagnitude(derivative)),
+        ]);
+      } catch {
+        rows.push([
+          normalizeNumber(x),
+          normalizeNumber(y),
+          Number.NaN,
+          Number.NaN,
+          Number.NaN,
+        ]);
+      }
+    }
+  }
+  return rows;
+}
+
+function sampleNonlinearNullclines(request) {
+  const range = nonlinearOdePhaseRange(request);
+  const xValues = evenlySpacedValues(range.xMin, range.xMax, 17);
+  const yValues = evenlySpacedValues(range.yMin, range.yMax, 17);
+  const rows = [];
+  for (let component = 0; component < 2; component += 1) {
+    const componentRows = [];
+    for (const y of yValues) {
+      for (let index = 0; index < xValues.length - 1; index += 1) {
+        const left = [xValues[index], y];
+        const right = [xValues[index + 1], y];
+        addNullclineCrossing(request, component, left, right, componentRows);
+      }
+    }
+    for (const x of xValues) {
+      for (let index = 0; index < yValues.length - 1; index += 1) {
+        const lower = [x, yValues[index]];
+        const upper = [x, yValues[index + 1]];
+        addNullclineCrossing(request, component, lower, upper, componentRows);
+      }
+    }
+    rows.push(...uniquePointList(componentRows, 1e-4).slice(0, 60).map((point) => ({
+      component: `${request.stateVariables[component]}'=0`,
+      point,
+    })));
+  }
+  return rows;
+}
+
+function addNullclineCrossing(request, component, left, right, rows) {
+  const leftValue = evaluateNonlinearOdeComponent(request, component, left);
+  const rightValue = evaluateNonlinearOdeComponent(request, component, right);
+  if (!Number.isFinite(leftValue) || !Number.isFinite(rightValue)) {
+    return;
+  }
+  const tolerance = 1e-7;
+  if (Math.abs(leftValue) <= tolerance) {
+    rows.push(left.map(normalizeNumber));
+  }
+  if (Math.abs(rightValue) <= tolerance) {
+    rows.push(right.map(normalizeNumber));
+  }
+  if (leftValue * rightValue < 0) {
+    const ratio = Math.abs(leftValue) / (Math.abs(leftValue) + Math.abs(rightValue));
+    rows.push([
+      normalizeNumber(left[0] + ratio * (right[0] - left[0])),
+      normalizeNumber(left[1] + ratio * (right[1] - left[1])),
+    ]);
+  }
+}
+
+function evaluateNonlinearOdeComponent(request, component, point) {
+  try {
+    return evaluateNonlinearOdeVector(request, point)[component];
+  } catch {
+    return Number.NaN;
+  }
+}
+
+function nonlinearOdePhaseRange(request) {
+  const margin = 1;
+  const xCenter = request.initialState[0];
+  const yCenter = request.initialState[1];
+  const xMin = Math.min(-2, xCenter - margin);
+  const xMax = Math.max(2, xCenter + margin);
+  const yMin = Math.min(-2, yCenter - margin);
+  const yMax = Math.max(2, yCenter + margin);
+  return {
+    xMin: normalizeNumber(xMin),
+    xMax: normalizeNumber(xMax),
+    yMin: normalizeNumber(yMin),
+    yMax: normalizeNumber(yMax),
+  };
+}
+
+function evenlySpacedValues(minimum, maximum, count) {
+  if (count <= 1) {
+    return [normalizeNumber(minimum)];
+  }
+  const step = (maximum - minimum) / (count - 1);
+  return Array.from({ length: count }, (_, index) => normalizeNumber(minimum + step * index));
+}
+
+function uniquePointList(points, tolerance) {
+  const unique = [];
+  for (const point of points) {
+    if (!point.every(Number.isFinite)) continue;
+    if (unique.some((candidate) => vectorMagnitude(candidate.map((value, index) => value - point[index])) <= tolerance)) {
+      continue;
+    }
+    unique.push(point.map(normalizeNumber));
+  }
+  return unique;
+}
+
+function compactTrajectoryRows(rows) {
+  if (rows.length <= 12) {
+    return rows;
+  }
+  const last = rows.length - 1;
+  const indexes = new Set([0, 1, 2, 3, 4, Math.floor(last / 4), Math.floor(last / 2), Math.floor((3 * last) / 4), last]);
+  return [...indexes].sort((left, right) => left - right).map((index) => rows[index]);
+}
+
+function buildNonlinearOdeTrajectoryGraph(request, trajectory, equilibria) {
+  const range = nonlinearOdePhaseRange(request);
+  return {
+    expression: "Nonlinear phase trajectory",
+    kind: "regression-diagnostic",
+    scatterLabel: "Equilibria",
+    xMin: range.xMin,
+    xMax: range.xMax,
+    yMin: range.yMin,
+    yMax: range.yMax,
+    scatter: equilibria.map((entry) => ({ x: entry.point[0], y: entry.point[1] })),
+    lines: [{
+      label: "RK4 trajectory",
+      className: "graph-line-accent",
+      points: trajectory.rows.map((row) => ({
+        x: row.state[0],
+        y: row.state[1],
+      })),
+    }],
+  };
+}
+
+function buildNonlinearOdeNullclineGraph(request, nullclineRows) {
+  if (nullclineRows.length === 0) {
+    return null;
+  }
+  const range = nonlinearOdePhaseRange(request);
+  const lines = request.stateVariables
+    .map((variable, index) => {
+      const component = `${variable}'=0`;
+      const points = nullclineRows
+        .filter((row) => row.component === component)
+        .map((row) => ({ x: row.point[0], y: row.point[1] }))
+        .sort((left, right) => left.x - right.x || left.y - right.y);
+      return points.length
+        ? {
+            label: component,
+            className: index === 0 ? "graph-line-accent" : "graph-line-muted",
+            points,
+          }
+        : null;
+    })
+    .filter(Boolean);
+  if (lines.length === 0) {
+    return null;
+  }
+  return {
+    expression: "Approximate nonlinear nullclines",
+    kind: "regression-diagnostic",
+    xMin: range.xMin,
+    xMax: range.xMax,
+    yMin: range.yMin,
+    yMax: range.yMax,
+    lines,
+  };
 }
 
 function readOdeEquation(text) {

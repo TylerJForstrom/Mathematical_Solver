@@ -1596,6 +1596,23 @@ runTest("differential equation mode analyzes linear ODE systems", () => {
   assert.equal(matrixInput.answer, equationInput.answer);
 });
 
+runTest("differential equation mode analyzes nonlinear phase planes", () => {
+  const statement = "phase plane x' = x - x*y; y' = -y + x*y; x0=2 y0=1 t=1 steps=40";
+  const result = analyzeDifferentialEquation(statement);
+
+  assert.equal(result.summary, "nonlinear ODE system");
+  assert.equal(result.answer, "state(1) ~= [1.156474, 1.977678]; equilibria: [0, 0] saddle point; [1, 1] center");
+  assert.equal(result.details, "2D autonomous system with numeric equilibria, nullclines, and RK4 trajectory");
+  assert.equal(artifactValue(result, "Equilibria found"), "2");
+  assert.equal(artifactValue(result, "Equilibria"), "[0, 0] saddle point; [1, 1] center");
+  assert.equal(artifactValue(result, "Nullcline samples"), "66");
+  assert.deepEqual(result.extraTables.map((table) => table.title), ["Equilibria and local linearization", "Approximate nullcline samples", "Trajectory samples"]);
+  assert.deepEqual(result.extraTables[0].rows, [["0", "0", "0", "-1", "saddle point"], ["1", "1", "0", "1", "center"]]);
+  assert.deepEqual(result.graphs.map((graph) => graph.expression), ["Nonlinear phase trajectory", "Approximate nonlinear nullclines"]);
+  assert.deepEqual(result.graphs[1].lines.map((line) => line.label), ["x'=0", "y'=0"]);
+  assert.equal(analyzeUniversal(statement).summary, "nonlinear ODE system");
+});
+
 runTest("equation mode approximates higher-degree real roots", () => {
   const result = analyzeEquation("x^3 - x - 2 = 0", "x");
 

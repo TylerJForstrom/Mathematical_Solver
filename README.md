@@ -64,8 +64,9 @@ The frontend currently supports:
 - Fourier series partial sums with numerically integrated sine/cosine
   coefficients and plotted approximations
 - Differential equations: exponential growth/decay, Newton cooling, logistic
-  growth, separable power ODEs, and 2D linear ODE systems with phase-plane
-  classification
+  growth, separable power ODEs, 2D linear ODE systems with phase-plane
+  classification, and autonomous nonlinear phase-plane systems with numeric
+  equilibria, nullclines, and RK4 trajectories
 - Numerical ODE solvers: Euler's method and fourth-order Runge-Kutta for
   first-order differential equations
 - Smart input assistance for incomplete math/statistics questions, including
@@ -316,6 +317,9 @@ The same idea works for algebra and calculus:
 - `ode system dx/dt = y; dy/dt = -2*x - 3*y; x0=1 y0=0 t=1`
   evaluates a 2D linear system, classifies the phase portrait by eigenvalues,
   and samples direction-field vectors.
+- `phase plane x' = x - x*y; y' = -y + x*y; x0=2 y0=1 t=1 steps=40`
+  estimates nonlinear equilibria, local Jacobian classifications, nullcline
+  samples, direction-field vectors, and an RK4 trajectory.
 - `rk4 dy/dt = t + y y0=1 from t=0 to 1 h=0.25` approximates a first-order
   ODE with fourth-order Runge-Kutta.
 - `regression for (1,2), (2,3), (3,5), (4,8); predict x=5` becomes a statistical model tree
@@ -544,8 +548,8 @@ The demo includes:
   approximation, and dominant eigenpair approximation,
   polynomial/elementary integrals, optimization, linear programming,
   vector geometry, geometry formulas, sequences/series, graphing with tangent
-  overlays, differential equations, numerical roots with iteration graphs,
-  numerical integration, and numerical ODEs
+  overlays, differential equations including nonlinear phase-plane systems,
+  numerical roots with iteration graphs, numerical integration, and numerical ODEs
   through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
@@ -579,8 +583,8 @@ These are good ways to make the project more impressive mathematically:
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
 7. Add richer custom nonlinear residual diagnostics, parameter stability views,
    and bootstrap trace exports.
-8. Add nonlinear systems of differential equations, nullclines, and richer
-   phase-plane plotting.
+8. Add richer nonlinear phase-plane tools, including separatrix tracing,
+   parameter sweeps, and styled direction-field arrows.
 9. Add multi-step natural-language explanations for word problems.
 10. Add exact symbolic roots for more higher-degree equations when possible.
 11. Add more Boolean algebra simplification rules, including normal-form
