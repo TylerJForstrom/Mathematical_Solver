@@ -1648,6 +1648,10 @@ export function analyzeStatistics(statement) {
     return analyzeRegressionDiagnostics(statement);
   }
 
+  if (isRegressionModelComparisonQuestion(lower)) {
+    return analyzeRegressionModelComparison(statement);
+  }
+
   if (
     lower.includes("regression") ||
     isLassoRegressionQuestion(lower) ||
@@ -7917,6 +7921,160 @@ function analyzePolynomialRegression(statement) {
       ["SSE", formatNumber(sse)],
       ["R squared", formatNumber(rSquared)],
       ...(hasPrediction ? [["Prediction", formatNumber(prediction)]] : []),
+    ],
+  };
+}
+
+function analyzeRegressionModelComparison(statement) {
+  const request = parseRegressionModelComparisonInput(statement);
+  const models = request.degrees.map((degree) =>
+    fitPolynomialComparisonModel(request.x, request.y, degree),
+  );
+  const criterion = models.every((model) => Number.isFinite(model.aicc)) ? "AICc" : "AIC";
+  const best = pickBestRegressionComparisonModel(models, criterion);
+  const tree = {
+    kind: "statsRegression",
+    label: "MODEL CMP",
+    children: [
+      statsDatasetNode(request.x, [], "X"),
+      statsDatasetNode(request.y, [], "Y"),
+      ...models.map((model) => statsMetricNode(`d${model.degree}`, regressionComparisonCriterionValue(model, criterion))),
+    ],
+  };
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `best degree ${best.degree} by ${criterion}: ${best.equation}`,
+    summary: "regression model comparison",
+    details: `${request.x.length} observations, degrees ${request.degrees.join(", ")}`,
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read candidate models",
+        expression: `degrees ${request.degrees.join(", ")}`,
+        detail: "Each candidate is a polynomial regression model fit to the same paired data.",
+      },
+      {
+        title: "Fit least-squares curves",
+        expression: models.map((model) => `degree ${model.degree}: SSE=${formatNumber(model.sse)}`).join("; "),
+        detail: "The solver solves normal equations for every candidate degree.",
+      },
+      {
+        title: "Penalize complexity",
+        expression: `${criterion}: lower is better`,
+        detail: "AIC, AICc, and BIC reward smaller residual error while penalizing extra coefficients.",
+      },
+      {
+        title: "Select best model",
+        expression: `degree ${best.degree}`,
+        detail: `The selected model has the smallest ${criterion} among the candidates.`,
+      },
+    ],
+    table: {
+      headers: ["Degree", "Equation", "SSE", "R squared", "Adjusted R^2", "AIC", "AICc", "BIC"],
+      rows: models.map((model) => [
+        formatNumber(model.degree),
+        model.equation,
+        formatNumber(model.sse),
+        formatNumber(model.rSquared),
+        formatNumber(model.adjustedRSquared),
+        formatNumber(model.aic),
+        Number.isFinite(model.aicc) ? formatNumber(model.aicc) : "undefined",
+        formatNumber(model.bic),
+      ]),
+    },
+    artifacts: [
+      ["Criterion", criterion],
+      ["Best degree", formatNumber(best.degree)],
+      ["Best equation", best.equation],
+      ["Best SSE", formatNumber(best.sse)],
+      ["Best adjusted R squared", formatNumber(best.adjustedRSquared)],
+      ["Best AIC", formatNumber(best.aic)],
+      ["Best AICc", Number.isFinite(best.aicc) ? formatNumber(best.aicc) : "undefined"],
+      ["Best BIC", formatNumber(best.bic)],
+    ],
+    graph: buildRegressionModelComparisonGraph(models, criterion),
+  };
+}
+
+function fitPolynomialComparisonModel(xValues, yValues, degree) {
+  const design = polynomialDesignMatrix(xValues, degree);
+  const transposed = transposeMatrix(design);
+  const normalMatrix = multiplyMatrices(transposed, design);
+  const normalVector = multiplyMatrixVector(transposed, yValues);
+  const coefficients = solveLinearSystem(normalMatrix, normalVector).map(normalizeNumber);
+  const fitted = design.map((row) => normalizeNumber(dotProduct(row, coefficients)));
+  const residuals = yValues.map((value, index) => normalizeNumber(value - fitted[index]));
+  const n = yValues.length;
+  const parameterCount = degree + 1;
+  const degreesFreedom = n - parameterCount;
+  const sse = residuals.reduce((sum, value) => sum + value ** 2, 0);
+  const meanY = mean(yValues);
+  const tss = yValues.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
+  const rSquared = nearlyEqual(tss, 0) ? 1 : 1 - sse / tss;
+  const adjustedRSquared = 1 - (1 - rSquared) * (n - 1) / degreesFreedom;
+  const varianceEstimate = Math.max(sse / n, EPSILON);
+  const aic = n * Math.log(varianceEstimate) + 2 * parameterCount;
+  const aiccDenominator = n - parameterCount - 1;
+  const aicc = aiccDenominator > 0
+    ? aic + (2 * parameterCount * (parameterCount + 1)) / aiccDenominator
+    : Number.NaN;
+  const bic = n * Math.log(varianceEstimate) + parameterCount * Math.log(n);
+
+  return {
+    degree,
+    coefficients,
+    fitted,
+    residuals,
+    sse: normalizeNumber(sse),
+    rSquared: normalizeNumber(rSquared),
+    adjustedRSquared: normalizeNumber(adjustedRSquared),
+    aic: normalizeNumber(aic),
+    aicc: Number.isFinite(aicc) ? normalizeNumber(aicc) : Number.NaN,
+    bic: normalizeNumber(bic),
+    equation: formatPolynomialRegressionEquation(coefficients, "x"),
+  };
+}
+
+function polynomialDesignMatrix(xValues, degree) {
+  return xValues.map((x) => Array.from({ length: degree + 1 }, (_, power) => x ** power));
+}
+
+function pickBestRegressionComparisonModel(models, criterion) {
+  return [...models].sort((left, right) =>
+    regressionComparisonCriterionValue(left, criterion) - regressionComparisonCriterionValue(right, criterion) ||
+    left.bic - right.bic ||
+    left.degree - right.degree,
+  )[0];
+}
+
+function regressionComparisonCriterionValue(model, criterion) {
+  return criterion === "AICc" ? model.aicc : model.aic;
+}
+
+function buildRegressionModelComparisonGraph(models, criterion) {
+  const criterionValues = models.map((model) => regressionComparisonCriterionValue(model, criterion));
+  const [yMin, yMax] = paddedNumericRange(criterionValues);
+  const points = models.map((model) => ({
+    x: model.degree,
+    y: regressionComparisonCriterionValue(model, criterion),
+  }));
+  return {
+    expression: `${criterion} by polynomial degree`,
+    kind: "regression-diagnostic",
+    scatterLabel: criterion,
+    xMin: Math.min(...models.map((model) => model.degree)),
+    xMax: Math.max(...models.map((model) => model.degree)),
+    yMin,
+    yMax,
+    scatter: points,
+    lines: [
+      {
+        label: criterion,
+        points,
+      },
     ],
   };
 }
@@ -18972,14 +19130,20 @@ function parsePairs(text) {
 }
 
 function parseXYLists(text) {
-  const match = text.match(/x\s*[:=]\s*([^;]+);\s*y\s*[:=]\s*([^;]+)/i);
-  if (!match) return null;
-  const x = parseNumberList(match[1]);
-  const y = parseNumberList(match[2]);
+  const xMatch = text.match(/\bx\b\s*[:=]\s*([^;]+)/i);
+  const yMatch = text.match(/\by\b\s*[:=]\s*([^;]+)/i);
+  if (!xMatch || !yMatch) return null;
+  const x = parseNumberList(cleanLabeledListChunk(xMatch[1]));
+  const y = parseNumberList(cleanLabeledListChunk(yMatch[1]));
   if (x.length !== y.length || x.length < 2) {
     throw new Error("x and y lists must have the same length and at least two values.");
   }
   return { x, y };
+}
+
+function cleanLabeledListChunk(text) {
+  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty)\b/i);
+  return optionIndex >= 0 ? text.slice(0, optionIndex) : text;
 }
 
 function parseSimpleRegressionPrediction(text) {
@@ -19151,6 +19315,46 @@ function parsePolynomialRegressionInput(text) {
     y: pairs.map((pair) => pair.y),
     prediction: parsePolynomialRegressionPrediction(text),
   };
+}
+
+function parseRegressionModelComparisonInput(text) {
+  const parsedLists = parseXYLists(text);
+  const pairs = parsedLists ? zipPairs(parsedLists.x, parsedLists.y) : parsePairs(text);
+  if (pairs.length < 4) {
+    throw new Error("Regression model comparison needs at least four paired observations.");
+  }
+
+  const distinctX = new Set(pairs.map((pair) => formatNumber(pair.x)));
+  const degrees = readRegressionComparisonDegrees(text, pairs.length, distinctX.size);
+  return {
+    degrees,
+    x: pairs.map((pair) => pair.x),
+    y: pairs.map((pair) => pair.y),
+  };
+}
+
+function readRegressionComparisonDegrees(text, observationCount, distinctXCount) {
+  const explicit = text.match(/\bdegrees?\s*=?\s*([0-9,\s]+)/i);
+  const requested = explicit
+    ? parseNumbers(explicit[1])
+    : Array.from({ length: Math.min(3, observationCount - 2, distinctXCount - 1) }, (_, index) => index + 1);
+  const degrees = uniqueSortedNumbers(requested)
+    .filter((degree) => Number.isSafeInteger(degree));
+  if (!degrees.length) {
+    throw new Error("Regression model comparison needs integer degrees, such as degrees=1,2,3.");
+  }
+  for (const degree of degrees) {
+    if (degree < 1 || degree > 5) {
+      throw new Error("Regression model comparison supports polynomial degrees from 1 through 5.");
+    }
+    if (observationCount <= degree + 1) {
+      throw new Error("Regression model comparison needs more observations than coefficients for every degree.");
+    }
+    if (distinctXCount <= degree) {
+      throw new Error("Regression model comparison needs at least degree + 1 distinct x values.");
+    }
+  }
+  return degrees;
 }
 
 function readPolynomialRegressionDegree(text) {
@@ -20944,6 +21148,15 @@ function isPolynomialRegressionQuestion(lower) {
     lower.includes("curve fitting");
 }
 
+function isRegressionModelComparisonQuestion(lower) {
+  return lower.includes("regression model comparison") ||
+    lower.includes("model comparison regression") ||
+    lower.includes("compare regression models") ||
+    lower.includes("compare polynomial models") ||
+    lower.includes("compare regression") ||
+    (lower.includes("model comparison") && lower.includes("regression"));
+}
+
 function isRegressionDiagnosticsQuestion(lower) {
   return lower.includes("regression diagnostics") ||
     lower.includes("regression diagnostic") ||
@@ -21422,6 +21635,7 @@ function isStatisticsQuestion(lower) {
     isFisherExactQuestion(lower) ||
     isNormalityQuestion(lower) ||
     isEqualVarianceQuestion(lower) ||
+    isRegressionModelComparisonQuestion(lower) ||
     isRegressionDiagnosticsQuestion(lower) ||
     isPearsonQuestion(lower) ||
     isSpearmanQuestion(lower) ||
@@ -21491,6 +21705,8 @@ function isStatisticsQuestion(lower) {
     "lasso regression",
     "lasso",
     "feature selection regression",
+    "model comparison",
+    "compare regression models",
     "correlation",
     "covariance",
     "pca",

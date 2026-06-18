@@ -442,6 +442,18 @@ runTest("statistics mode computes polynomial regression", () => {
   assert.deepEqual(result.table.rows[3], ["4", "4", "17", "17", "0"]);
 });
 
+runTest("statistics mode compares regression models", () => {
+  const result = analyzeStatistics("compare regression models y: 2, 3, 5, 8, 13, 21; x: 1, 2, 3, 4, 5, 6 degrees=1,2,3");
+
+  assert.equal(result.summary, "regression model comparison");
+  assert.equal(result.answer, "best degree 2 by AICc: y = 3.7 - 2.217857x + 0.839286x^2");
+  assert.equal(artifactValue(result, "Best degree"), "2");
+  assert.equal(artifactValue(result, "Best AICc"), "7.119474");
+  assert.deepEqual(result.table.rows[1], ["2", "y = 3.7 - 2.217857x + 0.839286x^2", "0.978571", "0.996255", "0.993759", "-4.880526", "7.119474", "-5.505247"]);
+  assert.equal(result.graph.expression, "AICc by polynomial degree");
+  assert.equal(result.graph.scatter.length, 3);
+});
+
 runTest("statistics mode computes multiple linear regression", () => {
   const result = analyzeStatistics("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
 
@@ -1527,6 +1539,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("meta-analysis effects: 0.2, 0.5, 0.1, 0.7; se: 0.1, 0.2, 0.15, 0.25").summary, "meta-analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
+  assert.equal(analyzeUniversal("compare regression models y: 2, 3, 5, 8, 13, 21; x: 1, 2, 3, 4, 5, 6 degrees=1,2,3").summary, "regression model comparison");
   assert.equal(analyzeUniversal("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0").summary, "multiple linear regression");
   assert.equal(analyzeUniversal("pearson correlation x: 1,2,3,4,5,6; y: 2,4,5,4,5,7").summary, "Pearson correlation test");
   assert.equal(analyzeUniversal("spearman correlation x: 1,2,3,4,5,6; y: 1,3,2,5,4,6").summary, "Spearman rank correlation");
