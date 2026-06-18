@@ -458,6 +458,22 @@ runTest("statistics mode compares regression models", () => {
   assert.equal(result.graphs[1].expression, "LOOCV RMSE by polynomial degree");
 });
 
+runTest("statistics mode compares regression models with requested validation", () => {
+  const result = analyzeStatistics("compare regression models x: 1, 2, 3, 4, 5, 6; y: 2, 3, 5, 8, 13, 21 kfold=3 holdout=0.33 degrees=1,2,3");
+
+  assert.equal(result.details, "6 observations, degrees 1, 2, 3, 3-fold CV, 2-point holdout");
+  assert.equal(artifactValue(result, "K-fold count"), "3");
+  assert.equal(artifactValue(result, "K-fold best degree"), "3");
+  assert.equal(artifactValue(result, "K-fold best RMSE"), "0.507901");
+  assert.equal(artifactValue(result, "Holdout count"), "2");
+  assert.equal(artifactValue(result, "Holdout best degree"), "2");
+  assert.equal(artifactValue(result, "Holdout best RMSE"), "2.915476");
+  assert.deepEqual(result.table.rows[1], ["2", "y = 3.7 - 2.217857x + 0.839286x^2", "0.978571", "0.996255", "0.993759", "-4.880526", "7.119474", "-5.505247", "1.270369", "1.074586", "1.186695", "0.890171", "2.915476", "2.5"]);
+  assert.equal(result.graphs.length, 4);
+  assert.equal(result.graphs[2].expression, "3-fold RMSE by polynomial degree");
+  assert.equal(result.graphs[3].expression, "Holdout RMSE by polynomial degree");
+});
+
 runTest("statistics mode computes multiple linear regression", () => {
   const result = analyzeStatistics("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
 

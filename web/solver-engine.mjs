@@ -7928,13 +7928,15 @@ function analyzePolynomialRegression(statement) {
 function analyzeRegressionModelComparison(statement) {
   const request = parseRegressionModelComparisonInput(statement);
   const models = request.degrees.map((degree) =>
-    fitPolynomialComparisonModel(request.x, request.y, degree),
+    fitPolynomialComparisonModel(request.x, request.y, degree, request.validation),
   );
   const criterion = models.every((model) => Number.isFinite(model.aicc)) ? "AICc" : "AIC";
   const best = pickBestRegressionComparisonModel(models, criterion);
   const bestCv = pickBestRegressionComparisonCvModel(models);
   const criterionGraph = buildRegressionModelComparisonGraph(models, criterion);
   const cvGraph = buildRegressionCvComparisonGraph(models);
+  const requestedValidationGraphs = buildRequestedRegressionValidationGraphs(models, request.validation);
+  const tableHeaders = regressionComparisonTableHeaders(request.validation);
   const tree = {
     kind: "statsRegression",
     label: "MODEL CMP",
@@ -7950,7 +7952,7 @@ function analyzeRegressionModelComparison(statement) {
     tree,
     answer: `best degree ${best.degree} by ${criterion}: ${best.equation}`,
     summary: "regression model comparison",
-    details: `${request.x.length} observations, degrees ${request.degrees.join(", ")}`,
+    details: regressionComparisonDetails(request),
     variables: [],
     metrics: treeMetrics(tree),
     steps: [
@@ -7974,6 +7976,7 @@ function analyzeRegressionModelComparison(statement) {
         expression: models.map((model) => `degree ${model.degree}: LOOCV RMSE=${formatFiniteNumber(model.loocvRmse)}`).join("; "),
         detail: "Leave-one-out cross-validation refits each candidate after holding out one observation, then scores the held-out prediction errors.",
       },
+      ...requestedRegressionValidationSteps(models, request.validation),
       {
         title: "Select best model",
         expression: `degree ${best.degree}`,
@@ -7981,19 +7984,8 @@ function analyzeRegressionModelComparison(statement) {
       },
     ],
     table: {
-      headers: ["Degree", "Equation", "SSE", "R squared", "Adjusted R^2", "AIC", "AICc", "BIC", "LOOCV RMSE", "LOOCV MAE"],
-      rows: models.map((model) => [
-        formatNumber(model.degree),
-        model.equation,
-        formatNumber(model.sse),
-        formatNumber(model.rSquared),
-        formatNumber(model.adjustedRSquared),
-        formatNumber(model.aic),
-        Number.isFinite(model.aicc) ? formatNumber(model.aicc) : "undefined",
-        formatNumber(model.bic),
-        formatFiniteNumber(model.loocvRmse),
-        formatFiniteNumber(model.loocvMae),
-      ]),
+      headers: tableHeaders,
+      rows: models.map((model) => regressionComparisonTableRow(model, request.validation)),
     },
     artifacts: [
       ["Criterion", criterion],
@@ -8007,17 +7999,24 @@ function analyzeRegressionModelComparison(statement) {
       ["LOOCV best degree", bestCv ? formatNumber(bestCv.degree) : "undefined"],
       ["LOOCV best RMSE", bestCv ? formatNumber(bestCv.loocvRmse) : "undefined"],
       ["LOOCV best MAE", bestCv ? formatNumber(bestCv.loocvMae) : "undefined"],
+      ...requestedRegressionValidationArtifacts(models, request.validation),
     ],
     graph: criterionGraph,
-    graphs: [criterionGraph, cvGraph].filter(Boolean),
+    graphs: [criterionGraph, cvGraph, ...requestedValidationGraphs].filter(Boolean),
   };
 }
 
-function fitPolynomialComparisonModel(xValues, yValues, degree) {
+function fitPolynomialComparisonModel(xValues, yValues, degree, validation = {}) {
   const coefficients = fitPolynomialCoefficients(xValues, yValues, degree);
   const fitted = xValues.map((x) => polynomialPrediction(coefficients, x));
   const residuals = yValues.map((value, index) => normalizeNumber(value - fitted[index]));
   const loocv = leaveOneOutPolynomialValidation(xValues, yValues, degree);
+  const kFold = validation.kFold
+    ? kFoldPolynomialValidation(xValues, yValues, degree, validation.kFold)
+    : null;
+  const holdout = validation.holdoutCount
+    ? holdoutPolynomialValidation(xValues, yValues, degree, validation.holdoutCount)
+    : null;
   const n = yValues.length;
   const parameterCount = degree + 1;
   const degreesFreedom = n - parameterCount;
@@ -8049,6 +8048,14 @@ function fitPolynomialComparisonModel(xValues, yValues, degree) {
     loocvMae: loocv.mae,
     loocvErrors: loocv.errors,
     loocvPredictions: loocv.predictions,
+    kFoldRmse: kFold?.rmse ?? Number.NaN,
+    kFoldMae: kFold?.mae ?? Number.NaN,
+    kFoldErrors: kFold?.errors ?? [],
+    kFoldPredictions: kFold?.predictions ?? [],
+    holdoutRmse: holdout?.rmse ?? Number.NaN,
+    holdoutMae: holdout?.mae ?? Number.NaN,
+    holdoutErrors: holdout?.errors ?? [],
+    holdoutPredictions: holdout?.predictions ?? [],
     equation: formatPolynomialRegressionEquation(coefficients, "x"),
   };
 }
@@ -8070,12 +8077,47 @@ function polynomialPrediction(coefficients, x) {
 }
 
 function leaveOneOutPolynomialValidation(xValues, yValues, degree) {
+  const splits = Array.from({ length: yValues.length }, (_, heldOut) => ({
+    train: complementIndices(yValues.length, [heldOut]),
+    test: [heldOut],
+  }));
+  return scorePolynomialValidationSplits(xValues, yValues, degree, splits);
+}
+
+function kFoldPolynomialValidation(xValues, yValues, degree, kFold) {
+  const folds = Array.from({ length: kFold }, () => []);
+  for (let index = 0; index < yValues.length; index += 1) {
+    folds[index % kFold].push(index);
+  }
+  const splits = folds
+    .filter((fold) => fold.length > 0)
+    .map((fold) => ({
+      train: complementIndices(yValues.length, fold),
+      test: fold,
+    }));
+  return scorePolynomialValidationSplits(xValues, yValues, degree, splits);
+}
+
+function holdoutPolynomialValidation(xValues, yValues, degree, holdoutCount) {
+  const test = Array.from(
+    { length: holdoutCount },
+    (_, index) => yValues.length - holdoutCount + index,
+  );
+  return scorePolynomialValidationSplits(xValues, yValues, degree, [
+    {
+      train: complementIndices(yValues.length, test),
+      test,
+    },
+  ]);
+}
+
+function scorePolynomialValidationSplits(xValues, yValues, degree, splits) {
   const predictions = [];
   const errors = [];
 
-  for (let heldOut = 0; heldOut < yValues.length; heldOut += 1) {
-    const trainX = xValues.filter((_, index) => index !== heldOut);
-    const trainY = yValues.filter((_, index) => index !== heldOut);
+  for (const split of splits) {
+    const trainX = split.train.map((index) => xValues[index]);
+    const trainY = split.train.map((index) => yValues[index]);
     const distinctTrainX = new Set(trainX.map((x) => formatNumber(x))).size;
     if (trainX.length < degree + 1 || distinctTrainX < degree + 1) {
       return { predictions: [], errors: [], rmse: Number.NaN, mae: Number.NaN };
@@ -8083,14 +8125,19 @@ function leaveOneOutPolynomialValidation(xValues, yValues, degree) {
 
     try {
       const coefficients = fitPolynomialCoefficients(trainX, trainY, degree);
-      const prediction = polynomialPrediction(coefficients, xValues[heldOut]);
-      predictions.push(prediction);
-      errors.push(normalizeNumber(yValues[heldOut] - prediction));
+      for (const testIndex of split.test) {
+        const prediction = polynomialPrediction(coefficients, xValues[testIndex]);
+        predictions.push(prediction);
+        errors.push(normalizeNumber(yValues[testIndex] - prediction));
+      }
     } catch {
       return { predictions: [], errors: [], rmse: Number.NaN, mae: Number.NaN };
     }
   }
 
+  if (errors.length === 0) {
+    return { predictions: [], errors: [], rmse: Number.NaN, mae: Number.NaN };
+  }
   const mse = mean(errors.map((error) => error ** 2));
   const mae = mean(errors.map((error) => Math.abs(error)));
   return {
@@ -8099,6 +8146,12 @@ function leaveOneOutPolynomialValidation(xValues, yValues, degree) {
     rmse: normalizeNumber(Math.sqrt(mse)),
     mae: normalizeNumber(mae),
   };
+}
+
+function complementIndices(length, excluded) {
+  const excludedSet = new Set(excluded);
+  return Array.from({ length }, (_, index) => index)
+    .filter((index) => !excludedSet.has(index));
 }
 
 function pickBestRegressionComparisonModel(models, criterion) {
@@ -8118,8 +8171,107 @@ function pickBestRegressionComparisonCvModel(models) {
   )[0] ?? null;
 }
 
+function pickBestRegressionComparisonMetricModel(models, rmseKey, maeKey) {
+  const candidates = models.filter((model) => Number.isFinite(model[rmseKey]));
+  return [...candidates].sort((left, right) =>
+    left[rmseKey] - right[rmseKey] ||
+    left[maeKey] - right[maeKey] ||
+    left.degree - right.degree,
+  )[0] ?? null;
+}
+
 function regressionComparisonCriterionValue(model, criterion) {
   return criterion === "AICc" ? model.aicc : model.aic;
+}
+
+function regressionComparisonDetails(request) {
+  const validationDetails = [];
+  if (request.validation.kFold) {
+    validationDetails.push(`${request.validation.kFold}-fold CV`);
+  }
+  if (request.validation.holdoutCount) {
+    validationDetails.push(`${request.validation.holdoutCount}-point holdout`);
+  }
+  return [
+    `${request.x.length} observations`,
+    `degrees ${request.degrees.join(", ")}`,
+    ...validationDetails,
+  ].join(", ");
+}
+
+function regressionComparisonTableHeaders(validation) {
+  const headers = ["Degree", "Equation", "SSE", "R squared", "Adjusted R^2", "AIC", "AICc", "BIC", "LOOCV RMSE", "LOOCV MAE"];
+  if (validation.kFold) {
+    headers.push("K-fold RMSE", "K-fold MAE");
+  }
+  if (validation.holdoutCount) {
+    headers.push("Holdout RMSE", "Holdout MAE");
+  }
+  return headers;
+}
+
+function regressionComparisonTableRow(model, validation) {
+  const row = [
+    formatNumber(model.degree),
+    model.equation,
+    formatNumber(model.sse),
+    formatNumber(model.rSquared),
+    formatNumber(model.adjustedRSquared),
+    formatNumber(model.aic),
+    Number.isFinite(model.aicc) ? formatNumber(model.aicc) : "undefined",
+    formatNumber(model.bic),
+    formatFiniteNumber(model.loocvRmse),
+    formatFiniteNumber(model.loocvMae),
+  ];
+  if (validation.kFold) {
+    row.push(formatFiniteNumber(model.kFoldRmse), formatFiniteNumber(model.kFoldMae));
+  }
+  if (validation.holdoutCount) {
+    row.push(formatFiniteNumber(model.holdoutRmse), formatFiniteNumber(model.holdoutMae));
+  }
+  return row;
+}
+
+function requestedRegressionValidationSteps(models, validation) {
+  const steps = [];
+  if (validation.kFold) {
+    steps.push({
+      title: "Run k-fold validation",
+      expression: models.map((model) => `degree ${model.degree}: RMSE=${formatFiniteNumber(model.kFoldRmse)}`).join("; "),
+      detail: `${validation.kFold}-fold validation assigns observations to deterministic round-robin folds and scores held-out predictions.`,
+    });
+  }
+  if (validation.holdoutCount) {
+    steps.push({
+      title: "Run holdout validation",
+      expression: models.map((model) => `degree ${model.degree}: RMSE=${formatFiniteNumber(model.holdoutRmse)}`).join("; "),
+      detail: `The solver trains on the first ${models[0].fitted.length - validation.holdoutCount} observations and tests on the final ${validation.holdoutCount}.`,
+    });
+  }
+  return steps;
+}
+
+function requestedRegressionValidationArtifacts(models, validation) {
+  const artifacts = [];
+  if (validation.kFold) {
+    const best = pickBestRegressionComparisonMetricModel(models, "kFoldRmse", "kFoldMae");
+    artifacts.push(
+      ["K-fold count", formatNumber(validation.kFold)],
+      ["K-fold best degree", best ? formatNumber(best.degree) : "undefined"],
+      ["K-fold best RMSE", best ? formatNumber(best.kFoldRmse) : "undefined"],
+      ["K-fold best MAE", best ? formatNumber(best.kFoldMae) : "undefined"],
+    );
+  }
+  if (validation.holdoutCount) {
+    const best = pickBestRegressionComparisonMetricModel(models, "holdoutRmse", "holdoutMae");
+    artifacts.push(
+      ["Holdout count", formatNumber(validation.holdoutCount)],
+      ["Holdout best degree", best ? formatNumber(best.degree) : "undefined"],
+      ["Holdout best RMSE", best ? formatNumber(best.holdoutRmse) : "undefined"],
+      ["Holdout best MAE", best ? formatNumber(best.holdoutMae) : "undefined"],
+    );
+  }
+  return artifacts;
 }
 
 function buildRegressionModelComparisonGraph(models, criterion) {
@@ -8148,20 +8300,35 @@ function buildRegressionModelComparisonGraph(models, criterion) {
 }
 
 function buildRegressionCvComparisonGraph(models) {
+  return buildRegressionValidationMetricGraph(models, "loocvRmse", "LOOCV RMSE by polynomial degree", "LOOCV RMSE");
+}
+
+function buildRequestedRegressionValidationGraphs(models, validation) {
+  return [
+    validation.kFold
+      ? buildRegressionValidationMetricGraph(models, "kFoldRmse", `${validation.kFold}-fold RMSE by polynomial degree`, "K-fold RMSE")
+      : null,
+    validation.holdoutCount
+      ? buildRegressionValidationMetricGraph(models, "holdoutRmse", "Holdout RMSE by polynomial degree", "Holdout RMSE")
+      : null,
+  ].filter(Boolean);
+}
+
+function buildRegressionValidationMetricGraph(models, metricKey, expression, scatterLabel) {
   const points = models
-    .filter((model) => Number.isFinite(model.loocvRmse))
+    .filter((model) => Number.isFinite(model[metricKey]))
     .map((model) => ({
       x: model.degree,
-      y: model.loocvRmse,
+      y: model[metricKey],
     }));
   if (points.length === 0) {
     return null;
   }
   const [yMin, yMax] = paddedNumericRange(points.map((point) => point.y));
   return {
-    expression: "LOOCV RMSE by polynomial degree",
+    expression,
     kind: "regression-diagnostic",
-    scatterLabel: "LOOCV RMSE",
+    scatterLabel,
     xMin: Math.min(...points.map((point) => point.x)),
     xMax: Math.max(...points.map((point) => point.x)),
     yMin,
@@ -8169,7 +8336,7 @@ function buildRegressionCvComparisonGraph(models) {
     scatter: points,
     lines: [
       {
-        label: "LOOCV RMSE",
+        label: scatterLabel,
         points,
       },
     ],
@@ -19239,7 +19406,7 @@ function parseXYLists(text) {
 }
 
 function cleanLabeledListChunk(text) {
-  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty)\b/i);
+  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty|k\s*[- ]?\s*fold|kfold|folds?|holdout|test(?:\s*size)?|validation(?:\s*(?:size|split))?|val\s*split|split)\b/i);
   return optionIndex >= 0 ? text.slice(0, optionIndex) : text;
 }
 
@@ -19425,9 +19592,49 @@ function parseRegressionModelComparisonInput(text) {
   const degrees = readRegressionComparisonDegrees(text, pairs.length, distinctX.size);
   return {
     degrees,
+    validation: parseRegressionModelComparisonValidation(text, pairs.length),
     x: pairs.map((pair) => pair.x),
     y: pairs.map((pair) => pair.y),
   };
+}
+
+function parseRegressionModelComparisonValidation(text, observationCount) {
+  return {
+    kFold: readRegressionComparisonKFold(text, observationCount),
+    holdoutCount: readRegressionComparisonHoldoutCount(text, observationCount),
+  };
+}
+
+function readRegressionComparisonKFold(text, observationCount) {
+  const named = text.match(/\b(?:k\s*[- ]?\s*fold|kfold|folds?)\s*=?\s*(\d+)\b/i);
+  const prefixed = text.match(/\b(\d+)\s*[- ]?fold\b/i);
+  const value = named ? Number(named[1]) : prefixed ? Number(prefixed[1]) : null;
+  if (value === null) {
+    return null;
+  }
+  if (!Number.isSafeInteger(value) || value < 2 || value > observationCount) {
+    throw new Error("Regression model comparison k-fold validation needs an integer k from 2 through the number of observations.");
+  }
+  return value;
+}
+
+function readRegressionComparisonHoldoutCount(text, observationCount) {
+  const match = text.match(/\b(?:holdout|test(?:\s*size)?|validation(?:\s*(?:size|split))?|val\s*split)\s*=?\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\b/i);
+  if (!match) {
+    return null;
+  }
+
+  const value = Number(match[1]);
+  if (!(value > 0)) {
+    throw new Error("Regression model comparison holdout must be a positive count or proportion.");
+  }
+  const count = value < 1
+    ? Math.max(1, Math.round(observationCount * value))
+    : Math.trunc(value);
+  if (!Number.isSafeInteger(count) || count < 1 || count >= observationCount) {
+    throw new Error("Regression model comparison holdout must leave at least one training observation and one test observation.");
+  }
+  return count;
 }
 
 function readRegressionComparisonDegrees(text, observationCount, distinctXCount) {
