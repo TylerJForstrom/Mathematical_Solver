@@ -14,6 +14,8 @@ The frontend currently supports:
 - Boolean algebra simplification with identity, domination, complement,
   idempotent, absorption, consensus, De Morgan, double-negation, implication,
   XOR, and IFF rules
+- Logic normal forms: NNF, CNF, and DNF conversion with truth-table
+  equivalence checks
 - Algebra simplification with constants, like terms, Pythagorean identities,
   reciprocal trig functions, cofunction identities, double-angle rules, and
   angle-sum/product-to-sum/sum-to-product rules
@@ -240,6 +242,8 @@ The same idea works for algebra and calculus:
   `(x - 1) * exp(x) + C`.
 - `complex (3+4i)*(2-i)` evaluates the same math tree with complex pairs and
   returns `10 + 5i`.
+- `cnf P -> (Q and R)` rewrites a propositional tree into
+  `(not P or Q) and (not P or R)` and verifies equivalence.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
 - `solve nonlinear system x^2 + y^2 = 25; x - y = 1 guess x=3 y=2`
   numerically solves a square nonlinear system with Newton iterations.
@@ -531,18 +535,16 @@ These are good ways to make the project more impressive mathematically:
    phase-plane plotting.
 9. Add multi-step natural-language explanations for word problems.
 10. Add exact symbolic roots for more higher-degree equations when possible.
-11. Convert logic statements to negation normal form, conjunctive normal form, and
-   disjunctive normal form.
-12. Add more Boolean algebra simplification rules, including normal-form
+11. Add more Boolean algebra simplification rules, including normal-form
    factoring and larger multi-clause reductions.
-13. Build a small SAT solver using the DPLL algorithm instead of checking every
+12. Build a small SAT solver using the DPLL algorithm instead of checking every
    truth-table row.
-14. Generate formal proof steps for tautologies using natural deduction or
+13. Generate formal proof steps for tautologies using natural deduction or
    sequent calculus.
-15. Add semantic tableaux, which are also tree-based, to prove whether a
+14. Add semantic tableaux, which are also tree-based, to prove whether a
    statement is satisfiable.
-16. Add Karnaugh maps for statements with two to four variables.
-17. Export expression trees to Graphviz DOT so the parse tree can be visualized.
-18. Add binary decision diagrams to represent equivalent formulas compactly.
-19. Add probability or fuzzy truth values so statements can evaluate beyond
+15. Add Karnaugh maps for statements with two to four variables.
+16. Export expression trees to Graphviz DOT so the parse tree can be visualized.
+17. Add binary decision diagrams to represent equivalent formulas compactly.
+18. Add probability or fuzzy truth values so statements can evaluate beyond
     simple true/false logic.

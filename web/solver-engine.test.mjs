@@ -15,6 +15,7 @@ import {
   analyzeLaplaceTransform,
   analyzeLimit,
   analyzeLogic,
+  analyzeLogicNormalForm,
   analyzeLogicSimplification,
   analyzeMatrix,
   analyzeMarkovChain,
@@ -64,10 +65,30 @@ runTest("logic mode simplifies Boolean algebra", () => {
   assert.equal(analyzeLogicSimplification("(P and Q) or (P and Q and R)").answer, "P and Q");
   assert.equal(analyzeLogicSimplification("(P and Q) or (not P and R) or (Q and R)").answer, "P and Q or not P and R");
   assert.equal(analyzeLogicSimplification("(P or Q) and (P or not Q)").answer, "P");
+  assert.equal(analyzeLogicSimplification("(P or Q or R) and (P or not Q or R)").answer, "P or R");
   assert.equal(analyzeUniversal("simplify logic not (P and Q)").answer, "not P or not Q");
 });
 
+runTest("logic mode converts to normal forms", () => {
+  const cnf = analyzeLogicNormalForm("cnf P -> (Q and R)");
+  const dnf = analyzeLogicNormalForm("dnf P and (Q or R)");
+  const nnf = analyzeLogicNormalForm("nnf not (P -> Q)");
+  const all = analyzeLogicNormalForm("normal forms (P xor Q) -> R");
+
+  assert.equal(cnf.summary, "CNF logic normal form");
+  assert.equal(cnf.answer, "(not P or Q) and (not P or R)");
+  assert.equal(artifactValue(cnf, "Equivalent"), "yes");
+  assert.equal(dnf.answer, "P and Q or P and R");
+  assert.equal(nnf.answer, "P and (not Q)");
+  assert.equal(all.answer, "NNF: (not P or Q) and (P or not Q) or R; CNF: (not P or Q or R) and (P or not Q or R); DNF: not P and (not Q) or Q and P or R");
+  assert.equal(analyzeUniversal("convert P -> Q to cnf").answer, "not P or Q");
+});
+
 runTest("input assistant suggests structured problem formats", () => {
+  const normalForm = suggestProblemHelp("convert to cnf", "ask", "Need a logic statement.");
+  assert.equal(normalForm.title, "Logic normal form");
+  assert.equal(normalForm.examples[0][2], "cnf P -> (Q and R)");
+
   const twoSample = suggestProblemHelp("compare two groups with a t-test", "statistics", "Two-sample tests need group1 and group2.");
   assert.equal(twoSample.title, "Two-sample t-test");
   assert.equal(twoSample.examples[0][2], "two-sample t-test group1: 10, 12, 9; group2: 8, 7, 11");

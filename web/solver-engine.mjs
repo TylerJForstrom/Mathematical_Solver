@@ -42,6 +42,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
 
   const suggestions = [
     {
+      title: "Logic normal form",
+      when: () => activeMode === "ask" && /\b(cnf|dnf|nnf|normal forms?|conjunctive normal|disjunctive normal|negation normal)\b/.test(lower),
+      reason: "I detected a propositional-logic normal-form question.",
+      needs: [
+        "A logic statement using and, or, not, ->, xor, or iff",
+        "The target form: NNF, CNF, DNF, or all normal forms",
+      ],
+      examples: [
+        ["CNF", "ask", "cnf P -> (Q and R)"],
+        ["All forms", "ask", "normal forms (P xor Q) -> R"],
+      ],
+    },
+    {
       title: "Two-sample t-test",
       when: () => wantsStats && /\b(two[-\s]?sample|welch|compare|difference)\b/.test(lower),
       reason: "I detected a comparison between two numeric samples.",
@@ -397,6 +410,57 @@ export function analyzeLogicSimplification(statement) {
       ["Simplified", answer],
       ["Classification", classification.name],
       ["Equivalent", counterexample === null ? "yes" : "no"],
+    ],
+  };
+}
+
+export function analyzeLogicNormalForm(statement) {
+  const request = extractLogicNormalFormQuestion(statement);
+  const tree = parseLogic(request.expression);
+  const steps = [
+    {
+      title: "Parse logic statement",
+      expression: logicToString(tree),
+      detail: "The statement becomes a propositional expression tree.",
+    },
+  ];
+
+  const forms = buildLogicNormalForms(tree, steps);
+  const selected = request.form === "all" ? forms.cnf : forms[request.form];
+  const answer = request.form === "all"
+    ? `NNF: ${logicToString(forms.nnf)}; CNF: ${logicToString(forms.cnf)}; DNF: ${logicToString(forms.dnf)}`
+    : logicToString(selected);
+  const counterexamples = {
+    nnf: findLogicCounterexample(tree, forms.nnf),
+    cnf: findLogicCounterexample(tree, forms.cnf),
+    dnf: findLogicCounterexample(tree, forms.dnf),
+  };
+  const equivalent = Object.values(counterexamples).every((counterexample) => counterexample === null);
+
+  steps.push({
+    title: "Verify equivalent truth tables",
+    expression: equivalent ? "all normal forms equivalent" : "counterexample found",
+    detail: equivalent
+      ? "The normal-form trees match the original on every truth-table row."
+      : "At least one normal-form tree does not match the original statement.",
+  });
+
+  return {
+    mode: "logic",
+    tree: selected,
+    answer,
+    summary: request.form === "all" ? "logic normal forms" : `${request.form.toUpperCase()} logic normal form`,
+    details: equivalent ? "Equivalent NNF/CNF/DNF conversion" : "Normal-form equivalence check failed",
+    variables: logicVariables(tree),
+    metrics: treeMetrics(selected),
+    steps,
+    artifacts: [
+      ["Original", logicToString(tree)],
+      ["NNF", logicToString(forms.nnf)],
+      ["CNF", logicToString(forms.cnf)],
+      ["DNF", logicToString(forms.dnf)],
+      ["Requested form", request.form === "all" ? "all" : request.form.toUpperCase()],
+      ["Equivalent", equivalent ? "yes" : "no"],
     ],
   };
 }
@@ -1585,6 +1649,9 @@ export function analyzeUniversal(question, values = {}) {
   if (isMarkovQuestion(lower)) {
     routed = analyzeMarkovChain(question);
     routedLabel = "Markov chain";
+  } else if (isLogicNormalFormQuestion(lower)) {
+    routed = analyzeLogicNormalForm(question);
+    routedLabel = "Logic normal form";
   } else if (isMultivariateStatsQuestion(lower, question)) {
     routed = analyzeStatistics(question);
     routedLabel = "Multivariate statistics";
@@ -21168,6 +21235,19 @@ function isLogicSimplificationQuestion(lower) {
   );
 }
 
+function isLogicNormalFormQuestion(lower) {
+  return /\b(?:nnf|cnf|dnf)\b/.test(lower) ||
+    lower.includes("negation normal form") ||
+    lower.includes("conjunctive normal form") ||
+    lower.includes("disjunctive normal form") ||
+    lower.includes("logic normal form") ||
+    lower.includes("logic normal forms") ||
+    lower.includes("boolean normal form") ||
+    lower.includes("boolean normal forms") ||
+    lower.startsWith("normal form ") ||
+    lower.startsWith("normal forms ");
+}
+
 function isSimplifyQuestion(lower) {
   return lower.includes("simplify") || lower.includes("combine like terms");
 }
@@ -21424,6 +21504,33 @@ function cleanLogicSimplificationQuestion(question) {
     .replace(/^(simplify\s+(?:logic|boolean)|(?:logic|boolean)\s+simplify)\s+/i, "")
     .replace(/[?!.]+$/, "")
     .trim();
+}
+
+function extractLogicNormalFormQuestion(question) {
+  const form = readLogicNormalFormTarget(question);
+  const formPattern = "(?:nnf|cnf|dnf|negation\\s+normal\\s+form|conjunctive\\s+normal\\s+form|disjunctive\\s+normal\\s+form|normal\\s+forms?|normal\\s+form)";
+  const expression = question
+    .replace(/[?!.]+$/, "")
+    .replace(/\b(?:convert|transform|rewrite|write|put|find|compute|show)\b/gi, " ")
+    .replace(/\b(?:logic|boolean|propositional)\b/gi, " ")
+    .replace(new RegExp(`\\b(?:to|in|as|into)\\s+${formPattern}\\b`, "gi"), " ")
+    .replace(new RegExp(`\\b${formPattern}\\b`, "gi"), " ")
+    .replace(/^\s*of\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!expression) {
+    throw new Error("Logic normal-form mode needs a statement, such as cnf P -> (Q and R).");
+  }
+  return { form, expression };
+}
+
+function readLogicNormalFormTarget(question) {
+  const lower = question.toLowerCase();
+  if (/\bcnf\b/.test(lower) || lower.includes("conjunctive normal form")) return "cnf";
+  if (/\bdnf\b/.test(lower) || lower.includes("disjunctive normal form")) return "dnf";
+  if (/\bnnf\b/.test(lower) || lower.includes("negation normal form")) return "nnf";
+  return "all";
 }
 
 function cleanEquationQuestion(question) {
@@ -21936,32 +22043,46 @@ function simplifyLogicComplementaryPair(left, right, operator, steps) {
   const innerOperator = operator === "and" ? "or" : "and";
   const leftParts = flattenLogicOperator(left, innerOperator);
   const rightParts = flattenLogicOperator(right, innerOperator);
-  let complementaryPair = null;
-  for (const leftPart of leftParts) {
-    const rightPart = rightParts.find((part) => isLogicNegationOf(leftPart, part));
-    if (rightPart) {
-      complementaryPair = { leftPart, rightPart };
-      break;
+  for (let leftIndex = 0; leftIndex < leftParts.length; leftIndex += 1) {
+    const leftPart = leftParts[leftIndex];
+    const rightIndex = rightParts.findIndex((part) => isLogicNegationOf(leftPart, part));
+    if (rightIndex === -1) {
+      continue;
     }
-  }
-  if (!complementaryPair) {
-    return null;
+
+    const remainingLeft = leftParts.filter((_, index) => index !== leftIndex);
+    const remainingRight = rightParts.filter((_, index) => index !== rightIndex);
+    if (!sameLogicTermMultiset(remainingLeft, remainingRight)) {
+      continue;
+    }
+
+    const reduced = logicTreeFromTerms(remainingLeft, innerOperator);
+    steps.push({
+      title: "Apply complementary-pair reduction",
+      expression: `${logicToString(left)} ${operator} ${logicToString(right)} = ${logicToString(reduced)}`,
+      detail: "Two clauses that differ only by a complemented term reduce to their shared part.",
+    });
+    return reduced;
   }
 
-  const shared = leftParts.filter((leftPart) =>
-    rightParts.some((rightPart) => sameLogicTree(leftPart, rightPart)),
-  );
-  if (shared.length === 0) {
-    return null;
-  }
+  return null;
+}
 
-  const reduced = logicTreeFromTerms(shared, innerOperator);
-  steps.push({
-    title: "Apply complementary-pair reduction",
-    expression: `${logicToString(left)} ${operator} ${logicToString(right)} = ${logicToString(reduced)}`,
-    detail: "Two clauses that differ only by a complemented term reduce to their shared part.",
-  });
-  return reduced;
+function sameLogicTermMultiset(leftTerms, rightTerms) {
+  if (leftTerms.length !== rightTerms.length) {
+    return false;
+  }
+  const used = Array(rightTerms.length).fill(false);
+  for (const leftTerm of leftTerms) {
+    const matchIndex = rightTerms.findIndex((rightTerm, index) =>
+      !used[index] && sameLogicTree(leftTerm, rightTerm),
+    );
+    if (matchIndex === -1) {
+      return false;
+    }
+    used[matchIndex] = true;
+  }
+  return true;
 }
 
 function simplifyLogicConsensus(left, right, steps) {
@@ -22048,6 +22169,165 @@ function logicTreeFromTerms(terms, operator) {
     return logicConstant(operator === "and");
   }
   return terms.reduce((tree, term) => tree ? logicBinary(operator, tree, term) : term, null);
+}
+
+function buildLogicNormalForms(tree, steps = []) {
+  const primitive = eliminateLogicDerivedOperators(tree);
+  steps.push({
+    title: "Eliminate derived connectives",
+    expression: logicToString(primitive),
+    detail: "Implication, biconditional, and XOR are rewritten with only AND, OR, and NOT.",
+  });
+
+  const nnfRaw = logicNegationNormalForm(primitive);
+  steps.push({
+    title: "Push negations inward",
+    expression: logicToString(nnfRaw),
+    detail: "De Morgan's laws move every negation down to a variable or constant.",
+  });
+  const nnf = simplifyLogicNode(nnfRaw, steps);
+
+  const cnfRaw = logicConjunctiveNormalForm(nnf);
+  steps.push({
+    title: "Distribute OR over AND",
+    expression: logicToString(cnfRaw),
+    detail: "CNF is an AND of OR clauses, so OR is distributed across nested AND groups.",
+  });
+  const cnf = simplifyLogicNode(cnfRaw, steps);
+
+  const dnfRaw = logicDisjunctiveNormalForm(nnf);
+  steps.push({
+    title: "Distribute AND over OR",
+    expression: logicToString(dnfRaw),
+    detail: "DNF is an OR of AND terms, so AND is distributed across nested OR groups.",
+  });
+  const dnf = simplifyLogicNode(dnfRaw, steps);
+
+  return { nnf, cnf, dnf };
+}
+
+function eliminateLogicDerivedOperators(node) {
+  if (node.kind === "logicConstant" || node.kind === "logicVariable") {
+    return node;
+  }
+  if (node.kind === "logicNot") {
+    return { kind: "logicNot", operand: eliminateLogicDerivedOperators(node.operand) };
+  }
+
+  const left = eliminateLogicDerivedOperators(node.left);
+  const right = eliminateLogicDerivedOperators(node.right);
+  if (node.operator === "and" || node.operator === "or") {
+    return logicBinary(node.operator, left, right);
+  }
+  if (node.operator === "implies") {
+    return logicBinary("or", { kind: "logicNot", operand: left }, right);
+  }
+  if (node.operator === "iff") {
+    return logicBinary(
+      "or",
+      logicBinary("and", left, right),
+      logicBinary("and", { kind: "logicNot", operand: left }, { kind: "logicNot", operand: right }),
+    );
+  }
+  if (node.operator === "xor") {
+    return logicBinary(
+      "or",
+      logicBinary("and", left, { kind: "logicNot", operand: right }),
+      logicBinary("and", { kind: "logicNot", operand: left }, right),
+    );
+  }
+  throw new Error(`Unknown logic operator '${node.operator}'.`);
+}
+
+function logicNegationNormalForm(node, negated = false) {
+  if (node.kind === "logicConstant") {
+    return logicConstant(negated ? !node.value : node.value);
+  }
+  if (node.kind === "logicVariable") {
+    return negated ? { kind: "logicNot", operand: node } : node;
+  }
+  if (node.kind === "logicNot") {
+    return logicNegationNormalForm(node.operand, !negated);
+  }
+  if (node.kind === "logicBinary" && (node.operator === "and" || node.operator === "or")) {
+    const operator = negated
+      ? node.operator === "and" ? "or" : "and"
+      : node.operator;
+    return logicBinary(
+      operator,
+      logicNegationNormalForm(node.left, negated),
+      logicNegationNormalForm(node.right, negated),
+    );
+  }
+  throw new Error("Negation normal form requires primitive logic operators.");
+}
+
+function logicConjunctiveNormalForm(node) {
+  if (node.kind !== "logicBinary") {
+    return node;
+  }
+  if (node.operator === "and") {
+    return logicBinary("and", logicConjunctiveNormalForm(node.left), logicConjunctiveNormalForm(node.right));
+  }
+  if (node.operator === "or") {
+    return distributeLogicOrOverAnd(
+      logicConjunctiveNormalForm(node.left),
+      logicConjunctiveNormalForm(node.right),
+    );
+  }
+  return node;
+}
+
+function distributeLogicOrOverAnd(left, right) {
+  if (left.kind === "logicBinary" && left.operator === "and") {
+    return logicBinary(
+      "and",
+      distributeLogicOrOverAnd(left.left, right),
+      distributeLogicOrOverAnd(left.right, right),
+    );
+  }
+  if (right.kind === "logicBinary" && right.operator === "and") {
+    return logicBinary(
+      "and",
+      distributeLogicOrOverAnd(left, right.left),
+      distributeLogicOrOverAnd(left, right.right),
+    );
+  }
+  return logicBinary("or", left, right);
+}
+
+function logicDisjunctiveNormalForm(node) {
+  if (node.kind !== "logicBinary") {
+    return node;
+  }
+  if (node.operator === "or") {
+    return logicBinary("or", logicDisjunctiveNormalForm(node.left), logicDisjunctiveNormalForm(node.right));
+  }
+  if (node.operator === "and") {
+    return distributeLogicAndOverOr(
+      logicDisjunctiveNormalForm(node.left),
+      logicDisjunctiveNormalForm(node.right),
+    );
+  }
+  return node;
+}
+
+function distributeLogicAndOverOr(left, right) {
+  if (left.kind === "logicBinary" && left.operator === "or") {
+    return logicBinary(
+      "or",
+      distributeLogicAndOverOr(left.left, right),
+      distributeLogicAndOverOr(left.right, right),
+    );
+  }
+  if (right.kind === "logicBinary" && right.operator === "or") {
+    return logicBinary(
+      "or",
+      distributeLogicAndOverOr(left, right.left),
+      distributeLogicAndOverOr(left, right.right),
+    );
+  }
+  return logicBinary("and", left, right);
 }
 
 function sameLogicTree(left, right) {
