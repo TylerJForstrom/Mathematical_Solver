@@ -34,9 +34,9 @@ The frontend currently supports:
   Universal Ask mode
 - Matrix determinants, inverses, multiplication, row reduction, rank, row-space
   bases, column-space bases, null spaces, QR decomposition, reduced SVD,
-  real and complex 2x2 eigenvalues/eigenvectors, symmetric
-  eigenvalue/eigenvector approximation for larger matrices, and dominant
-  eigenpair approximation
+  real and complex 2x2 eigenvalues/eigenvectors, nonsymmetric 3x3 real
+  eigenvalues/eigenvectors, symmetric eigenvalue/eigenvector approximation for
+  larger matrices, and dominant eigenpair approximation
 - Vector geometry: dot products, cross products, magnitudes, angles,
   projections, and point distances
 - Geometry formulas: circles, rectangles, triangles, Pythagorean theorem,
@@ -287,6 +287,9 @@ The same idea works for algebra and calculus:
   a larger symmetric matrix.
 - `eigenvectors [[4,1,0],[1,3,0],[0,0,2]]` approximates orthonormal
   eigenvectors for a larger symmetric matrix.
+- `eigenvectors [[5,1,0],[0,3,1],[0,0,1]]` solves the 3x3 characteristic
+  cubic for real eigenvalues and estimates nonsymmetric eigendirections with
+  residual checks.
 - `dominant eigen [[4,1,0],[1,3,0],[0,0,2]]` uses power iteration to
   approximate the largest-magnitude eigenvalue and eigenvector.
 - `limit (x^2 - 1)/(x - 1) as x approaches 1` samples both sides of a
@@ -544,8 +547,8 @@ The demo includes:
   with approximate confidence intervals for t tests, and pairwise follow-up
   summaries in Stats mode
 - Linear and nonlinear systems of equations, matrices with fundamental subspace
-  bases, complex 2x2 eigenvectors, symmetric eigenvalue/eigenvector
-  approximation, and dominant eigenpair approximation,
+  bases, complex 2x2 eigenvectors, nonsymmetric 3x3 real eigenvectors,
+  symmetric eigenvalue/eigenvector approximation, and dominant eigenpair approximation,
   polynomial/elementary integrals, optimization, linear programming,
   vector geometry, geometry formulas, sequences/series, graphing with tangent
   overlays, differential equations including nonlinear phase-plane systems,
@@ -580,7 +583,7 @@ These are good ways to make the project more impressive mathematically:
 4. Add broader substitution, broader integration by parts, and repeated
    irreducible quadratic partial fractions.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
-6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
+6. Add nonsymmetric eigenvector approximations beyond 3x3 and larger complex eigenvalue algorithms.
 7. Add richer custom nonlinear residual diagnostics, parameter stability views,
    and bootstrap trace exports.
 8. Add richer nonlinear phase-plane tools, including separatrix tracing,

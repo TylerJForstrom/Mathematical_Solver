@@ -1318,6 +1318,17 @@ runTest("matrix mode approximates symmetric matrix eigenvalues", () => {
   assert.equal(artifactValue(result, "Tolerance"), "1e-10");
 });
 
+runTest("matrix mode computes nonsymmetric 3x3 real eigenvalues", () => {
+  const result = analyzeMatrix("eigenvalues [[5,1,0],[0,3,1],[0,0,1]]");
+
+  assert.equal(result.summary, "3x3 real eigenvalues");
+  assert.equal(result.answer, "lambda ~= [5, 3, 1]");
+  assert.equal(artifactValue(result, "Method"), "3x3 characteristic cubic");
+  assert.equal(artifactValue(result, "Characteristic polynomial"), "lambda^3 - 9lambda^2 + 23lambda - 15");
+  assert.equal(artifactValue(result, "Characteristic residuals"), "[0, 0, 0]");
+  assert.equal(analyzeUniversal("eigenvalues [[5,1,0],[0,3,1],[0,0,1]]").summary, "3x3 real eigenvalues");
+});
+
 runTest("matrix mode approximates symmetric matrix eigenvectors", () => {
   const result = analyzeMatrix("eigenvectors [[4,1,0],[1,3,0],[0,0,2]]");
 
@@ -1326,6 +1337,17 @@ runTest("matrix mode approximates symmetric matrix eigenvectors", () => {
   assert.equal(artifactValue(result, "Method"), "Jacobi rotations");
   assert.equal(artifactValue(result, "Eigenvalues"), "[4.618034, 2.381966, 2]");
   assert.equal(artifactValue(result, "Converged"), "yes");
+});
+
+runTest("matrix mode computes nonsymmetric 3x3 real eigenvectors", () => {
+  const result = analyzeMatrix("eigenvectors [[5,1,0],[0,3,1],[0,0,1]]");
+
+  assert.equal(result.summary, "3x3 real eigenvectors");
+  assert.equal(result.answer, "lambda 5: [1, 0, 0]; lambda 3: [0.447214, -0.894427, 0]; lambda 1: [0.111111, -0.444444, 0.888889]");
+  assert.equal(artifactValue(result, "Real eigenvalues"), "[5, 3, 1]");
+  assert.equal(artifactValue(result, "Residual norms"), "[0, 0, 0]");
+  assert.equal(result.steps.at(-1).title, "Check residuals");
+  assert.equal(analyzeUniversal("eigenvectors [[5,1,0],[0,3,1],[0,0,1]]").summary, "3x3 real eigenvectors");
 });
 
 runTest("matrix mode approximates dominant eigenpairs", () => {

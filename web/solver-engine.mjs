@@ -2123,6 +2123,48 @@ export function analyzeMatrix(statement) {
         detail: "For each eigenvalue, the solver finds the null space of A - lambda I.",
       },
     ];
+  } else if (lower.includes("eigenvector") && is3x3Matrix(matrices[0]) && !isSymmetricMatrix(matrices[0]) && !wantsDominantEigenpair(lower)) {
+    const result = realEigenpairs3x3(matrices[0]);
+    answer = formatApproximateEigenpairs(result.eigenpairs);
+    summary = "3x3 real eigenvectors";
+    artifacts = [
+      ["Matrix", formatMatrix(matrices[0])],
+      ["Method", "3x3 characteristic cubic"],
+      ["Characteristic polynomial", formatPolynomialFromCoefficients(result.characteristicCoefficients, "lambda")],
+      ["Real eigenvalues", formatVector(result.eigenvalues)],
+      ["Eigenpairs", answer],
+      ["Residual norms", formatVector(result.eigenpairs.map((entry) => entry.residualNorm))],
+    ];
+    children = [
+      matrixNode("A", matrices[0]),
+      ...result.eigenpairs.map((entry, index) => ({
+        kind: "matrixRow",
+        label: `lambda${index + 1}=${formatNumber(entry.eigenvalue)}`,
+        children: entry.vector.map((value) => statsMetricNode("v", value)),
+      })),
+    ];
+    steps = [
+      {
+        title: "Build characteristic cubic",
+        expression: `${formatPolynomialFromCoefficients(result.characteristicCoefficients, "lambda")} = 0`,
+        detail: "For nonsymmetric 3x3 matrices, the solver forms det(lambda I - A).",
+      },
+      {
+        title: "Solve real eigenvalues",
+        expression: formatVector(result.eigenvalues),
+        detail: "An analytic cubic reduction finds the real eigenvalues that can be paired with real eigenvectors.",
+      },
+      {
+        title: "Find eigendirections",
+        expression: answer,
+        detail: "For each eigenvalue, two independent rows of A - lambda I are crossed to approximate a null vector.",
+      },
+      {
+        title: "Check residuals",
+        expression: formatVector(result.eigenpairs.map((entry) => entry.residualNorm)),
+        detail: "Small residuals mean each vector nearly satisfies Av = lambda v.",
+      },
+    ];
   } else if (lower.includes("eigenvector")) {
     const maxIterations = Math.max(1, Math.min(50000, Math.round(readNamedNumber(statement, ["iterations", "iter", "maxIterations", "maxiter"], 2000))));
     const tolerance = readNamedNumber(statement, ["tolerance", "tol", "epsilon"], 1e-10);
@@ -2280,6 +2322,38 @@ export function analyzeMatrix(statement) {
           title: "Check residual",
           expression: `||Av - lambda v|| = ${formatNumber(result.residualNorm)}`,
           detail: "A small residual means the approximate vector behaves like an eigenvector.",
+        },
+      ];
+    } else if (is3x3Matrix(matrices[0]) && !isSymmetricMatrix(matrices[0])) {
+      const result = realEigenvalues3x3(matrices[0]);
+      answer = `lambda ~= ${formatVector(result.eigenvalues)}`;
+      summary = "3x3 real eigenvalues";
+      artifacts = [
+        ["Matrix", formatMatrix(matrices[0])],
+        ["Method", "3x3 characteristic cubic"],
+        ["Characteristic polynomial", formatPolynomialFromCoefficients(result.characteristicCoefficients, "lambda")],
+        ["Real eigenvalues", formatVector(result.eigenvalues)],
+        ["Characteristic residuals", formatVector(result.residuals)],
+      ];
+      children = [
+        matrixNode("A", matrices[0]),
+        ...result.eigenvalues.map((value, index) => statsMetricNode(`lambda${index + 1}`, value)),
+      ];
+      steps = [
+        {
+          title: "Build characteristic cubic",
+          expression: `${formatPolynomialFromCoefficients(result.characteristicCoefficients, "lambda")} = 0`,
+          detail: "For nonsymmetric 3x3 matrices, the solver forms det(lambda I - A).",
+        },
+        {
+          title: "Solve real roots",
+          expression: formatVector(result.eigenvalues),
+          detail: "The cubic is reduced analytically to its real roots; complex roots are omitted from this real-eigenvalue view.",
+        },
+        {
+          title: "Check characteristic residuals",
+          expression: formatVector(result.residuals),
+          detail: "Each reported eigenvalue is substituted back into the characteristic polynomial.",
         },
       ];
     } else {
@@ -13677,6 +13751,10 @@ function is2x2Matrix(matrix) {
   return matrix.length === 2 && matrix[0].length === 2;
 }
 
+function is3x3Matrix(matrix) {
+  return matrix.length === 3 && matrix[0].length === 3;
+}
+
 function isSymmetricMatrix(matrix) {
   if (matrix.length !== matrix[0].length) {
     return false;
@@ -15225,6 +15303,128 @@ function dominantEigenpairPowerIteration(matrix, options = {}) {
     residualNorm: normalizeNumber(residualNorm),
     tolerance,
   };
+}
+
+function realEigenvalues3x3(matrix) {
+  if (!is3x3Matrix(matrix)) {
+    throw new Error("3x3 real eigenvalue mode needs a 3x3 matrix.");
+  }
+  const characteristicCoefficients = characteristicPolynomialCoefficients3x3(matrix);
+  const eigenvalues = cubicRealRoots(characteristicCoefficients).sort((left, right) => right - left);
+  if (eigenvalues.length === 0) {
+    throw new Error("No real eigenvalues were found for this 3x3 matrix.");
+  }
+  return {
+    characteristicCoefficients,
+    eigenvalues: eigenvalues.map(normalizeNumber),
+    residuals: eigenvalues.map((lambda) =>
+      normalizeNumber(Math.abs(evaluatePolynomialCoefficients(characteristicCoefficients, lambda))),
+    ),
+  };
+}
+
+function realEigenpairs3x3(matrix) {
+  const result = realEigenvalues3x3(matrix);
+  const eigenpairs = result.eigenvalues.map((lambda) => {
+    const vector = approximateEigenvector3x3(matrix, lambda);
+    const product = multiplyMatrixVector(matrix, vector);
+    const residual = product.map((value, index) => value - lambda * vector[index]);
+    return {
+      eigenvalue: lambda,
+      vector,
+      residualNorm: normalizeNumber(vectorMagnitude(residual)),
+    };
+  });
+  return {
+    ...result,
+    eigenpairs,
+  };
+}
+
+function characteristicPolynomialCoefficients3x3(matrix) {
+  const [
+    [a, b, c],
+    [d, e, f],
+    [g, h, i],
+  ] = matrix;
+  const trace = a + e + i;
+  const principalMinorSum = a * e + a * i + e * i - b * d - c * g - f * h;
+  return [
+    normalizeNumber(-determinant(matrix)),
+    normalizeNumber(principalMinorSum),
+    normalizeNumber(-trace),
+    1,
+  ];
+}
+
+function cubicRealRoots(coefficients) {
+  const trimmed = trimPolynomialCoefficients(coefficients);
+  if (polynomialDegree(trimmed) < 3) {
+    return realPolynomialRoots(trimmed).sort((left, right) => right - left);
+  }
+  const d = trimmed[0] ?? 0;
+  const c = trimmed[1] ?? 0;
+  const b = trimmed[2] ?? 0;
+  const a = trimmed[3] ?? 0;
+  if (nearlyEqual(a, 0)) {
+    return realPolynomialRoots(trimmed).sort((left, right) => right - left);
+  }
+
+  const normalizedB = b / a;
+  const normalizedC = c / a;
+  const normalizedD = d / a;
+  const p = normalizedC - (normalizedB ** 2) / 3;
+  const q = (2 * normalizedB ** 3) / 27 - (normalizedB * normalizedC) / 3 + normalizedD;
+  const discriminant = (q / 2) ** 2 + (p / 3) ** 3;
+  const offset = normalizedB / 3;
+  let roots;
+
+  if (Math.abs(p) <= EPSILON && Math.abs(q) <= EPSILON) {
+    roots = [-offset];
+  } else if (discriminant > EPSILON) {
+    const root = Math.cbrt(-q / 2 + Math.sqrt(discriminant)) +
+      Math.cbrt(-q / 2 - Math.sqrt(discriminant)) -
+      offset;
+    roots = [root];
+  } else if (Math.abs(discriminant) <= EPSILON) {
+    const u = Math.cbrt(-q / 2);
+    roots = [2 * u - offset, -u - offset];
+  } else {
+    const radius = 2 * Math.sqrt(-p / 3);
+    const argument = Math.max(-1, Math.min(1, ((3 * q) / (2 * p)) * Math.sqrt(-3 / p)));
+    const angle = Math.acos(argument);
+    roots = [0, 1, 2].map((index) =>
+      radius * Math.cos((angle - 2 * Math.PI * index) / 3) - offset,
+    );
+  }
+
+  return uniqueSortedNumbers(roots.map(normalizeNumber)).sort((left, right) => right - left);
+}
+
+function approximateEigenvector3x3(matrix, lambda) {
+  const shifted = matrix.map((row, rowIndex) =>
+    row.map((value, columnIndex) => value - (rowIndex === columnIndex ? lambda : 0)),
+  );
+  let best = null;
+  for (let left = 0; left < 3; left += 1) {
+    for (let right = left + 1; right < 3; right += 1) {
+      const candidate = crossProduct(shifted[left], shifted[right]);
+      const magnitude = vectorMagnitude(candidate);
+      if (!best || magnitude > best.magnitude) {
+        best = { vector: candidate, magnitude };
+      }
+    }
+  }
+
+  if (!best || best.magnitude <= 1e-8) {
+    const nullSpace = nullSpaceBasis(shifted);
+    if (nullSpace.basis.length > 0) {
+      return normalizeUnitVector(nullSpace.basis[0]);
+    }
+    throw new Error("Could not find a stable approximate 3x3 eigenvector.");
+  }
+
+  return normalizeUnitVector(best.vector);
 }
 
 function symmetricEigenvaluesJacobi(matrix, options = {}) {
