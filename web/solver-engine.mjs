@@ -7932,6 +7932,9 @@ function analyzeRegressionModelComparison(statement) {
   );
   const criterion = models.every((model) => Number.isFinite(model.aicc)) ? "AICc" : "AIC";
   const best = pickBestRegressionComparisonModel(models, criterion);
+  const bestCv = pickBestRegressionComparisonCvModel(models);
+  const criterionGraph = buildRegressionModelComparisonGraph(models, criterion);
+  const cvGraph = buildRegressionCvComparisonGraph(models);
   const tree = {
     kind: "statsRegression",
     label: "MODEL CMP",
@@ -7967,13 +7970,18 @@ function analyzeRegressionModelComparison(statement) {
         detail: "AIC, AICc, and BIC reward smaller residual error while penalizing extra coefficients.",
       },
       {
+        title: "Cross-validate predictions",
+        expression: models.map((model) => `degree ${model.degree}: LOOCV RMSE=${formatFiniteNumber(model.loocvRmse)}`).join("; "),
+        detail: "Leave-one-out cross-validation refits each candidate after holding out one observation, then scores the held-out prediction errors.",
+      },
+      {
         title: "Select best model",
         expression: `degree ${best.degree}`,
         detail: `The selected model has the smallest ${criterion} among the candidates.`,
       },
     ],
     table: {
-      headers: ["Degree", "Equation", "SSE", "R squared", "Adjusted R^2", "AIC", "AICc", "BIC"],
+      headers: ["Degree", "Equation", "SSE", "R squared", "Adjusted R^2", "AIC", "AICc", "BIC", "LOOCV RMSE", "LOOCV MAE"],
       rows: models.map((model) => [
         formatNumber(model.degree),
         model.equation,
@@ -7983,6 +7991,8 @@ function analyzeRegressionModelComparison(statement) {
         formatNumber(model.aic),
         Number.isFinite(model.aicc) ? formatNumber(model.aicc) : "undefined",
         formatNumber(model.bic),
+        formatFiniteNumber(model.loocvRmse),
+        formatFiniteNumber(model.loocvMae),
       ]),
     },
     artifacts: [
@@ -7994,19 +8004,20 @@ function analyzeRegressionModelComparison(statement) {
       ["Best AIC", formatNumber(best.aic)],
       ["Best AICc", Number.isFinite(best.aicc) ? formatNumber(best.aicc) : "undefined"],
       ["Best BIC", formatNumber(best.bic)],
+      ["LOOCV best degree", bestCv ? formatNumber(bestCv.degree) : "undefined"],
+      ["LOOCV best RMSE", bestCv ? formatNumber(bestCv.loocvRmse) : "undefined"],
+      ["LOOCV best MAE", bestCv ? formatNumber(bestCv.loocvMae) : "undefined"],
     ],
-    graph: buildRegressionModelComparisonGraph(models, criterion),
+    graph: criterionGraph,
+    graphs: [criterionGraph, cvGraph].filter(Boolean),
   };
 }
 
 function fitPolynomialComparisonModel(xValues, yValues, degree) {
-  const design = polynomialDesignMatrix(xValues, degree);
-  const transposed = transposeMatrix(design);
-  const normalMatrix = multiplyMatrices(transposed, design);
-  const normalVector = multiplyMatrixVector(transposed, yValues);
-  const coefficients = solveLinearSystem(normalMatrix, normalVector).map(normalizeNumber);
-  const fitted = design.map((row) => normalizeNumber(dotProduct(row, coefficients)));
+  const coefficients = fitPolynomialCoefficients(xValues, yValues, degree);
+  const fitted = xValues.map((x) => polynomialPrediction(coefficients, x));
   const residuals = yValues.map((value, index) => normalizeNumber(value - fitted[index]));
+  const loocv = leaveOneOutPolynomialValidation(xValues, yValues, degree);
   const n = yValues.length;
   const parameterCount = degree + 1;
   const degreesFreedom = n - parameterCount;
@@ -8034,12 +8045,60 @@ function fitPolynomialComparisonModel(xValues, yValues, degree) {
     aic: normalizeNumber(aic),
     aicc: Number.isFinite(aicc) ? normalizeNumber(aicc) : Number.NaN,
     bic: normalizeNumber(bic),
+    loocvRmse: loocv.rmse,
+    loocvMae: loocv.mae,
+    loocvErrors: loocv.errors,
+    loocvPredictions: loocv.predictions,
     equation: formatPolynomialRegressionEquation(coefficients, "x"),
   };
 }
 
+function fitPolynomialCoefficients(xValues, yValues, degree) {
+  const design = polynomialDesignMatrix(xValues, degree);
+  const transposed = transposeMatrix(design);
+  const normalMatrix = multiplyMatrices(transposed, design);
+  const normalVector = multiplyMatrixVector(transposed, yValues);
+  return solveLinearSystem(normalMatrix, normalVector).map(normalizeNumber);
+}
+
 function polynomialDesignMatrix(xValues, degree) {
   return xValues.map((x) => Array.from({ length: degree + 1 }, (_, power) => x ** power));
+}
+
+function polynomialPrediction(coefficients, x) {
+  return normalizeNumber(coefficients.reduce((sum, coefficient, power) => sum + coefficient * x ** power, 0));
+}
+
+function leaveOneOutPolynomialValidation(xValues, yValues, degree) {
+  const predictions = [];
+  const errors = [];
+
+  for (let heldOut = 0; heldOut < yValues.length; heldOut += 1) {
+    const trainX = xValues.filter((_, index) => index !== heldOut);
+    const trainY = yValues.filter((_, index) => index !== heldOut);
+    const distinctTrainX = new Set(trainX.map((x) => formatNumber(x))).size;
+    if (trainX.length < degree + 1 || distinctTrainX < degree + 1) {
+      return { predictions: [], errors: [], rmse: Number.NaN, mae: Number.NaN };
+    }
+
+    try {
+      const coefficients = fitPolynomialCoefficients(trainX, trainY, degree);
+      const prediction = polynomialPrediction(coefficients, xValues[heldOut]);
+      predictions.push(prediction);
+      errors.push(normalizeNumber(yValues[heldOut] - prediction));
+    } catch {
+      return { predictions: [], errors: [], rmse: Number.NaN, mae: Number.NaN };
+    }
+  }
+
+  const mse = mean(errors.map((error) => error ** 2));
+  const mae = mean(errors.map((error) => Math.abs(error)));
+  return {
+    predictions,
+    errors,
+    rmse: normalizeNumber(Math.sqrt(mse)),
+    mae: normalizeNumber(mae),
+  };
 }
 
 function pickBestRegressionComparisonModel(models, criterion) {
@@ -8048,6 +8107,15 @@ function pickBestRegressionComparisonModel(models, criterion) {
     left.bic - right.bic ||
     left.degree - right.degree,
   )[0];
+}
+
+function pickBestRegressionComparisonCvModel(models) {
+  const candidates = models.filter((model) => Number.isFinite(model.loocvRmse));
+  return [...candidates].sort((left, right) =>
+    left.loocvRmse - right.loocvRmse ||
+    left.loocvMae - right.loocvMae ||
+    left.degree - right.degree,
+  )[0] ?? null;
 }
 
 function regressionComparisonCriterionValue(model, criterion) {
@@ -8073,6 +8141,35 @@ function buildRegressionModelComparisonGraph(models, criterion) {
     lines: [
       {
         label: criterion,
+        points,
+      },
+    ],
+  };
+}
+
+function buildRegressionCvComparisonGraph(models) {
+  const points = models
+    .filter((model) => Number.isFinite(model.loocvRmse))
+    .map((model) => ({
+      x: model.degree,
+      y: model.loocvRmse,
+    }));
+  if (points.length === 0) {
+    return null;
+  }
+  const [yMin, yMax] = paddedNumericRange(points.map((point) => point.y));
+  return {
+    expression: "LOOCV RMSE by polynomial degree",
+    kind: "regression-diagnostic",
+    scatterLabel: "LOOCV RMSE",
+    xMin: Math.min(...points.map((point) => point.x)),
+    xMax: Math.max(...points.map((point) => point.x)),
+    yMin,
+    yMax,
+    scatter: points,
+    lines: [
+      {
+        label: "LOOCV RMSE",
         points,
       },
     ],
@@ -25600,6 +25697,10 @@ function formatNumber(value) {
 
 function formatPercent(value) {
   return Number.isFinite(value) ? `${formatNumber(value * 100)}%` : "undefined";
+}
+
+function formatFiniteNumber(value) {
+  return Number.isFinite(value) ? formatNumber(value) : "undefined";
 }
 
 function formatStatisticValue(value) {

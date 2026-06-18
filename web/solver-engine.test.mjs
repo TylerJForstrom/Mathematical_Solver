@@ -449,9 +449,13 @@ runTest("statistics mode compares regression models", () => {
   assert.equal(result.answer, "best degree 2 by AICc: y = 3.7 - 2.217857x + 0.839286x^2");
   assert.equal(artifactValue(result, "Best degree"), "2");
   assert.equal(artifactValue(result, "Best AICc"), "7.119474");
-  assert.deepEqual(result.table.rows[1], ["2", "y = 3.7 - 2.217857x + 0.839286x^2", "0.978571", "0.996255", "0.993759", "-4.880526", "7.119474", "-5.505247"]);
+  assert.equal(artifactValue(result, "LOOCV best degree"), "3");
+  assert.equal(artifactValue(result, "LOOCV best RMSE"), "0.550766");
+  assert.deepEqual(result.table.rows[1], ["2", "y = 3.7 - 2.217857x + 0.839286x^2", "0.978571", "0.996255", "0.993759", "-4.880526", "7.119474", "-5.505247", "1.270369", "1.074586"]);
   assert.equal(result.graph.expression, "AICc by polynomial degree");
-  assert.equal(result.graph.scatter.length, 3);
+  assert.equal(result.graphs.length, 2);
+  assert.equal(result.graphs[0].scatter.length, 3);
+  assert.equal(result.graphs[1].expression, "LOOCV RMSE by polynomial degree");
 });
 
 runTest("statistics mode computes multiple linear regression", () => {

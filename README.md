@@ -85,7 +85,8 @@ The frontend currently supports:
   distance, Durbin-Watson, Breusch-Pagan, residual Jarque-Bera checks, and
   diagnostic plots for actual-vs-fitted, residuals-vs-fitted, and influence
 - Regression model comparison for polynomial families with SSE, adjusted R
-  squared, AIC, AICc, BIC, and an information-criterion plot
+  squared, AIC, AICc, BIC, leave-one-out cross-validation RMSE/MAE, and
+  comparison plots
 - Ridge regression for regularized linear modeling with an unpenalized intercept,
   shrinkage penalty, objective value, fitted values, residuals, and prediction
 - LASSO regression for sparse feature selection with standardized coordinate
@@ -326,8 +327,8 @@ The same idea works for algebra and calculus:
   residual shape, autocorrelation, heteroscedasticity, leverage, influence,
   and graph-based diagnostic patterns.
 - `compare regression models y: 2,3,5,8,13,21; x: 1,2,3,4,5,6 degrees=1,2,3`
-  compares polynomial models with AIC/AICc/BIC and selects the least-overfit
-  candidate by information criterion.
+  compares polynomial models with AIC/AICc/BIC plus leave-one-out
+  cross-validation error.
 - `ridge regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a regularized model that shrinks predictor coefficients.
 - `lasso regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
@@ -481,7 +482,7 @@ The demo includes:
   multiple regression,
   coefficient inference for linear models,
   regression diagnostics with visual residual and influence plots,
-  regression model comparison,
+  regression model comparison with cross-validation metrics,
   ridge regression,
   LASSO regression,
   Bayesian linear regression,
@@ -549,7 +550,8 @@ These are good ways to make the project more impressive mathematically:
    irreducible quadratic partial fractions.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
-7. Add cross-validation and holdout metrics for regression model comparison.
+7. Add configurable train/test holdout and k-fold controls for regression
+   model comparison.
 8. Add nonlinear systems of differential equations, nullclines, and richer
    phase-plane plotting.
 9. Add multi-step natural-language explanations for word problems.
