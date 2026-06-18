@@ -93,7 +93,8 @@ The frontend currently supports:
 - Custom nonlinear regression formulas with named parameters, starting
   values, optional parameter bounds, fitted/residual tables, approximate
   confidence intervals, requested prediction intervals, optimizer diagnostics,
-  multi-start search, optimizer trace tables, and best-fit plots
+  multi-start search, optimizer trace tables, custom-formula comparison,
+  model-averaged predictions, and best-fit plots
 - Ridge regression for regularized linear modeling with an unpenalized intercept,
   shrinkage penalty, objective value, fitted values, residuals, and prediction
 - LASSO regression for sparse feature selection with standardized coordinate
@@ -345,6 +346,9 @@ The same idea works for algebra and calculus:
 - `custom nonlinear regression formula=a*exp(b*x); x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5; bounds a=0:10,b=0:2; multistart=3; predict x=6`
   fits a user-supplied formula with named parameters, optional bounds, and
   approximate parameter/prediction intervals plus optimizer trace tables.
+- `compare custom nonlinear regression models formulas=a*exp(b*x) | c*x^d; x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5,c=1,d=2; bounds a=0:10,b=0:2,c=0:10,d=0:4; multistart=3; predict x=6`
+  fits multiple custom formulas, ranks them by AICc/AIC/BIC, computes model
+  weights, and reports model-averaged predictions.
 - `ridge regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
   solves a regularized model that shrinks predictor coefficients.
 - `lasso regression lambda=1 y: 4,7,9,12,15; x1: 1,2,3,4,5; x2: 0,1,0,1,1`
@@ -500,7 +504,8 @@ The demo includes:
   regression diagnostics with visual residual and influence plots,
   regression model comparison with LOOCV, k-fold, and holdout metrics,
   nonlinear regression family comparison including logistic growth,
-  custom nonlinear regression formulas with prediction intervals and optimizer traces,
+  custom nonlinear regression formulas with prediction intervals, optimizer
+  traces, formula comparison, and model averaging,
   ridge regression,
   LASSO regression,
   Bayesian linear regression,
@@ -568,8 +573,8 @@ These are good ways to make the project more impressive mathematically:
    irreducible quadratic partial fractions.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
-7. Add custom-formula model comparison and model averaging for nonlinear
-   regression.
+7. Add custom nonlinear cross-validation, bootstrap uncertainty, and richer
+   model-averaged interval estimates.
 8. Add nonlinear systems of differential equations, nullclines, and richer
    phase-plane plotting.
 9. Add multi-step natural-language explanations for word problems.

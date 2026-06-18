@@ -527,6 +527,24 @@ runTest("statistics mode fits custom nonlinear regression formulas", () => {
   assert.equal(analyzeUniversal("custom nonlinear regression formula=a*exp(b*x); x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5").summary, "custom nonlinear regression");
 });
 
+runTest("statistics mode compares custom nonlinear regression formulas", () => {
+  const result = analyzeStatistics("compare custom nonlinear regression models formulas=a*exp(b*x) | c*x^d; x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5,c=1,d=2; bounds a=0:10,b=0:2,c=0:10,d=0:4; multistart=3; predict x=6");
+
+  assert.equal(result.summary, "custom nonlinear model comparison");
+  assert.equal(result.answer, "best Model 1 by AICc: y = a*exp(b*x); averaged prediction = 64");
+  assert.equal(artifactValue(result, "Criterion"), "AICc");
+  assert.equal(artifactValue(result, "Best model"), "Model 1");
+  assert.equal(artifactValue(result, "Best weight"), "1");
+  assert.equal(artifactValue(result, "Model weights"), "Model 1=1, Model 2=0");
+  assert.equal(artifactValue(result, "Model-averaged prediction"), "64");
+  assert.deepEqual(result.table.rows[0], ["Model 1", "y = a*exp(b*x)", "a=1, b=0.693147", "0", "1", "-111.129255", "-105.129255", "-111.910379", "0", "1", "64", "fit in 11 iterations"]);
+  assert.deepEqual(result.table.rows[1], ["Model 2", "y = c*x^d", "c=0.405279, d=2.704563", "6.148024", "0.989671", "5.033464", "11.033464", "4.25234", "116.162719", "0", "51.560077", "fit in 7 iterations"]);
+  assert.equal(result.extraTables[0].title, "Model-averaged fitted values");
+  assert.deepEqual(result.extraTables[0].rows[2], ["3", "3", "8", "8", "0"]);
+  assert.deepEqual(result.graphs.map((graph) => graph.expression), ["Model 1 best fit", "Model-averaged custom best fit", "AICc by custom nonlinear model"]);
+  assert.equal(analyzeUniversal("compare custom nonlinear regression models formulas=a*exp(b*x) | c*x^d; x: 1,2,3,4,5; y: 2,4,8,16,32; params a=1,b=0.5,c=1,d=2").summary, "custom nonlinear model comparison");
+});
+
 runTest("statistics mode computes multiple linear regression", () => {
   const result = analyzeStatistics("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
 

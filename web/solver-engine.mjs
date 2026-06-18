@@ -1579,6 +1579,10 @@ export function analyzeStatistics(statement) {
     return analyzePoisson(statement);
   }
 
+  if (isCustomNonlinearRegressionModelComparisonQuestion(lower)) {
+    return analyzeCustomNonlinearRegressionModelComparison(statement);
+  }
+
   if (isCustomNonlinearRegressionQuestion(lower)) {
     return analyzeCustomNonlinearRegression(statement);
   }
@@ -1654,6 +1658,10 @@ export function analyzeStatistics(statement) {
 
   if (isRegressionDiagnosticsQuestion(lower)) {
     return analyzeRegressionDiagnostics(statement);
+  }
+
+  if (isCustomNonlinearRegressionModelComparisonQuestion(lower)) {
+    return analyzeCustomNonlinearRegressionModelComparison(statement);
   }
 
   if (isCustomNonlinearRegressionQuestion(lower)) {
@@ -8107,6 +8115,110 @@ function analyzeNonlinearRegressionModelComparison(statement) {
   };
 }
 
+function analyzeCustomNonlinearRegressionModelComparison(statement) {
+  const request = parseCustomNonlinearRegressionModelComparisonInput(statement);
+  const models = request.entries.map((entry, index) =>
+    fitCustomNonlinearComparisonModel(request, entry, index + 1),
+  );
+  const viableModels = models.filter((model) => model.viable);
+  if (viableModels.length < 2) {
+    throw new Error("Custom nonlinear model comparison needs at least two valid fitted formulas.");
+  }
+
+  const criterion = selectCustomNonlinearComparisonCriterion(viableModels, request.criterion);
+  const weightedModels = applyNonlinearComparisonWeights(models, criterion);
+  const weightedViable = weightedModels.filter((model) => model.viable);
+  const best = pickBestNonlinearRegressionModel(weightedViable, criterion);
+  const prediction = Number.isFinite(request.prediction)
+    ? customNonlinearModelAveragedPrediction(weightedViable, request.prediction)
+    : null;
+  const averagedRows = customNonlinearModelAveragedRows(weightedViable, request);
+  const bestGraph = buildNonlinearRegressionFitGraph(request.x, request.y, best);
+  const averagedGraph = buildNonlinearRegressionFitGraph(request.x, request.y, {
+    label: "Model-averaged custom",
+    predict: (x) => customNonlinearWeightedPrediction(weightedViable, x),
+  });
+  const criterionGraph = buildNonlinearRegressionCriterionGraph(
+    weightedViable,
+    criterion,
+    `${criterion} by custom nonlinear model`,
+  );
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      label: "CUSTOM CMP",
+      children: [
+        statsDatasetNode(request.x, [], "X"),
+        statsDatasetNode(request.y, [], "Y"),
+        ...weightedViable.map((model) => statsMetricNode(model.label, nonlinearRegressionCriterionValue(model, criterion))),
+      ],
+    },
+    answer: `best ${best.label} by ${criterion}: ${best.equation}${prediction ? `; averaged prediction = ${formatNumber(prediction.yHat)}` : ""}`,
+    summary: "custom nonlinear model comparison",
+    details: `${request.x.length} observations, ${request.entries.length} custom formulas`,
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.y, weightedViable.map((model) =>
+      statsMetricNode(model.label, nonlinearRegressionCriterionValue(model, criterion)),
+    ))),
+    steps: [
+      {
+        title: "Read custom candidate formulas",
+        expression: request.entries.map((entry) => `${entry.label}: ${entry.formula}`).join("; "),
+        detail: "Each candidate is parsed as an expression tree with the same input variable and response data.",
+      },
+      {
+        title: "Fit every candidate",
+        expression: weightedViable.map((model) => `${model.label}: SSE=${formatNumber(model.sse)}`).join("; "),
+        detail: "The solver runs bounded multi-start damped least squares for every custom formula.",
+      },
+      {
+        title: "Score and weight models",
+        expression: weightedViable.map((model) => `${model.label}: ${criterion}=${formatNumber(nonlinearRegressionCriterionValue(model, criterion))}, weight=${formatNumber(model.weight)}`).join("; "),
+        detail: "Akaike-style weights are computed from criterion deltas so close models can contribute to an averaged prediction.",
+      },
+      ...(prediction
+        ? [{
+            title: "Average requested prediction",
+            expression: `${request.variable}=${formatNumber(prediction.x)}, averaged ${request.response}=${formatNumber(prediction.yHat)}`,
+            detail: "The model-averaged prediction is the weighted mean of finite candidate predictions.",
+          }]
+        : []),
+      {
+        title: "Select best custom model",
+        expression: `${best.label}: ${best.equation}`,
+        detail: `The selected model has the smallest ${criterion}; weights are still shown for model-selection uncertainty.`,
+      },
+    ],
+    table: {
+      headers: ["Model", "Formula", "Parameters", "SSE", "R squared", "AIC", "AICc", "BIC", "Delta", "Weight", "Prediction", "Status"],
+      rows: weightedModels.map((model) => customNonlinearComparisonTableRow(model, request)),
+    },
+    artifacts: [
+      ["Criterion", criterion],
+      ["Best model", best.label],
+      ["Best formula", best.equation],
+      ["Best SSE", formatNumber(best.sse)],
+      ["Best R squared", formatNumber(best.rSquared)],
+      ["Best weight", formatNumber(best.weight)],
+      ["Model weights", weightedViable.map((model) => `${model.label}=${formatNumber(model.weight)}`).join(", ")],
+      ...(prediction ? [
+        ["Prediction x", formatNumber(prediction.x)],
+        ["Best model prediction", formatFiniteNumber(best.prediction?.yHat)],
+        ["Model-averaged prediction", formatNumber(prediction.yHat)],
+      ] : []),
+    ],
+    graph: bestGraph,
+    graphs: [bestGraph, averagedGraph, criterionGraph].filter(Boolean),
+    extraTables: [{
+      title: "Model-averaged fitted values",
+      headers: ["Obs", request.variable, "Actual", "Averaged fitted", "Residual"],
+      rows: averagedRows,
+    }],
+  };
+}
+
 function analyzeCustomNonlinearRegression(statement) {
   const request = parseCustomNonlinearRegressionInput(statement);
   const fit = fitCustomNonlinearRegression(request);
@@ -8538,6 +8650,180 @@ function logisticGrowthSigmoid(value) {
 
 function formatLogisticGrowthEquation([asymptote, intercept, slope]) {
   return `y = ${formatNumber(asymptote)} / (1 + e^(${formatNumber(-intercept)} ${formatSignedTerm(-slope, "x")}))`;
+}
+
+function fitCustomNonlinearComparisonModel(request, entry, modelIndex) {
+  try {
+    const modelRequest = buildCustomNonlinearComparisonModelRequest(request, entry);
+    const fit = fitCustomNonlinearRegression(modelRequest);
+    const prediction = Number.isFinite(request.prediction)
+      ? customNonlinearRegressionPrediction(modelRequest, fit.parameters, fit.covariance, request.prediction)
+      : null;
+    return {
+      ...fit,
+      modelIndex,
+      label: entry.label,
+      family: `custom${modelIndex}`,
+      equation: `${modelRequest.response} = ${modelRequest.formula}`,
+      request: modelRequest,
+      parameterNames: modelRequest.parameterNames,
+      prediction,
+      status: fit.converged
+        ? `fit in ${fit.iterations} iterations`
+        : `stopped after ${fit.iterations} iterations`,
+    };
+  } catch (error) {
+    return invalidCustomNonlinearComparisonModel(entry, modelIndex, error.message);
+  }
+}
+
+function buildCustomNonlinearComparisonModelRequest(request, entry) {
+  const formulaInfo = entry.formulaInfo;
+  const variable = parseCustomRegressionVariable(request.sourceText, formulaInfo.expression);
+  if (variable !== request.variable) {
+    throw new Error(`uses ${variable}, not ${request.variable}`);
+  }
+  const parameterNames = mathVariables(formulaInfo.expression)
+    .filter((name) => name !== variable && !isMathConstantName(name));
+  if (parameterNames.length === 0) {
+    throw new Error("needs at least one fitted parameter");
+  }
+  if (request.x.length <= parameterNames.length) {
+    throw new Error("needs more observations than fitted parameters");
+  }
+  const bounds = parseCustomRegressionBounds(request.sourceText, parameterNames);
+  const initial = parseCustomRegressionInitialParameters(request.sourceText, parameterNames, bounds);
+  return {
+    response: formulaInfo.response,
+    formula: formulaInfo.formula,
+    expression: formulaInfo.expression,
+    variable,
+    parameterNames,
+    initial,
+    startCount: request.startCount,
+    bounds,
+    level: request.level,
+    maxIterations: request.maxIterations,
+    tolerance: request.tolerance,
+    prediction: request.prediction,
+    x: request.x,
+    y: request.y,
+  };
+}
+
+function invalidCustomNonlinearComparisonModel(entry, modelIndex, status) {
+  return {
+    modelIndex,
+    label: entry.label,
+    family: `custom${modelIndex}`,
+    equation: entry.formula,
+    parameterNames: [],
+    parameters: [],
+    fitted: [],
+    residuals: [],
+    viable: false,
+    sse: Number.NaN,
+    rSquared: Number.NaN,
+    aic: Number.NaN,
+    aicc: Number.NaN,
+    bic: Number.NaN,
+    delta: Number.NaN,
+    weight: Number.NaN,
+    prediction: null,
+    status: `invalid: ${status}`,
+  };
+}
+
+function selectCustomNonlinearComparisonCriterion(models, requestedCriterion) {
+  if (requestedCriterion) {
+    const missing = models.some((model) => !Number.isFinite(nonlinearRegressionCriterionValue(model, requestedCriterion)));
+    if (missing) {
+      throw new Error(`Custom nonlinear model comparison could not compute finite ${requestedCriterion} for every valid model.`);
+    }
+    return requestedCriterion;
+  }
+  return models.every((model) => Number.isFinite(model.aicc)) ? "AICc" : "AIC";
+}
+
+function applyNonlinearComparisonWeights(models, criterion) {
+  const viable = models.filter((model) =>
+    model.viable && Number.isFinite(nonlinearRegressionCriterionValue(model, criterion)),
+  );
+  const bestCriterion = Math.min(...viable.map((model) => nonlinearRegressionCriterionValue(model, criterion)));
+  const rawWeights = new Map(viable.map((model) => {
+    const delta = nonlinearRegressionCriterionValue(model, criterion) - bestCriterion;
+    return [model.modelIndex, { delta, rawWeight: Math.exp(-0.5 * delta) }];
+  }));
+  const totalWeight = [...rawWeights.values()].reduce((sum, item) => sum + item.rawWeight, 0);
+  return models.map((model) => {
+    const raw = rawWeights.get(model.modelIndex);
+    if (!raw || !(totalWeight > 0)) {
+      return {
+        ...model,
+        delta: Number.NaN,
+        weight: Number.NaN,
+      };
+    }
+    return {
+      ...model,
+      delta: normalizeNumber(raw.delta),
+      weight: normalizeNumber(raw.rawWeight / totalWeight),
+    };
+  });
+}
+
+function customNonlinearComparisonTableRow(model, request) {
+  return [
+    model.label,
+    model.equation,
+    model.viable ? formatCustomParameterVector(model.parameters, model.parameterNames) : "undefined",
+    formatFiniteNumber(model.sse),
+    formatFiniteNumber(model.rSquared),
+    formatFiniteNumber(model.aic),
+    formatFiniteNumber(model.aicc),
+    formatFiniteNumber(model.bic),
+    formatFiniteNumber(model.delta),
+    formatFiniteNumber(model.weight),
+    Number.isFinite(request.prediction) ? formatFiniteNumber(model.prediction?.yHat) : "",
+    model.status,
+  ];
+}
+
+function customNonlinearWeightedPrediction(models, x) {
+  const finitePredictions = models
+    .map((model) => ({
+      weight: model.weight,
+      prediction: model.predict(x),
+    }))
+    .filter((item) => Number.isFinite(item.weight) && Number.isFinite(item.prediction));
+  const totalWeight = finitePredictions.reduce((sum, item) => sum + item.weight, 0);
+  if (!(totalWeight > 0)) {
+    return Number.NaN;
+  }
+  return normalizeNumber(finitePredictions.reduce((sum, item) =>
+    sum + item.weight * item.prediction,
+  0) / totalWeight);
+}
+
+function customNonlinearModelAveragedPrediction(models, x) {
+  const yHat = customNonlinearWeightedPrediction(models, x);
+  return Number.isFinite(yHat)
+    ? { x, yHat }
+    : null;
+}
+
+function customNonlinearModelAveragedRows(models, request) {
+  return request.x.map((x, index) => {
+    const fitted = customNonlinearWeightedPrediction(models, x);
+    const residual = Number.isFinite(fitted) ? request.y[index] - fitted : Number.NaN;
+    return [
+      String(index + 1),
+      formatNumber(x),
+      formatNumber(request.y[index]),
+      formatFiniteNumber(fitted),
+      formatFiniteNumber(residual),
+    ];
+  });
 }
 
 function fitCustomNonlinearRegression(request) {
@@ -9248,17 +9534,19 @@ function pickBestNonlinearRegressionModel(models, criterion) {
 }
 
 function nonlinearRegressionCriterionValue(model, criterion) {
-  return criterion === "AICc" ? model.aicc : model.aic;
+  if (criterion === "AICc") return model.aicc;
+  if (criterion === "BIC") return model.bic;
+  return model.aic;
 }
 
-function buildNonlinearRegressionCriterionGraph(models, criterion) {
+function buildNonlinearRegressionCriterionGraph(models, criterion, expression = `${criterion} by nonlinear regression family`) {
   const points = models.map((model, index) => ({
     x: index + 1,
     y: nonlinearRegressionCriterionValue(model, criterion),
   }));
   const [yMin, yMax] = paddedNumericRange(points.map((point) => point.y));
   return {
-    expression: `${criterion} by nonlinear regression family`,
+    expression,
     kind: "regression-diagnostic",
     scatterLabel: criterion,
     xMin: 1,
@@ -20581,6 +20869,97 @@ function parseNonlinearRegressionModelComparisonInput(text) {
   };
 }
 
+function parseCustomNonlinearRegressionModelComparisonInput(text) {
+  const formulaSpec = parseCustomComparisonFormulaSpec(text);
+  if (formulaSpec.entries.length < 2) {
+    throw new Error("Custom nonlinear model comparison needs at least two formulas, such as formulas=a*exp(b*x) | c*x^d.");
+  }
+
+  const parsedLists = parseXYLists(formulaSpec.dataText);
+  const pairs = parsedLists ? zipPairs(parsedLists.x, parsedLists.y) : parsePairs(formulaSpec.dataText);
+  if (pairs.length < 4) {
+    throw new Error("Custom nonlinear model comparison needs at least four paired observations.");
+  }
+
+  const formulaInfos = formulaSpec.entries.map((entry) => ({
+    ...entry,
+    formulaInfo: parseCustomRegressionFormula(entry.formula),
+  }));
+  const variables = [...new Set(formulaInfos.map((entry) =>
+    parseCustomRegressionVariable(text, entry.formulaInfo.expression),
+  ))];
+  if (variables.length !== 1) {
+    throw new Error("Custom nonlinear model comparison needs every formula to use the same input variable.");
+  }
+
+  const variable = variables[0];
+  const maxIterations = readNamedNumber(text, ["maxIterations", "maxiterations", "maxIter", "maxiter", "iterations"], 200);
+  const tolerance = readNamedNumber(text, ["tolerance", "tol"], 1e-8);
+  if (!Number.isSafeInteger(maxIterations) || maxIterations < 1 || maxIterations > 1000) {
+    throw new Error("Custom nonlinear model comparison iterations must be an integer from 1 through 1000.");
+  }
+  if (!(tolerance > 0)) {
+    throw new Error("Custom nonlinear model comparison tolerance must be positive.");
+  }
+
+  return {
+    entries: formulaInfos,
+    response: formulaInfos[0].formulaInfo.response,
+    variable,
+    criterion: parseCustomComparisonCriterion(text),
+    level: parseConfidenceLevel(text, 0.95),
+    maxIterations,
+    tolerance,
+    startCount: parseCustomRegressionStartCount(text),
+    prediction: parseCustomRegressionPrediction(text, variable),
+    x: pairs.map((pair) => pair.x),
+    y: pairs.map((pair) => pair.y),
+    sourceText: text,
+  };
+}
+
+function parseCustomComparisonFormulaSpec(text) {
+  const joined = text.match(/\b(?:formulas|candidate\s+formulas|custom\s+models)\s*[:=]\s*(.+?)(?=\s*(?:;\s*)?\b(?:x|y|params?|starts?|initial|bounds?|multistart|multi-start|restarts?|startcount|predict(?:ion)?|confidence|level|tol|tolerance|iterations|maxiterations|maxiter|criterion|average|averaging)\b\s*[:=]|$)/i);
+  if (joined) {
+    const entries = splitCustomComparisonFormulas(joined[1]);
+    return {
+      entries,
+      dataText: text.slice(0, joined.index) + text.slice(joined.index + joined[0].length),
+    };
+  }
+
+  const matches = [...text.matchAll(/\b(?:formula|model)\s*(\d+)\s*[:=]\s*([^;]+)/gi)];
+  const entries = matches.map((match, index) =>
+    normalizeCustomComparisonFormulaEntry(match[2], index + 1),
+  );
+  let dataText = text;
+  for (const match of [...matches].reverse()) {
+    dataText = dataText.slice(0, match.index) + dataText.slice(match.index + match[0].length);
+  }
+  return { entries, dataText };
+}
+
+function splitCustomComparisonFormulas(chunk) {
+  return chunk
+    .split(/\s*\|\s*/)
+    .map((part, index) => normalizeCustomComparisonFormulaEntry(part, index + 1))
+    .filter((entry) => entry.formula);
+}
+
+function normalizeCustomComparisonFormulaEntry(raw, index) {
+  const trimmed = raw.replace(/;\s*$/, "").trim();
+  const labeled = trimmed.match(/^([A-Za-z][A-Za-z0-9 _-]{0,30})\s*=>\s*(.+)$/);
+  return {
+    label: labeled ? labeled[1].trim() : `Model ${index}`,
+    formula: labeled ? labeled[2].trim() : trimmed,
+  };
+}
+
+function parseCustomComparisonCriterion(text) {
+  const match = text.match(/\bcriterion\s*[:=]\s*(aicc|aic|bic)\b/i);
+  return match ? match[1].toUpperCase() : "";
+}
+
 function parseCustomNonlinearRegressionInput(text) {
   const formulaMatch = extractCustomRegressionFormulaMatch(text);
   if (!formulaMatch) {
@@ -22654,6 +23033,24 @@ function isNonlinearRegressionModelComparisonQuestion(lower) {
     lower.includes("logistic growth") ||
     lower.includes("sigmoid");
   return wantsComparison && wantsRegression && namesNonlinearFamily;
+}
+
+function isCustomNonlinearRegressionModelComparisonQuestion(lower) {
+  const wantsComparison = lower.includes("compare") ||
+    lower.includes("model comparison") ||
+    lower.includes("best model") ||
+    lower.includes("select model") ||
+    lower.includes("model averaging") ||
+    lower.includes("model-averaging");
+  const namesCustom = lower.includes("custom nonlinear") ||
+    lower.includes("custom regression") ||
+    lower.includes("custom models") ||
+    lower.includes("formulas=");
+  const hasMultipleFormulas = lower.includes("formulas=") ||
+    lower.includes("formulas:") ||
+    /\bformula\s*1\s*[:=]/.test(lower) ||
+    /\bmodel\s*1\s*[:=]/.test(lower);
+  return wantsComparison && namesCustom && hasMultipleFormulas;
 }
 
 function isCustomNonlinearRegressionQuestion(lower) {
