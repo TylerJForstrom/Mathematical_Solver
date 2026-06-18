@@ -27,9 +27,12 @@ import {
   analyzeSimplification,
   analyzeStatistics,
   analyzeSystem,
+  analyzeTableau,
   analyzeTaylor,
   analyzeUniversal,
   analyzeVector,
+  evaluateLogic,
+  parseLogic,
   suggestProblemHelp,
 } from "./solver-engine.mjs";
 
@@ -82,6 +85,42 @@ runTest("logic mode converts to normal forms", () => {
   assert.equal(nnf.answer, "P and (not Q)");
   assert.equal(all.answer, "NNF: (not P or Q) and (P or not Q) or R; CNF: (not P or Q or R) and (P or not Q or R); DNF: not P and (not Q) or Q and P or R");
   assert.equal(analyzeUniversal("convert P -> Q to cnf").answer, "not P or Q");
+});
+
+runTest("semantic tableau decides satisfiability and validity", () => {
+  const tautology = analyzeTableau("P or not P");
+  assert.equal(tautology.answer, "satisfiable");
+  assert.equal(artifactValue(tautology, "Classification"), "tautology");
+  assert.equal(artifactValue(tautology, "Closed branches"), "0");
+
+  const syllogism = analyzeTableau("(P -> Q) and (Q -> R) -> (P -> R)");
+  assert.equal(artifactValue(syllogism, "Classification"), "tautology");
+
+  const contradiction = analyzeTableau("P and not P");
+  assert.equal(contradiction.answer, "unsatisfiable");
+  assert.equal(artifactValue(contradiction, "Classification"), "contradiction");
+  assert.equal(artifactValue(contradiction, "Open branches"), "0");
+  assert.equal(artifactValue(contradiction, "Satisfying assignment"), "none");
+
+  const contingent = analyzeTableau("(P or Q) and (not P or R)");
+  assert.equal(contingent.answer, "satisfiable");
+  assert.equal(artifactValue(contingent, "Classification"), "contingency");
+  // The model read off the open branch must satisfy the formula.
+  assert.ok(evaluateLogic(parseLogic("(P or Q) and (not P or R)"), contingent.assignment));
+
+  // Every formula's tableau verdict must agree with the brute-force truth table.
+  for (const formula of ["P iff not P", "P xor P", "not (P -> P)", "(P and Q) -> R", "P implies Q"]) {
+    const result = analyzeTableau(formula);
+    assert.equal(artifactValue(result, "Truth-table check"), `matches (${artifactValue(result, "Classification")})`);
+  }
+});
+
+runTest("universal Ask routes semantic tableau questions", () => {
+  const routed = analyzeUniversal("tableau P or Q");
+  assert.equal(routed.summary, "semantic tableau");
+  assert.equal(routed.answer, "satisfiable");
+  assert.equal(analyzeUniversal("semantic tableau P and not P").answer, "unsatisfiable");
+  assert.equal(analyzeUniversal("truth tree P or not P").answer, "satisfiable");
 });
 
 runTest("input assistant suggests structured problem formats", () => {

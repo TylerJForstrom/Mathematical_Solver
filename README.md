@@ -16,6 +16,9 @@ The frontend currently supports:
   XOR, and IFF rules
 - Logic normal forms: NNF, CNF, and DNF conversion with truth-table
   equivalence checks
+- Semantic tableaux (truth trees) that decide satisfiability and validity by
+  expanding alpha/beta rules, report open/closed branches with a model from any
+  open branch, and cross-check the verdict against the brute-force truth table
 - Algebra simplification with constants, like terms, Pythagorean identities,
   reciprocal trig functions, cofunction identities, double-angle rules,
   power-reduction/half-angle rewrites, and
@@ -259,6 +262,11 @@ The same idea works for algebra and calculus:
   returns `10 + 5i`.
 - `cnf P -> (Q and R)` rewrites a propositional tree into
   `(not P or Q) and (not P or R)` and verifies equivalence.
+- `tableau (P or Q) and (not P or R)` builds a semantic tableau (truth tree),
+  reports `satisfiable` with the open branches and a model, and cross-checks the
+  classification against the truth table. `semantic tableau` and `truth tree`
+  are accepted as aliases, and a formula such as `tableau P and not P` closes
+  every branch and is reported unsatisfiable.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
 - `solve nonlinear system x^2 + y^2 = 25; x - y = 1 guess x=3 y=2`
   numerically solves a square nonlinear system with Newton iterations.
@@ -580,10 +588,8 @@ These are good ways to make the project more impressive mathematically:
    truth-table row.
 13. Generate formal proof steps for tautologies using natural deduction or
    sequent calculus.
-14. Add semantic tableaux, which are also tree-based, to prove whether a
-   statement is satisfiable.
-15. Add Karnaugh maps for statements with two to four variables.
-16. Export expression trees to Graphviz DOT so the parse tree can be visualized.
-17. Add binary decision diagrams to represent equivalent formulas compactly.
-18. Add probability or fuzzy truth values so statements can evaluate beyond
+14. Add Karnaugh maps for statements with two to four variables.
+15. Export expression trees to Graphviz DOT so the parse tree can be visualized.
+16. Add binary decision diagrams to represent equivalent formulas compactly.
+17. Add probability or fuzzy truth values so statements can evaluate beyond
     simple true/false logic.

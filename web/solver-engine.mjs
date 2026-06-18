@@ -478,6 +478,241 @@ export function analyzeLogicNormalForm(statement) {
   };
 }
 
+export function analyzeTableau(statement) {
+  const tree = parseLogic(statement);
+  const variables = logicVariables(tree);
+
+  const satBranches = [];
+  expandTableau([tree], [], satBranches);
+  const validityBranches = [];
+  expandTableau([{ kind: "logicNot", operand: tree }], [], validityBranches);
+
+  const openBranches = satBranches.filter((branch) => branch.status === "open");
+  const satisfiable = openBranches.length > 0;
+  const valid = validityBranches.every((branch) => branch.status === "closed");
+
+  let classification = "contingency";
+  if (!satisfiable) classification = "contradiction";
+  else if (valid) classification = "tautology";
+
+  const truthTableName = classifyLogic(logicTruthTable(tree)).name;
+  const crossChecks = truthTableName === classification;
+
+  const steps = [
+    {
+      title: "Parse formula",
+      expression: logicToString(tree),
+      detail: "The formula becomes a propositional expression tree.",
+    },
+    {
+      title: "Expand tableau for the formula",
+      expression: `${openBranches.length} open / ${satBranches.length - openBranches.length} closed`,
+      detail:
+        "Alpha rules extend a branch; beta rules split it. A branch closes when it holds a " +
+        "literal and its negation. An open, fully expanded branch is a satisfying model.",
+    },
+    {
+      title: "Expand tableau for the negation",
+      expression: `${validityBranches.filter((b) => b.status === "open").length} open / ` +
+        `${validityBranches.filter((b) => b.status === "closed").length} closed`,
+      detail: valid
+        ? "Every branch of the negation closes, so the original formula is a tautology."
+        : "The negation has an open branch, so the original formula is not valid.",
+    },
+    {
+      title: "Cross-check with the truth table",
+      expression: crossChecks ? `matches (${truthTableName})` : `mismatch (${truthTableName})`,
+      detail: crossChecks
+        ? "The tableau verdict matches the brute-force truth-table classification."
+        : "The tableau verdict disagrees with the truth-table classification.",
+    },
+  ];
+
+  let assignment = null;
+  let assignmentText = "none";
+  if (satisfiable) {
+    assignment = {};
+    const open = openBranches[0];
+    for (const name of variables) {
+      assignment[name] = open.assigned[name] !== undefined ? open.assigned[name] : true;
+    }
+    assignmentText = formatAssignment(assignment);
+    steps.push({
+      title: "Read model from open branch",
+      expression: assignmentText,
+      detail: `Substituting this assignment evaluates the formula to ${formatTruth(evaluateLogic(tree, assignment))}.`,
+    });
+  }
+
+  const branchRows = satBranches.map((branch, index) => [
+    `B${index + 1}`,
+    branch.literals.length ? branch.literals.map(tableauLiteralText).join(", ") : "(empty)",
+    branch.status === "open" ? "open" : `closed (${branch.reason})`,
+  ]);
+
+  return {
+    mode: "logic",
+    tree,
+    answer: satisfiable ? "satisfiable" : "unsatisfiable",
+    summary: "semantic tableau",
+    details: `${classification}; ${openBranches.length} open / ${satBranches.length - openBranches.length} closed branches`,
+    variables,
+    assignment,
+    metrics: treeMetrics(tree),
+    steps,
+    table: {
+      headers: ["Branch", "Literals", "Status"],
+      rows: branchRows,
+    },
+    artifacts: [
+      ["Original formula", logicToString(tree)],
+      ["Satisfiable", satisfiable ? "yes" : "no"],
+      ["Classification", classification],
+      ["Open branches", String(openBranches.length)],
+      ["Closed branches", String(satBranches.length - openBranches.length)],
+      ["Satisfying assignment", assignmentText],
+      ["Truth-table check", crossChecks ? `matches (${truthTableName})` : `mismatch (${truthTableName})`],
+    ],
+  };
+}
+
+// Expand a semantic tableau, collecting fully developed branches as leaves.
+// `pending` holds formulas still to decompose; `literals` are the signed literals
+// already on this path; `branches` accumulates {literals, assigned, status, reason}.
+function expandTableau(pending, literals, branches) {
+  if (pending.length === 0) {
+    branches.push({
+      literals,
+      assigned: tableauAssignment(literals),
+      status: "open",
+    });
+    return;
+  }
+
+  const [formula, ...rest] = pending;
+  const rule = classifyTableauFormula(formula);
+
+  if (rule.type === "true") {
+    expandTableau(rest, literals, branches);
+    return;
+  }
+  if (rule.type === "false") {
+    branches.push({ literals, assigned: tableauAssignment(literals), status: "closed", reason: "false" });
+    return;
+  }
+  if (rule.type === "literal") {
+    const opposite = negateTableauLiteral(rule.literal);
+    if (literals.includes(opposite)) {
+      const name = tableauLiteralInfo(rule.literal).name;
+      branches.push({
+        literals: [...literals, rule.literal],
+        assigned: tableauAssignment(literals),
+        status: "closed",
+        reason: `${name} and not ${name}`,
+      });
+      return;
+    }
+    if (literals.includes(rule.literal)) {
+      expandTableau(rest, literals, branches); // already recorded on this branch
+      return;
+    }
+    expandTableau(rest, [...literals, rule.literal], branches);
+    return;
+  }
+  if (rule.type === "alpha") {
+    expandTableau([...rule.components, ...rest], literals, branches);
+    return;
+  }
+  // beta: the branch splits into two independent continuations
+  expandTableau([...rule.left, ...rest], literals, branches);
+  expandTableau([...rule.right, ...rest], literals, branches);
+}
+
+function classifyTableauFormula(node) {
+  if (node.kind === "logicConstant") {
+    return { type: node.value ? "true" : "false" };
+  }
+  if (node.kind === "logicVariable") {
+    return { type: "literal", literal: node.name };
+  }
+  if (node.kind === "logicNot") {
+    const inner = node.operand;
+    if (inner.kind === "logicConstant") {
+      return { type: inner.value ? "false" : "true" };
+    }
+    if (inner.kind === "logicVariable") {
+      return { type: "literal", literal: `-${inner.name}` };
+    }
+    if (inner.kind === "logicNot") {
+      return { type: "alpha", components: [inner.operand] };
+    }
+    if (inner.kind === "logicBinary") {
+      const { operator, left, right } = inner;
+      if (operator === "and") {
+        return { type: "beta", left: [tableauNot(left)], right: [tableauNot(right)] };
+      }
+      if (operator === "or") {
+        return { type: "alpha", components: [tableauNot(left), tableauNot(right)] };
+      }
+      if (operator === "implies") {
+        return { type: "alpha", components: [left, tableauNot(right)] };
+      }
+      if (operator === "iff") {
+        return { type: "beta", left: [left, tableauNot(right)], right: [tableauNot(left), right] };
+      }
+      if (operator === "xor") {
+        return { type: "beta", left: [left, right], right: [tableauNot(left), tableauNot(right)] };
+      }
+    }
+  }
+  if (node.kind === "logicBinary") {
+    const { operator, left, right } = node;
+    if (operator === "and") {
+      return { type: "alpha", components: [left, right] };
+    }
+    if (operator === "or") {
+      return { type: "beta", left: [left], right: [right] };
+    }
+    if (operator === "implies") {
+      return { type: "beta", left: [tableauNot(left)], right: [right] };
+    }
+    if (operator === "iff") {
+      return { type: "beta", left: [left, right], right: [tableauNot(left), tableauNot(right)] };
+    }
+    if (operator === "xor") {
+      return { type: "beta", left: [left, tableauNot(right)], right: [tableauNot(left), right] };
+    }
+  }
+  throw new Error("Semantic tableau cannot expand this formula.");
+}
+
+function tableauNot(node) {
+  return { kind: "logicNot", operand: node };
+}
+
+function negateTableauLiteral(literal) {
+  return literal.startsWith("-") ? literal.slice(1) : `-${literal}`;
+}
+
+function tableauLiteralInfo(literal) {
+  const negated = literal.startsWith("-");
+  return { name: negated ? literal.slice(1) : literal, negated, value: !negated };
+}
+
+function tableauLiteralText(literal) {
+  const info = tableauLiteralInfo(literal);
+  return info.negated ? `not ${info.name}` : info.name;
+}
+
+function tableauAssignment(literals) {
+  const assigned = {};
+  for (const literal of literals) {
+    const info = tableauLiteralInfo(literal);
+    assigned[info.name] = info.value;
+  }
+  return assigned;
+}
+
 export function analyzeSimplification(statement) {
   const trigRequest = extractExplicitTrigIdentityQuestion(statement);
   const parsed = parseMath(trigRequest?.expression ?? statement);
@@ -1787,6 +2022,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isInequalityQuestion(question)) {
     routed = analyzeInequality(question);
     routedLabel = "Inequality";
+  } else if (isTableauQuestion(lower)) {
+    routed = analyzeTableau(cleanTableauQuestion(question));
+    routedLabel = "Semantic tableau";
   } else if (isLogicSimplificationQuestion(lower)) {
     routed = analyzeLogicSimplification(cleanLogicSimplificationQuestion(question));
     routedLabel = "Logic simplification";
@@ -23275,6 +23513,15 @@ function isLogicNormalFormQuestion(lower) {
     lower.startsWith("normal forms ");
 }
 
+function isTableauQuestion(lower) {
+  const trimmed = lower.trim();
+  return /^(?:tableau|tableaux|tableau)\b/.test(trimmed) ||
+    trimmed.startsWith("semantic tableau") ||
+    trimmed.startsWith("analytic tableau") ||
+    trimmed.startsWith("truth tree ") ||
+    trimmed.startsWith("smullyan ");
+}
+
 function isSimplifyQuestion(lower) {
   return isTrigIdentityQuestion(lower) ||
     lower.includes("simplify") ||
@@ -23536,6 +23783,15 @@ function cleanLogicQuestion(question) {
 function cleanLogicSimplificationQuestion(question) {
   return question
     .replace(/^(simplify\s+(?:logic|boolean)|(?:logic|boolean)\s+simplify)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+}
+
+function cleanTableauQuestion(question) {
+  return question
+    .replace(/^(?:semantic|analytic|smullyan)\s+/i, "")
+    .replace(/^(?:tableaux?|truth\s+tree)\b[:\s]*/i, "")
+    .replace(/^(?:for|of)\s+/i, "")
     .replace(/[?!.]+$/, "")
     .trim();
 }
