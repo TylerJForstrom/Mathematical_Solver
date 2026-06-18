@@ -561,6 +561,24 @@ runTest("statistics mode validates custom nonlinear regression formula compariso
   assert.deepEqual(result.graphs.map((graph) => graph.expression), ["Model 1 best fit", "Model-averaged custom best fit", "AICc by custom nonlinear model", "LOOCV RMSE by custom nonlinear model", "3-fold RMSE by custom nonlinear model", "Holdout RMSE by custom nonlinear model"]);
 });
 
+runTest("statistics mode bootstraps custom nonlinear model comparisons", () => {
+  const statement = "compare custom nonlinear regression models formulas=a*exp(b*x) | c*x^d; x: 1,2,3,4,5,6; y: 2.1,3.9,8.2,15.7,32.4,63.5; params a=1,b=0.5,c=1,d=2; bounds a=0:10,b=0:2,c=0:10,d=0:4; multistart=3; kfold=3 holdout=0.33; bootstrap=60 seed=11; predict x=7";
+  const result = analyzeStatistics(statement);
+
+  assert.equal(result.details, "6 observations, 2 custom formulas, 3-fold CV, 2-point holdout, 60 bootstrap resamples");
+  assert.equal(result.answer, "best Model 1 by AICc: y = a*exp(b*x); averaged prediction = 126.41703; bootstrap 95% CI = [117.437363, 134.241906]");
+  assert.equal(artifactValue(result, "Bootstrap resamples"), "60");
+  assert.equal(artifactValue(result, "Bootstrap valid resamples"), "60");
+  assert.equal(artifactValue(result, "Bootstrap seed"), "11");
+  assert.equal(artifactValue(result, "Bootstrap mean averaged prediction"), "126.745325");
+  assert.equal(artifactValue(result, "Bootstrap 95% averaged prediction CI"), "[117.437363, 134.241906]");
+  assert.deepEqual(result.table.rows[0], ["Model 1", "y = a*exp(b*x)", "a=1.031596, b=0.686926", "0.373683", "0.999865", "-12.656641", "-8.656641", "-13.073122", "0", "0.999989", "0.793464", "0.556051", "1.066253", "0.696957", "2.28306", "2.179814", "126.417261", "fit in 11 iterations"]);
+  assert.equal(result.extraTables[1].title, "Bootstrap model uncertainty");
+  assert.deepEqual(result.extraTables[1].rows, [["Model 1", "60", "1", "0.991611"], ["Model 2", "0", "0", "0.008389"]]);
+  assert.equal(result.steps.at(-2).title, "Bootstrap model uncertainty");
+  assert.equal(analyzeUniversal(statement).summary, "custom nonlinear model comparison");
+});
+
 runTest("statistics mode computes multiple linear regression", () => {
   const result = analyzeStatistics("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
 

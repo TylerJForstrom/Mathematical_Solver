@@ -1425,6 +1425,10 @@ export function analyzeStatistics(statement) {
     return analyzePermutationTest(statement);
   }
 
+  if (isCustomNonlinearRegressionModelComparisonQuestion(lower)) {
+    return analyzeCustomNonlinearRegressionModelComparison(statement);
+  }
+
   if (lower.includes("bootstrap")) {
     return analyzeBootstrapInterval(statement);
   }
@@ -8132,6 +8136,9 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
   const prediction = Number.isFinite(request.prediction)
     ? customNonlinearModelAveragedPrediction(weightedViable, request.prediction)
     : null;
+  const bootstrap = request.bootstrap.resamples
+    ? bootstrapCustomNonlinearModelComparison(request, criterion)
+    : null;
   const averagedRows = customNonlinearModelAveragedRows(weightedViable, request);
   const bestGraph = buildNonlinearRegressionFitGraph(request.x, request.y, best);
   const averagedGraph = buildNonlinearRegressionFitGraph(request.x, request.y, {
@@ -8165,7 +8172,7 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
         ...weightedViable.map((model) => statsMetricNode(model.label, nonlinearRegressionCriterionValue(model, criterion))),
       ],
     },
-    answer: `best ${best.label} by ${criterion}: ${best.equation}${prediction ? `; averaged prediction = ${formatNumber(prediction.yHat)}` : ""}`,
+    answer: `best ${best.label} by ${criterion}: ${best.equation}${prediction ? `; averaged prediction = ${formatNumber(prediction.yHat)}` : ""}${bootstrap?.prediction ? `; bootstrap ${formatNumber(request.level * 100)}% CI = [${formatNumber(bootstrap.prediction.lower)}, ${formatNumber(bootstrap.prediction.upper)}]` : ""}`,
     summary: "custom nonlinear model comparison",
     details: customNonlinearComparisonDetails(request),
     variables: [],
@@ -8201,6 +8208,13 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
             detail: "The model-averaged prediction is the weighted mean of finite candidate predictions.",
           }]
         : []),
+      ...(bootstrap
+        ? [{
+            title: "Bootstrap model uncertainty",
+            expression: `${formatNumber(bootstrap.validResamples)} / ${formatNumber(bootstrap.resamples)} valid resamples`,
+            detail: "Bootstrap rows are sampled with replacement, every custom formula is refit, and model weights plus averaged predictions are recomputed.",
+          }]
+        : []),
       {
         title: "Select best custom model",
         expression: `${best.label}: ${best.equation}`,
@@ -8223,6 +8237,7 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
       ["LOOCV best RMSE", formatFiniteNumber(pickBestCustomNonlinearMetricModel(weightedViable, "loocvRmse", "loocvMae")?.loocvRmse)],
       ["LOOCV best MAE", formatFiniteNumber(pickBestCustomNonlinearMetricModel(weightedViable, "loocvRmse", "loocvMae")?.loocvMae)],
       ...requestedCustomNonlinearValidationArtifacts(weightedViable, request.validation),
+      ...customNonlinearBootstrapArtifacts(bootstrap, request),
       ...(prediction ? [
         ["Prediction x", formatNumber(prediction.x)],
         ["Best model prediction", formatFiniteNumber(best.prediction?.yHat)],
@@ -8231,11 +8246,14 @@ function analyzeCustomNonlinearRegressionModelComparison(statement) {
     ],
     graph: bestGraph,
     graphs: [bestGraph, averagedGraph, criterionGraph, loocvGraph, ...requestedValidationGraphs].filter(Boolean),
-    extraTables: [{
-      title: "Model-averaged fitted values",
-      headers: ["Obs", request.variable, "Actual", "Averaged fitted", "Residual"],
-      rows: averagedRows,
-    }],
+    extraTables: [
+      {
+        title: "Model-averaged fitted values",
+        headers: ["Obs", request.variable, "Actual", "Averaged fitted", "Residual"],
+        rows: averagedRows,
+      },
+      ...customNonlinearBootstrapExtraTables(bootstrap),
+    ],
   };
 }
 
@@ -8679,11 +8697,13 @@ function fitCustomNonlinearComparisonModel(request, entry, modelIndex) {
     const prediction = Number.isFinite(request.prediction)
       ? customNonlinearRegressionPrediction(modelRequest, fit.parameters, fit.covariance, request.prediction)
       : null;
-    const loocv = leaveOneOutCustomNonlinearValidation(modelRequest);
-    const kFold = request.validation.kFold
+    const loocv = request.skipValidation
+      ? emptyValidationScore()
+      : leaveOneOutCustomNonlinearValidation(modelRequest);
+    const kFold = !request.skipValidation && request.validation.kFold
       ? kFoldCustomNonlinearValidation(modelRequest, request.validation.kFold)
       : null;
-    const holdout = request.validation.holdoutCount
+    const holdout = !request.skipValidation && request.validation.holdoutCount
       ? holdoutCustomNonlinearValidation(modelRequest, request.validation.holdoutCount)
       : null;
     return {
@@ -8825,6 +8845,9 @@ function customNonlinearComparisonDetails(request) {
   if (request.validation.holdoutCount) {
     validationDetails.push(`${request.validation.holdoutCount}-point holdout`);
   }
+  if (request.bootstrap.resamples) {
+    validationDetails.push(`${request.bootstrap.resamples} bootstrap resamples`);
+  }
   return [
     `${request.x.length} observations`,
     `${request.entries.length} custom formulas`,
@@ -8961,6 +8984,118 @@ function buildCustomNonlinearValidationMetricGraph(models, metricKey, expression
       },
     ],
   };
+}
+
+function bootstrapCustomNonlinearModelComparison(request, criterion) {
+  const random = seededRandom(request.bootstrap.seed);
+  const bestCounts = new Map(request.entries.map((entry, index) => [index + 1, 0]));
+  const weightSums = new Map(request.entries.map((entry, index) => [index + 1, 0]));
+  const predictions = [];
+  let validResamples = 0;
+
+  for (let resample = 0; resample < request.bootstrap.resamples; resample += 1) {
+    const indices = Array.from({ length: request.x.length }, () => Math.floor(random() * request.x.length));
+    const bootstrapRequest = {
+      ...request,
+      x: indices.map((index) => request.x[index]),
+      y: indices.map((index) => request.y[index]),
+      validation: { kFold: null, holdoutCount: null },
+      bootstrap: { resamples: 0, seed: request.bootstrap.seed },
+      skipValidation: true,
+    };
+    const models = request.entries.map((entry, index) =>
+      fitCustomNonlinearComparisonModel(bootstrapRequest, entry, index + 1),
+    );
+    const viableModels = models.filter((model) => model.viable);
+    if (viableModels.length < 2) {
+      continue;
+    }
+
+    let bootstrapCriterion;
+    try {
+      bootstrapCriterion = selectCustomNonlinearComparisonCriterion(viableModels, criterion);
+    } catch {
+      continue;
+    }
+    const weightedModels = applyNonlinearComparisonWeights(models, bootstrapCriterion);
+    const weightedViable = weightedModels.filter((model) => model.viable);
+    if (weightedViable.length < 2) {
+      continue;
+    }
+
+    const best = pickBestNonlinearRegressionModel(weightedViable, bootstrapCriterion);
+    bestCounts.set(best.modelIndex, (bestCounts.get(best.modelIndex) ?? 0) + 1);
+    for (const model of weightedViable) {
+      if (Number.isFinite(model.weight)) {
+        weightSums.set(model.modelIndex, (weightSums.get(model.modelIndex) ?? 0) + model.weight);
+      }
+    }
+    if (Number.isFinite(request.prediction)) {
+      const prediction = customNonlinearModelAveragedPrediction(weightedViable, request.prediction);
+      if (prediction) {
+        predictions.push(prediction.yHat);
+      }
+    }
+    validResamples += 1;
+  }
+
+  const sortedPredictions = [...predictions].sort((left, right) => left - right);
+  const alpha = (1 - request.level) / 2;
+  return {
+    resamples: request.bootstrap.resamples,
+    validResamples,
+    seed: request.bootstrap.seed,
+    prediction: sortedPredictions.length
+      ? {
+          x: request.prediction,
+          mean: normalizeNumber(mean(sortedPredictions)),
+          lower: percentileFromSorted(sortedPredictions, alpha),
+          upper: percentileFromSorted(sortedPredictions, 1 - alpha),
+        }
+      : null,
+    modelRows: request.entries.map((entry, index) => {
+      const modelIndex = index + 1;
+      const count = bestCounts.get(modelIndex) ?? 0;
+      return {
+        label: entry.label,
+        selected: count,
+        selectionRate: validResamples ? normalizeNumber(count / validResamples) : Number.NaN,
+        meanWeight: validResamples ? normalizeNumber((weightSums.get(modelIndex) ?? 0) / validResamples) : Number.NaN,
+      };
+    }),
+  };
+}
+
+function customNonlinearBootstrapArtifacts(bootstrap, request) {
+  if (!bootstrap) {
+    return [];
+  }
+  const percent = formatNumber(request.level * 100);
+  return [
+    ["Bootstrap resamples", formatNumber(bootstrap.resamples)],
+    ["Bootstrap valid resamples", formatNumber(bootstrap.validResamples)],
+    ["Bootstrap seed", formatNumber(bootstrap.seed)],
+    ...(bootstrap.prediction ? [
+      ["Bootstrap mean averaged prediction", formatNumber(bootstrap.prediction.mean)],
+      [`Bootstrap ${percent}% averaged prediction CI`, `[${formatNumber(bootstrap.prediction.lower)}, ${formatNumber(bootstrap.prediction.upper)}]`],
+    ] : []),
+  ];
+}
+
+function customNonlinearBootstrapExtraTables(bootstrap) {
+  if (!bootstrap) {
+    return [];
+  }
+  return [{
+    title: "Bootstrap model uncertainty",
+    headers: ["Model", "Selected", "Selection rate", "Mean weight"],
+    rows: bootstrap.modelRows.map((row) => [
+      row.label,
+      formatNumber(row.selected),
+      formatFiniteNumber(row.selectionRate),
+      formatFiniteNumber(row.meanWeight),
+    ]),
+  }];
 }
 
 function customNonlinearWeightedPrediction(models, x) {
@@ -20922,7 +21057,7 @@ function parseXYLists(text) {
 }
 
 function cleanLabeledListChunk(text) {
-  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty|families?|models?|formula|equation|params?|starts?|initial|bounds?|multistart|multi-start|restarts?|startcount|k\s*[- ]?\s*fold|kfold|folds?|holdout|test(?:\s*size)?|validation(?:\s*(?:size|split))?|val\s*split|split)\b/i);
+  const optionIndex = text.search(/\b(?:degrees?|deg|predict|prediction|confidence|level|lambda|alpha|penalty|families?|models?|formula|equation|params?|starts?|initial|bounds?|multistart|multi-start|restarts?|startcount|bootstrap|boot|resamples|samples|reps|seed|k\s*[- ]?\s*fold|kfold|folds?|holdout|test(?:\s*size)?|validation(?:\s*(?:size|split))?|val\s*split|split)\b/i);
   return optionIndex >= 0 ? text.slice(0, optionIndex) : text;
 }
 
@@ -21172,6 +21307,7 @@ function parseCustomNonlinearRegressionModelComparisonInput(text) {
     variable,
     criterion: parseCustomComparisonCriterion(text),
     validation: parseRegressionModelComparisonValidation(text, pairs.length),
+    bootstrap: parseCustomComparisonBootstrap(text),
     level: parseConfidenceLevel(text, 0.95),
     maxIterations,
     tolerance,
@@ -21184,7 +21320,7 @@ function parseCustomNonlinearRegressionModelComparisonInput(text) {
 }
 
 function parseCustomComparisonFormulaSpec(text) {
-  const joined = text.match(/\b(?:formulas|candidate\s+formulas|custom\s+models)\s*[:=]\s*(.+?)(?=\s*(?:;\s*)?\b(?:x|y|params?|starts?|initial|bounds?|multistart|multi-start|restarts?|startcount|predict(?:ion)?|confidence|level|tol|tolerance|iterations|maxiterations|maxiter|criterion|average|averaging)\b\s*[:=]|$)/i);
+  const joined = text.match(/\b(?:formulas|candidate\s+formulas|custom\s+models)\s*[:=]\s*(.+?)(?=\s*(?:;\s*)?\b(?:x|y|params?|starts?|initial|bounds?|multistart|multi-start|restarts?|startcount|bootstrap|boot|resamples|samples|reps|seed|predict(?:ion)?|confidence|level|tol|tolerance|iterations|maxiterations|maxiter|criterion|average|averaging)\b\s*[:=]|$)/i);
   if (joined) {
     const entries = splitCustomComparisonFormulas(joined[1]);
     return {
@@ -21223,6 +21359,23 @@ function normalizeCustomComparisonFormulaEntry(raw, index) {
 function parseCustomComparisonCriterion(text) {
   const match = text.match(/\bcriterion\s*[:=]\s*(aicc|aic|bic)\b/i);
   return match ? match[1].toUpperCase() : "";
+}
+
+function parseCustomComparisonBootstrap(text) {
+  const keyword = /\b(?:bootstrap|bootstrapped)\b/i.test(text);
+  const match = text.match(/\b(?:bootstrap|boot|resamples|samples|reps)\s*=?\s*(\d+)\b/i);
+  if (!keyword && !match) {
+    return { resamples: 0, seed: readNamedNumber(text, ["seed"], 12345) };
+  }
+  const resamples = match ? Number(match[1]) : 200;
+  if (!Number.isSafeInteger(resamples) || resamples < 20 || resamples > 5000) {
+    throw new Error("Custom nonlinear model comparison bootstrap resamples must be an integer from 20 through 5000.");
+  }
+  const seed = readNamedNumber(text, ["seed"], 12345);
+  if (!Number.isSafeInteger(seed)) {
+    throw new Error("Custom nonlinear model comparison bootstrap seed must be an integer.");
+  }
+  return { resamples, seed };
 }
 
 function parseCustomNonlinearRegressionInput(text) {
@@ -21366,7 +21519,7 @@ function parseCustomRegressionBounds(text, parameterNames) {
 }
 
 function extractCustomRegressionOptionChunk(text, labelPattern) {
-  const optionPattern = "(?:x|y|formula|equation|model|params?|starts?|initial|bounds?|multistart|multi-start|restarts?|startcount|predict(?:ion)?|confidence|level|tol|tolerance|iterations|maxiterations|maxiter|variable|var|input)";
+  const optionPattern = "(?:x|y|formula|equation|model|params?|starts?|initial|bounds?|multistart|multi-start|restarts?|startcount|bootstrap|boot|resamples|samples|reps|seed|predict(?:ion)?|confidence|level|tol|tolerance|iterations|maxiterations|maxiter|variable|var|input)";
   const match = text.match(new RegExp(`\\b(?:${labelPattern})\\b\\s*[:=]?\\s*(.+?)(?=\\s*(?:;\\s*)?\\b${optionPattern}\\b\\s*[:=]|$)`, "i"));
   return match ? match[1] : "";
 }
