@@ -3675,41 +3675,48 @@ export function analyzeNumerical(statement) {
     },
   ];
 
-  let root;
+  let result;
   let summary;
   if (request.method === "newton") {
-    root = newtonRoot(evaluator, request.guess);
+    result = newtonRootTrace(evaluator, request.guess);
     summary = "Newton root";
     steps.push({
       title: "Apply Newton's method",
-      expression: `${request.variable} ~= ${formatNumber(root)}`,
+      expression: `${request.variable} ~= ${formatNumber(result.root)}`,
       detail: "Newton's method repeatedly follows tangent lines toward a root.",
     });
   } else {
-    root = bisectionRoot(evaluator, request.low, request.high);
+    result = bisectionRootTrace(evaluator, request.low, request.high);
     summary = "bisection root";
     steps.push({
       title: "Apply bisection",
-      expression: `${request.variable} ~= ${formatNumber(root)}`,
+      expression: `${request.variable} ~= ${formatNumber(result.root)}`,
       detail: "Bisection repeatedly halves an interval where the function changes sign.",
     });
   }
 
+  const graph = buildRootIterationGraph(evaluator, request, result);
   return {
     mode: "numerical",
     tree: expression,
-    answer: `${request.variable} ~= ${formatNumber(root)}`,
+    answer: `${request.variable} ~= ${formatNumber(result.root)}`,
     summary,
-    details: "Numerical root approximation",
+    details: "Numerical root approximation with iteration trace",
     variables: mathVariables(expression),
     metrics: treeMetrics(expression),
     steps,
+    table: rootIterationTable(request, result),
     artifacts: [
       ["Method", request.method],
       ["Function", request.expression],
-      ["Root", `${request.variable} ~= ${formatNumber(root)}`],
-      ["f(root)", formatNumber(evaluator(root))],
+      ...(request.method === "newton"
+        ? [["Initial guess", formatNumber(request.guess)]]
+        : [["Initial bracket", `[${formatNumber(request.low)}, ${formatNumber(request.high)}]`]]),
+      ["Iterations", formatNumber(result.iterations.length)],
+      ["Root", `${request.variable} ~= ${formatNumber(result.root)}`],
+      ["f(root)", formatNumber(evaluator(result.root))],
     ],
+    ...(graph ? { graph } : {}),
   };
 }
 
@@ -16030,21 +16037,170 @@ function solveNumericalOde(request, expression) {
   };
 }
 
-function newtonRoot(evaluator, initialGuess) {
-  let x = initialGuess;
-  for (let index = 0; index < 40; index += 1) {
-    const y = evaluator(x);
-    if (Math.abs(y) < 1e-9) return normalizeNumber(x);
-    const derivative = numericDerivative(evaluator, x);
-    if (nearlyEqual(derivative, 0)) {
-      throw new Error("Newton's method hit a flat slope; try a different guess.");
+function rootIterationTable(request, result) {
+  const rows = visibleRootIterations(result.iterations);
+  if (request.method === "newton") {
+    return {
+      headers: ["Iter", request.variable, "f(x)", "f'(x)", "Next x"],
+      rows: rows.map((row) => row.iteration === "..."
+        ? ["...", "...", "...", "...", "..."]
+        : [
+            String(row.iteration),
+            formatNumber(row.x),
+            formatNumber(row.y),
+            formatOptionalNumber(row.slope),
+            formatOptionalNumber(row.next),
+          ]),
+    };
+  }
+
+  return {
+    headers: ["Iter", "Low", "High", "Mid", "f(mid)"],
+    rows: rows.map((row) => row.iteration === "..."
+      ? ["...", "...", "...", "...", "..."]
+      : [
+          String(row.iteration),
+          formatNumber(row.low),
+          formatNumber(row.high),
+          formatNumber(row.mid),
+          formatNumber(row.y),
+        ]),
+  };
+}
+
+function visibleRootIterations(iterations) {
+  if (iterations.length <= 22) {
+    return iterations;
+  }
+  return [
+    ...iterations.slice(0, 20),
+    { iteration: "..." },
+    iterations[iterations.length - 1],
+  ];
+}
+
+function buildRootIterationGraph(evaluator, request, result) {
+  const xMarkers = request.method === "newton"
+    ? result.iterations.flatMap((row) => [row.x, row.next])
+    : result.iterations.flatMap((row) => [row.low, row.high, row.mid]);
+  xMarkers.push(result.root);
+  const finiteXMarkers = xMarkers.filter(Number.isFinite);
+  if (finiteXMarkers.length === 0) {
+    return null;
+  }
+
+  const rawXMin = Math.min(...finiteXMarkers);
+  const rawXMax = Math.max(...finiteXMarkers);
+  const rawSpan = rawXMax - rawXMin;
+  const span = rawSpan > 0 ? rawSpan : Math.max(1, Math.abs(rawXMin) * 0.5);
+  const xMin = normalizeNumber(rawXMin - span * 0.25);
+  const xMax = normalizeNumber(rawXMax + span * 0.25);
+  const functionPoints = sampleNumericFunction(evaluator, xMin, xMax, 121);
+  if (functionPoints.length < 2) {
+    return null;
+  }
+
+  const iterationPoints = result.iterations
+    .map((row) => ({
+      x: request.method === "newton" ? row.x : row.mid,
+      y: row.y,
+    }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  const tangentLines = request.method === "newton"
+    ? result.iterations
+        .filter((row) => Number.isFinite(row.x) && Number.isFinite(row.y) && Number.isFinite(row.next))
+        .slice(0, 6)
+        .map((row, index) => ({
+          label: index === 0 ? "Newton tangent steps" : "",
+          className: "graph-line-muted",
+          points: [
+            { x: row.x, y: row.y },
+            { x: row.next, y: 0 },
+          ],
+        }))
+    : [];
+  const allYValues = [
+    0,
+    ...functionPoints.map((point) => point.y),
+    ...iterationPoints.map((point) => point.y),
+    ...tangentLines.flatMap((series) => series.points.map((point) => point.y)),
+  ];
+
+  return {
+    expression: `f(${request.variable}) = ${request.expression}`,
+    kind: "root-iterations",
+    scatterLabel: "Iterations",
+    xMin,
+    xMax,
+    yMin: Math.min(...allYValues),
+    yMax: Math.max(...allYValues),
+    points: functionPoints,
+    scatter: iterationPoints,
+    lines: [
+      { label: "f(x)", points: functionPoints },
+      ...tangentLines,
+    ],
+  };
+}
+
+function sampleNumericFunction(evaluator, xMin, xMax, count) {
+  const points = [];
+  for (let index = 0; index < count; index += 1) {
+    const x = xMin + ((xMax - xMin) * index) / (count - 1);
+    let y = Number.NaN;
+    try {
+      y = evaluator(x);
+    } catch {
+      y = Number.NaN;
     }
-    x -= y / derivative;
-    if (!Number.isFinite(x)) {
-      throw new Error("Newton's method diverged; try bisection with an interval.");
+    if (Number.isFinite(y)) {
+      points.push({ x: normalizeNumber(x), y: normalizeNumber(y) });
     }
   }
-  return normalizeNumber(x);
+  return points;
+}
+
+function formatOptionalNumber(value) {
+  return Number.isFinite(value) ? formatNumber(value) : "";
+}
+
+function newtonRootTrace(evaluator, initialGuess) {
+  let x = initialGuess;
+  const iterations = [];
+  for (let index = 0; index < 40; index += 1) {
+    const y = evaluator(x);
+    if (!Number.isFinite(y)) {
+      throw new Error("Newton's method hit a non-finite function value; try a different guess.");
+    }
+    const row = {
+      iteration: index,
+      x: normalizeNumber(x),
+      y: normalizeNumber(y),
+      slope: Number.NaN,
+      next: Number.NaN,
+    };
+    iterations.push(row);
+    if (Math.abs(y) < 1e-9) {
+      return { root: normalizeNumber(x), iterations };
+    }
+
+    const derivative = numericDerivative(evaluator, x);
+    if (!Number.isFinite(derivative) || nearlyEqual(derivative, 0)) {
+      throw new Error("Newton's method hit a flat slope; try a different guess.");
+    }
+    const next = x - y / derivative;
+    if (!Number.isFinite(next)) {
+      throw new Error("Newton's method diverged; try bisection with an interval.");
+    }
+    row.slope = normalizeNumber(derivative);
+    row.next = normalizeNumber(next);
+    x = next;
+  }
+  return { root: normalizeNumber(x), iterations };
+}
+
+function newtonRoot(evaluator, initialGuess) {
+  return newtonRootTrace(evaluator, initialGuess).root;
 }
 
 function numericDerivative(evaluator, x) {
@@ -16052,18 +16208,47 @@ function numericDerivative(evaluator, x) {
   return (evaluator(x + h) - evaluator(x - h)) / (2 * h);
 }
 
-function bisectionRoot(evaluator, lowStart, highStart) {
+function bisectionRootTrace(evaluator, lowStart, highStart) {
   let low = lowStart;
   let high = highStart;
   let lowValue = evaluator(low);
   let highValue = evaluator(high);
+  if (!Number.isFinite(lowValue) || !Number.isFinite(highValue)) {
+    throw new Error("Bisection needs finite function values at the interval endpoints.");
+  }
+  if (Math.abs(lowValue) < 1e-9) {
+    return {
+      root: normalizeNumber(low),
+      iterations: [{ iteration: 0, low: normalizeNumber(low), high: normalizeNumber(high), mid: normalizeNumber(low), y: normalizeNumber(lowValue) }],
+    };
+  }
+  if (Math.abs(highValue) < 1e-9) {
+    return {
+      root: normalizeNumber(high),
+      iterations: [{ iteration: 0, low: normalizeNumber(low), high: normalizeNumber(high), mid: normalizeNumber(high), y: normalizeNumber(highValue) }],
+    };
+  }
   if (lowValue * highValue > 0) {
     throw new Error("Bisection needs an interval where the function changes sign.");
   }
-  for (let index = 0; index < 80; index += 1) {
+
+  const iterations = [];
+  for (let index = 1; index <= 80; index += 1) {
     const mid = (low + high) / 2;
     const midValue = evaluator(mid);
-    if (Math.abs(midValue) < 1e-9) return normalizeNumber(mid);
+    if (!Number.isFinite(midValue)) {
+      throw new Error("Bisection hit a non-finite midpoint value.");
+    }
+    iterations.push({
+      iteration: index,
+      low: normalizeNumber(low),
+      high: normalizeNumber(high),
+      mid: normalizeNumber(mid),
+      y: normalizeNumber(midValue),
+    });
+    if (Math.abs(midValue) < 1e-9) {
+      return { root: normalizeNumber(mid), iterations };
+    }
     if (lowValue * midValue < 0) {
       high = mid;
       highValue = midValue;
@@ -16072,7 +16257,11 @@ function bisectionRoot(evaluator, lowStart, highStart) {
       lowValue = midValue;
     }
   }
-  return normalizeNumber((low + high) / 2);
+  return { root: normalizeNumber((low + high) / 2), iterations };
+}
+
+function bisectionRoot(evaluator, lowStart, highStart) {
+  return bisectionRootTrace(evaluator, lowStart, highStart).root;
 }
 
 function descriptiveSummary(values) {

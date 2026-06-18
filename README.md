@@ -157,7 +157,8 @@ The frontend currently supports:
   omega squared, rank-biserial correlation, epsilon squared, Cohen's w,
   Bonferroni-adjusted ANOVA pairwise comparisons, and Dunn-style rank
   comparisons
-- Newton and bisection numerical root solvers
+- Newton and bisection numerical root solvers with iteration tables and
+  root-finding graphs
 - Simpson's rule and trapezoidal-rule numerical integration
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
@@ -291,6 +292,10 @@ The same idea works for algebra and calculus:
   finds the tangent slope, and overlays the line `y = 4x - 4`.
 - `fourier series x from -pi to pi order=5` estimates Fourier coefficients
   and plots the fifth-order partial sum.
+- `newton x^3 - x - 2 guess=1` follows tangent-line iterations toward a root
+  and plots the function, iteration points, and Newton tangent steps.
+- `bisection x^2 - 4 interval 0 3` tracks midpoint brackets and plots the
+  root-finding iterations.
 - `simpson integrate sin(x) from 0 to pi n=100` approximates a definite
   integral numerically and returns `integral ~= 2`.
 - `ode dy/dt = 0.3y y0=2 t=5`, `newton cooling ambient=70 initial=100 k=0.2 t=10`,
@@ -503,7 +508,8 @@ The demo includes:
   approximation, and dominant eigenpair approximation,
   polynomial/elementary integrals, optimization, linear programming,
   vector geometry, geometry formulas, sequences/series, graphing with tangent
-  overlays, differential equations, numerical roots, numerical integration, and numerical ODEs
+  overlays, differential equations, numerical roots with iteration graphs,
+  numerical integration, and numerical ODEs
   through Ask mode
 - Step-by-step explanation cards
 - Tree complexity metrics
@@ -535,7 +541,7 @@ These are good ways to make the project more impressive mathematically:
    irreducible quadratic partial fractions.
 5. Add more exact rank-test variants and confidence intervals for additional effect sizes.
 6. Add nonsymmetric eigenvector approximations beyond 2x2 and larger complex eigenvalue algorithms.
-7. Add graphing for root-finding iterations and more regression diagnostics.
+7. Add more regression diagnostics plots and model-comparison visuals.
 8. Add nonlinear systems of differential equations, nullclines, and richer
    phase-plane plotting.
 9. Add multi-step natural-language explanations for word problems.

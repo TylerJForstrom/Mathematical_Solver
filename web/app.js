@@ -330,7 +330,7 @@ function renderGraph(graph) {
     .map((point) => `<circle class="graph-point" cx="${mapX(point.x).toFixed(2)}" cy="${mapY(point.y).toFixed(2)}" r="4.6"></circle>`)
     .join("");
   const legendItems = [
-    ...(scatterPoints.length ? ["Data"] : []),
+    ...(scatterPoints.length ? [graph.scatterLabel ?? "Data"] : []),
     ...areaSeries.map((series) => series.label).filter(Boolean),
     ...lineSeries.map((series) => series.label).filter(Boolean),
   ];
@@ -343,7 +343,9 @@ function renderGraph(graph) {
     ? "Statistical graph"
     : graph.kind === "distribution"
       ? "Probability distribution graph"
-      : "Function graph";
+      : graph.kind === "root-iterations"
+        ? "Root-finding graph"
+        : "Function graph";
 
   return `
     <div class="graph-card" aria-label="${graphLabel}">

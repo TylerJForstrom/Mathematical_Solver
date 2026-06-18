@@ -1380,6 +1380,11 @@ runTest("numerical mode runs Newton's method", () => {
 
   assert.equal(result.summary, "Newton root");
   assert.equal(result.answer, "x ~= 1.52138");
+  assert.equal(result.graph.kind, "root-iterations");
+  assert.equal(result.graph.scatterLabel, "Iterations");
+  assert.ok(result.graph.lines.some((series) => series.label === "Newton tangent steps"));
+  assert.equal(result.table.headers.join(","), "Iter,x,f(x),f'(x),Next x");
+  assert.ok(Number(artifactValue(result, "Iterations")) > 3);
 });
 
 runTest("numerical mode runs bisection", () => {
@@ -1387,6 +1392,11 @@ runTest("numerical mode runs bisection", () => {
 
   assert.equal(result.summary, "bisection root");
   assert.equal(result.answer, "x ~= 2");
+  assert.equal(result.graph.kind, "root-iterations");
+  assert.equal(result.graph.scatterLabel, "Iterations");
+  assert.equal(result.table.headers.join(","), "Iter,Low,High,Mid,f(mid)");
+  assert.equal(artifactValue(result, "Initial bracket"), "[0, 3]");
+  assert.ok(Number(artifactValue(result, "Iterations")) > 20);
 });
 
 runTest("numerical mode computes quadrature rules", () => {
