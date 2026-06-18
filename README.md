@@ -13,6 +13,7 @@ The frontend currently supports:
 - Propositional logic evaluation, truth tables, DPLL SAT solving, and semantic
   tableaux proof trees
 - Karnaugh maps for two- to four-variable Boolean minimization
+- Reduced ordered binary decision diagrams for compact Boolean representations
 - Graphviz DOT export for parsed math and logic expression trees
 - Boolean algebra simplification with identity, domination, complement,
   idempotent, absorption, consensus, De Morgan, double-negation, implication,
@@ -273,6 +274,8 @@ The same idea works for algebra and calculus:
   concrete satisfying assignments.
 - `kmap P or Q` lays out a Gray-code Karnaugh map, groups adjacent 1-cells,
   and returns the simplified sum-of-products form.
+- `bdd (P and Q) or (P and R)` builds a reduced ordered binary decision
+  diagram with merged subgraphs, satisfying paths, and Graphviz DOT output.
 - `dot tree x^2 + 2x + 1` exports the parsed expression tree as Graphviz DOT
   with node and edge tables.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
@@ -515,6 +518,7 @@ The demo includes:
 - DPLL SAT solving and logic normal forms through Ask mode
 - Semantic tableaux / truth-tree proofs through Ask mode
 - Karnaugh-map simplification through Ask mode
+- Reduced ordered BDDs through Ask mode
 - Graphviz DOT tree export through Ask mode
 - Number theory and modular arithmetic through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
@@ -616,6 +620,7 @@ These are good ways to make the project more impressive mathematically:
    annotations for classroom-style derivations.
 15. Add rendered Karnaugh-map group overlays and optional don't-care cells.
 16. Add one-click SVG or PNG rendering for exported Graphviz parse trees.
-17. Add binary decision diagrams to represent equivalent formulas compactly.
+17. Add Boolean operations directly on BDDs, including apply, restrict, and
+   variable reordering heuristics.
 18. Add probability or fuzzy truth values so statements can evaluate beyond
     simple true/false logic.

@@ -42,6 +42,19 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
 
   const suggestions = [
     {
+      title: "Binary decision diagram",
+      when: () => activeMode === "ask" && /\b(?:bdd|robdd|binary decision diagram|decision diagram)\b/.test(lower),
+      reason: "I detected a compact Boolean-decision-diagram request.",
+      needs: [
+        "A propositional statement using and, or, not, ->, xor, or iff",
+        "Use bdd or binary decision diagram to request a reduced ordered BDD",
+      ],
+      examples: [
+        ["BDD", "ask", "bdd (P and Q) or (P and R)"],
+        ["XOR BDD", "ask", "binary decision diagram P xor Q"],
+      ],
+    },
+    {
       title: "Graphviz tree export",
       when: () => activeMode === "ask" && /\b(?:graphviz|dot tree|tree dot|export tree|expression tree)\b/.test(lower),
       reason: "I detected an expression-tree export request.",
@@ -787,6 +800,93 @@ export function analyzeLogicKarnaughMap(statement) {
       ["Prime groups found", formatNumber(map.primeGroups.length)],
       ["Selected groups", selectedGroupText],
       ["Simplified SOP", simplified],
+    ],
+  };
+}
+
+export function analyzeLogicBdd(statement) {
+  const request = extractLogicBddQuestion(statement);
+  const tree = parseLogic(request.expression);
+  const variables = logicVariables(tree);
+  if (variables.length > 8) {
+    throw new Error("BDD mode currently supports up to eight variables.");
+  }
+
+  const bdd = buildReducedOrderedBdd(tree, variables);
+  const decisionNodes = [...bdd.nodes.values()].sort((left, right) => left.id - right.id);
+  const satisfyingPaths = enumerateBddTruePaths(bdd, variables);
+  const bddDot = bddToGraphvizDot(bdd);
+  const table = logicTruthTable(tree);
+  const equivalent = table.every((row) => evaluateBdd(bdd, row.assignment) === row.result);
+  const fullDecisionNodes = variables.length ? (2 ** variables.length) - 1 : 0;
+  const compression = fullDecisionNodes
+    ? `${formatNumber(decisionNodes.length)}/${formatNumber(fullDecisionNodes)} decision nodes`
+    : "constant function";
+  const rootText = formatBddNodeId(bdd.root);
+  const answer = bdd.root === 1
+    ? "reduced BDD root TRUE"
+    : bdd.root === 0
+      ? "reduced BDD root FALSE"
+      : `reduced BDD root ${rootText} with ${formatNumber(decisionNodes.length)} decision nodes`;
+
+  return {
+    mode: "logic",
+    tree,
+    answer,
+    summary: "Reduced ordered BDD",
+    details: `Canonical Boolean decision diagram in order ${variables.join(" < ") || "constant"}`,
+    variables,
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Parse logic statement",
+        expression: logicToString(tree),
+        detail: "The statement becomes a propositional expression tree.",
+      },
+      {
+        title: "Choose variable order",
+        expression: variables.join(" < ") || "no variables",
+        detail: "An ordered BDD tests variables in this fixed order along every root-to-terminal path.",
+      },
+      {
+        title: "Reduce decision graph",
+        expression: compression,
+        detail: "Equivalent subgraphs are merged and tests with identical low/high branches are removed.",
+      },
+      {
+        title: "Verify truth table",
+        expression: equivalent ? "equivalent" : "counterexample found",
+        detail: equivalent
+          ? "The reduced BDD evaluates to the same truth value as the original statement on every assignment."
+          : "The reduced BDD failed the truth-table equivalence check.",
+      },
+    ],
+    table: {
+      headers: ["Node", "Variable / value", "Low: false", "High: true"],
+      rows: bddNodeRows(bdd, decisionNodes),
+    },
+    extraTables: [{
+      title: "Satisfying BDD paths",
+      headers: ["Path", "Assignments", "Terminal"],
+      rows: satisfyingPaths.length
+        ? satisfyingPaths.map((path, index) => [
+            String(index + 1),
+            formatBddPath(path, variables),
+            "TRUE",
+          ])
+        : [["1", "none", "FALSE"]],
+    }],
+    artifacts: [
+      ["Original", logicToString(tree)],
+      ["Variable order", variables.join(" < ") || "constant"],
+      ["Root", rootText],
+      ["Decision nodes", formatNumber(decisionNodes.length)],
+      ["Total BDD nodes", formatNumber(decisionNodes.length + 2)],
+      ["Full decision tree nodes", formatNumber(fullDecisionNodes)],
+      ["Compression", compression],
+      ["Satisfying paths", formatNumber(satisfyingPaths.length)],
+      ["Equivalent truth table", equivalent ? "yes" : "no"],
+      ["BDD Graphviz DOT", bddDot],
     ],
   };
 }
@@ -2098,6 +2198,9 @@ export function analyzeUniversal(question, values = {}) {
   if (isMarkovQuestion(lower)) {
     routed = analyzeMarkovChain(question);
     routedLabel = "Markov chain";
+  } else if (isLogicBddQuestion(lower)) {
+    routed = analyzeLogicBdd(question);
+    routedLabel = "Binary decision diagram";
   } else if (isTreeExportQuestion(lower)) {
     routed = analyzeTreeExport(question);
     routedLabel = "Graphviz tree export";
@@ -25377,6 +25480,13 @@ function isTreeExportQuestion(lower) {
     /\b(?:parse|expression)\s+tree\s+(?:dot|graphviz|export)\b/.test(lower);
 }
 
+function isLogicBddQuestion(lower) {
+  return lower.startsWith("bdd ") ||
+    lower.startsWith("robdd ") ||
+    lower.startsWith("binary decision diagram ") ||
+    /\b(?:bdd|robdd|binary decision diagram|reduced ordered bdd|ordered bdd)\b/.test(lower);
+}
+
 function isLogicQuestion(question) {
   return /\b(and|or|not|xor|implies|iff)\b|->|<->|=>|&&|\|\|/i.test(question);
 }
@@ -25769,6 +25879,24 @@ function extractLogicKarnaughMapQuestion(question) {
 
   if (!expression) {
     throw new Error("Karnaugh-map mode needs a Boolean statement, such as kmap P or Q.");
+  }
+  return { expression };
+}
+
+function extractLogicBddQuestion(question) {
+  const expression = question
+    .replace(/[?!.]+$/, "")
+    .replace(/^(?:build|make|create|show|compute|reduce|draw)\s+(?:a\s+)?/i, "")
+    .replace(/^(?:reduced\s+ordered\s+)?(?:binary\s+decision\s+diagram|bdd|robdd|ordered\s+bdd)\s*:?\s*/i, "")
+    .replace(/\b(?:using|with|via)\s+(?:a\s+)?(?:reduced\s+ordered\s+)?(?:binary\s+decision\s+diagram|bdd|robdd|ordered\s+bdd)\b/gi, " ")
+    .replace(/\b(?:reduced\s+ordered\s+binary\s+decision\s+diagram|binary\s+decision\s+diagram|ordered\s+bdd|robdd|bdd)\b/gi, " ")
+    .replace(/\b(?:logic|boolean|propositional|expression|statement)\b/gi, " ")
+    .replace(/^\s*(?:of|for)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!expression) {
+    throw new Error("BDD mode needs a logic statement, such as bdd (P and Q) or (P and R).");
   }
   return { expression };
 }
@@ -27237,6 +27365,124 @@ function formatKarnaughMinterms(minterms, separator) {
 
 function formatKarnaughCell(cell) {
   return cell.value ? `1 m${cell.minterm}` : "0";
+}
+
+function buildReducedOrderedBdd(tree, variables) {
+  const nodes = new Map();
+  const unique = new Map();
+  let nextId = 2;
+
+  function build(index, assignment) {
+    if (index >= variables.length) {
+      return evaluateLogic(tree, assignment) ? 1 : 0;
+    }
+
+    const variable = variables[index];
+    const low = build(index + 1, { ...assignment, [variable]: false });
+    const high = build(index + 1, { ...assignment, [variable]: true });
+    if (low === high) {
+      return low;
+    }
+
+    const key = `${variable}|${low}|${high}`;
+    const existing = unique.get(key);
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const id = nextId++;
+    const node = { id, variable, low, high };
+    unique.set(key, id);
+    nodes.set(id, node);
+    return id;
+  }
+
+  return {
+    root: build(0, {}),
+    nodes,
+    variables,
+  };
+}
+
+function evaluateBdd(bdd, assignment) {
+  let current = bdd.root;
+  while (current !== 0 && current !== 1) {
+    const node = bdd.nodes.get(current);
+    current = assignment[node.variable] ? node.high : node.low;
+  }
+  return current === 1;
+}
+
+function enumerateBddTruePaths(bdd, variables) {
+  const paths = [];
+
+  function visit(id, assignment) {
+    if (id === 0) {
+      return;
+    }
+    if (id === 1) {
+      paths.push({ ...assignment });
+      return;
+    }
+
+    const node = bdd.nodes.get(id);
+    visit(node.low, { ...assignment, [node.variable]: false });
+    visit(node.high, { ...assignment, [node.variable]: true });
+  }
+
+  visit(bdd.root, {});
+  return paths.sort((left, right) => formatBddPath(left, variables).localeCompare(formatBddPath(right, variables)));
+}
+
+function bddNodeRows(bdd, decisionNodes) {
+  return [
+    ["T0", "false", "-", "-"],
+    ["T1", "true", "-", "-"],
+    ...decisionNodes.map((node) => [
+      formatBddNodeId(node.id),
+      node.variable,
+      formatBddNodeId(node.low),
+      formatBddNodeId(node.high),
+    ]),
+  ];
+}
+
+function formatBddPath(path, variables) {
+  const assignments = variables
+    .filter((variable) => path[variable] !== undefined)
+    .map((variable) => `${variable}=${formatTruth(path[variable])}`);
+  const skipped = variables
+    .filter((variable) => path[variable] === undefined)
+    .map((variable) => `${variable}=*`);
+  return [...assignments, ...skipped].join(", ") || "all assignments";
+}
+
+function formatBddNodeId(id) {
+  if (id === 0) return "T0";
+  if (id === 1) return "T1";
+  return `n${id}`;
+}
+
+function bddToGraphvizDot(bdd) {
+  const nodes = [...bdd.nodes.values()].sort((left, right) => left.id - right.id);
+  const lines = [
+    "digraph BinaryDecisionDiagram {",
+    "  graph [rankdir=TB, labelloc=\"t\", label=\"Reduced Ordered BDD\"];",
+    "  node [fontname=\"Inter\"];",
+    "  edge [fontname=\"Inter\"];",
+    "  T0 [label=\"false\", shape=box, style=\"rounded,filled\", fillcolor=\"#fee2e2\"];",
+    "  T1 [label=\"true\", shape=box, style=\"rounded,filled\", fillcolor=\"#dcfce7\"];",
+  ];
+
+  for (const node of nodes) {
+    lines.push(`  ${formatBddNodeId(node.id)} [label="${escapeDotLabel(node.variable)}", shape=circle, style=filled, fillcolor="#eff6ff"];`);
+  }
+  for (const node of nodes) {
+    lines.push(`  ${formatBddNodeId(node.id)} -> ${formatBddNodeId(node.low)} [label="0", style=dashed];`);
+    lines.push(`  ${formatBddNodeId(node.id)} -> ${formatBddNodeId(node.high)} [label="1"];`);
+  }
+  lines.push("}");
+  return lines.join("\n");
 }
 
 function parseTreeExportExpression(expression) {

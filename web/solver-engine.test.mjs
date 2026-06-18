@@ -15,6 +15,7 @@ import {
   analyzeLaplaceTransform,
   analyzeLimit,
   analyzeLogic,
+  analyzeLogicBdd,
   analyzeLogicKarnaughMap,
   analyzeLogicNormalForm,
   analyzeLogicSat,
@@ -145,6 +146,31 @@ runTest("logic mode builds Karnaugh maps", () => {
   assert.equal(analyzeUniversal("kmap P or Q").summary, "Karnaugh map");
 });
 
+runTest("logic mode builds reduced ordered BDDs", () => {
+  const result = analyzeLogicBdd("bdd (P and Q) or (P and R)");
+  const dot = artifactValue(result, "BDD Graphviz DOT");
+
+  assert.equal(result.summary, "Reduced ordered BDD");
+  assert.equal(result.answer, "reduced BDD root n4 with 3 decision nodes");
+  assert.deepEqual(result.table.rows, [
+    ["T0", "false", "-", "-"],
+    ["T1", "true", "-", "-"],
+    ["n2", "R", "T0", "T1"],
+    ["n3", "Q", "n2", "T1"],
+    ["n4", "P", "T0", "n3"],
+  ]);
+  assert.deepEqual(result.extraTables[0].rows, [
+    ["1", "P=true, Q=false, R=true", "TRUE"],
+    ["2", "P=true, Q=true, R=*", "TRUE"],
+  ]);
+  assert.equal(artifactValue(result, "Variable order"), "P < Q < R");
+  assert.equal(artifactValue(result, "Compression"), "3/7 decision nodes");
+  assert.equal(artifactValue(result, "Equivalent truth table"), "yes");
+  assert.ok(dot.startsWith("digraph BinaryDecisionDiagram"));
+  assert.ok(dot.includes("n4 -> T0"));
+  assert.equal(analyzeUniversal("bdd (P and Q) or (P and R)").summary, "Reduced ordered BDD");
+});
+
 runTest("tree export emits Graphviz DOT", () => {
   const math = analyzeTreeExport("dot tree x^2 + 2x + 1");
   const logic = analyzeTreeExport("graphviz tree P -> (Q or R)");
@@ -168,6 +194,10 @@ runTest("tree export emits Graphviz DOT", () => {
 });
 
 runTest("input assistant suggests structured problem formats", () => {
+  const bddHelp = suggestProblemHelp("binary decision diagram", "ask", "Need a logic statement.");
+  assert.equal(bddHelp.title, "Binary decision diagram");
+  assert.equal(bddHelp.examples[0][2], "bdd (P and Q) or (P and R)");
+
   const treeHelp = suggestProblemHelp("export expression tree", "ask", "Need an expression.");
   assert.equal(treeHelp.title, "Graphviz tree export");
   assert.equal(treeHelp.examples[0][2], "dot tree x^2 + 2x + 1");
