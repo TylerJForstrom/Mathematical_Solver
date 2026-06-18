@@ -936,21 +936,33 @@ export function analyzeLogicTruthValue(statement) {
   const request = extractLogicTruthValueQuestion(statement);
   const tree = parseLogic(request.expression);
   const variables = logicVariables(tree);
-  const assignment = resolveSoftLogicAssignments(variables, request.values);
+  const assignment = request.interval
+    ? resolveIntervalSoftLogicAssignments(variables, request.values)
+    : resolveSoftLogicAssignments(variables, request.values);
   const trace = [];
-  const result = evaluateSoftLogic(tree, assignment, request.kind, trace, request.tNorm);
+  const result = request.interval
+    ? evaluateIntervalSoftLogic(tree, assignment, trace, request.tNorm)
+    : evaluateSoftLogic(tree, assignment, request.kind, trace, request.tNorm);
   const semantics = request.kind === "probability"
     ? "independent probability"
-    : formatFuzzySemantics(request.tNorm);
+    : request.interval
+      ? `interval-valued ${formatFuzzySemantics(request.tNorm)}`
+      : formatFuzzySemantics(request.tNorm);
   const answer = request.kind === "probability"
     ? `probability = ${formatNumber(result)}`
-    : `fuzzy truth = ${formatNumber(result)}`;
+    : request.interval
+      ? `fuzzy truth interval = ${formatSoftTruthValue(result)}`
+      : `fuzzy truth = ${formatNumber(result)}`;
 
   return {
     mode: "logic",
     tree,
     answer,
-    summary: request.kind === "probability" ? "Probabilistic logic truth value" : "Fuzzy logic truth value",
+    summary: request.kind === "probability"
+      ? "Probabilistic logic truth value"
+      : request.interval
+        ? "Interval fuzzy logic truth value"
+        : "Fuzzy logic truth value",
     details: `${semantics} semantics`,
     variables,
     assignment,
@@ -964,14 +976,18 @@ export function analyzeLogicTruthValue(statement) {
       {
         title: "Read graded truth values",
         expression: formatSoftAssignment(assignment),
-        detail: "Each variable receives a value from 0 to 1 instead of only true or false.",
+        detail: request.interval
+          ? "Each variable receives a truth interval bounded between 0 and 1."
+          : "Each variable receives a value from 0 to 1 instead of only true or false.",
       },
       {
         title: "Evaluate graded operators",
         expression: answer,
         detail: request.kind === "probability"
           ? "Assuming independent variables, AND multiplies probabilities and OR uses inclusion-exclusion."
-          : fuzzyEvaluationDetail(request.tNorm),
+          : request.interval
+            ? `Interval arithmetic applies ${formatFuzzySemantics(request.tNorm)} to lower and upper truth bounds.`
+            : fuzzyEvaluationDetail(request.tNorm),
       },
     ],
     table: {
@@ -979,7 +995,7 @@ export function analyzeLogicTruthValue(statement) {
       rows: trace.map((entry) => [
         entry.expression,
         entry.rule,
-        formatNumber(entry.value),
+        formatSoftTruthValue(entry.value),
       ]),
     },
     artifacts: [
@@ -987,7 +1003,7 @@ export function analyzeLogicTruthValue(statement) {
       ["Semantics", semantics],
       ...(request.kind === "fuzzy" ? [["T-norm", request.tNorm]] : []),
       ["Assignments", formatSoftAssignment(assignment)],
-      ["Result", formatNumber(result)],
+      ["Result", formatSoftTruthValue(result)],
       ["Operator count", formatNumber(treeMetrics(tree).operators)],
     ],
   };
@@ -26044,16 +26060,24 @@ function extractLogicTruthValueQuestion(question) {
   const kind = /\b(?:probabilistic logic|probability logic|prob logic|independent probability)\b/.test(lower)
     ? "probability"
     : "fuzzy";
+  const interval = kind === "fuzzy" && (
+    hasSoftLogicIntervalAssignments(question) ||
+    /\b(?:interval[-\s]?valued|interval)\s+(?:fuzzy|truth|graded)\b/.test(lower) ||
+    /\b(?:fuzzy|truth|graded)\s+intervals?\b/.test(lower)
+  );
   const tNormRequest = kind === "fuzzy"
     ? extractFuzzyTNorm(question)
     : { text: question, tNorm: "minimum" };
-  const values = parseSoftLogicAssignments(question);
-  const expression = tNormRequest.text
+  const values = interval
+    ? parseIntervalSoftLogicAssignments(question)
+    : parseSoftLogicAssignments(question);
+  const expression = stripSoftLogicAssignments(tNormRequest.text)
     .replace(/[?!.]+$/, "")
-    .replace(/\b[A-Za-z_]\w*\s*(?:=|:)\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?\s*%?/gi, " ")
     .replace(/^(?:evaluate|compute|calculate|find|show)\s+(?:the\s+)?/i, "")
-    .replace(/^(?:fuzzy\s+logic|fuzzy|soft\s+logic|graded\s+truth|truth\s+values?|probabilistic\s+logic|probability\s+logic|prob\s+logic)\s*:?\s*/i, "")
-    .replace(/\b(?:using|with|given|where|values?|truth\s+values?|degrees?)\b/gi, " ")
+    .replace(/^(?:(?:interval[-\s]?valued|interval)\s+)?(?:fuzzy\s+logic|fuzzy|soft\s+logic|graded\s+truth|truth\s+values?|probabilistic\s+logic|probability\s+logic|prob\s+logic)\s*:?\s*/i, "")
+    .replace(/\b(?:using|with|given|where|values?|truth\s+values?|truth\s+intervals?|degrees?)\b/gi, " ")
+    .replace(/\b(?:interval[-\s]?valued|interval)\s+(?:fuzzy|truth|graded)\b/gi, " ")
+    .replace(/\b(?:fuzzy|truth|graded)\s+intervals?\b/gi, " ")
     .replace(/\b(?:fuzzy\s+logic|soft\s+logic|fuzzy|graded\s+truth|probabilistic\s+logic|probability\s+logic|prob\s+logic|independent\s+probability)\b/gi, " ")
     .replace(/\b(?:logic|boolean|propositional|expression|statement)\b/gi, " ")
     .replace(/^\s*(?:of|for)\s+/i, "")
@@ -26063,7 +26087,7 @@ function extractLogicTruthValueQuestion(question) {
   if (!expression) {
     throw new Error("Graded logic needs a statement, such as fuzzy logic P and Q with P=0.8 Q=0.4.");
   }
-  return { kind, expression, values, tNorm: tNormRequest.tNorm };
+  return { kind, expression, values, tNorm: tNormRequest.tNorm, interval };
 }
 
 function extractFuzzyTNorm(question) {
@@ -27806,6 +27830,49 @@ function parseSoftLogicAssignments(text) {
   return values;
 }
 
+function hasSoftLogicIntervalAssignments(text) {
+  return softLogicIntervalAssignmentPattern().test(text);
+}
+
+function parseIntervalSoftLogicAssignments(text) {
+  const values = new Map();
+  for (const match of text.matchAll(softLogicIntervalAssignmentPattern())) {
+    const lower = parseSoftTruthBound(match[2], match[3], match[1]);
+    const upper = parseSoftTruthBound(match[4], match[5], match[1]);
+    values.set(match[1], makeSoftTruthInterval(lower, upper));
+  }
+
+  const scalarValues = parseSoftLogicAssignments(stripSoftLogicIntervalAssignments(text));
+  for (const [name, value] of scalarValues.entries()) {
+    if (!values.has(name)) {
+      values.set(name, makeSoftTruthInterval(value, value));
+    }
+  }
+  return values;
+}
+
+function parseSoftTruthBound(rawText, percentMarker, name) {
+  const raw = Number(rawText);
+  const value = percentMarker ? raw / 100 : raw;
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`Truth interval for ${name} must stay between 0 and 1, or use percents from 0% to 100%.`);
+  }
+  return normalizeNumber(value);
+}
+
+function stripSoftLogicAssignments(text) {
+  return stripSoftLogicIntervalAssignments(text)
+    .replace(/\b[A-Za-z_]\w*\s*(?:=|:)\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?\s*%?/gi, " ");
+}
+
+function stripSoftLogicIntervalAssignments(text) {
+  return text.replace(softLogicIntervalAssignmentPattern(), " ");
+}
+
+function softLogicIntervalAssignmentPattern() {
+  return /\b([A-Za-z_]\w*)\s*(?:=|:)\s*[\[(]\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?\s*,\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?\s*[\])]/gi;
+}
+
 function resolveSoftLogicAssignments(variables, provided) {
   const assignment = {};
   for (const variable of variables) {
@@ -27819,6 +27886,23 @@ function resolveSoftLogicAssignments(variables, provided) {
       continue;
     }
     throw new Error(`Missing truth value for ${variable}. Add ${variable}=0.5 or another value from 0 to 1.`);
+  }
+  return assignment;
+}
+
+function resolveIntervalSoftLogicAssignments(variables, provided) {
+  const assignment = {};
+  for (const variable of variables) {
+    if (provided.has(variable)) {
+      assignment[variable] = provided.get(variable);
+      continue;
+    }
+    const insensitive = [...provided.entries()].find(([name]) => name.toLowerCase() === variable.toLowerCase());
+    if (insensitive) {
+      assignment[variable] = insensitive[1];
+      continue;
+    }
+    throw new Error(`Missing truth interval for ${variable}. Add ${variable}=[0.3,0.7] or another interval from 0 to 1.`);
   }
   return assignment;
 }
@@ -27979,10 +28063,189 @@ function normalizeSoftTruth(value) {
   return Math.min(1, Math.max(0, normalizeNumber(value)));
 }
 
+function evaluateIntervalSoftLogic(node, assignment, trace, tNorm = "minimum") {
+  if (node.kind === "logicConstant") {
+    const value = makeSoftTruthInterval(node.value ? 1 : 0, node.value ? 1 : 0);
+    trace.push({
+      expression: logicToString(node),
+      rule: "constant",
+      value,
+    });
+    return value;
+  }
+  if (node.kind === "logicVariable") {
+    const value = assignment[node.name];
+    trace.push({
+      expression: node.name,
+      rule: "variable interval",
+      value,
+    });
+    return value;
+  }
+  if (node.kind === "logicNot") {
+    const operand = evaluateIntervalSoftLogic(node.operand, assignment, trace, tNorm);
+    const value = intervalNot(operand);
+    trace.push({
+      expression: logicToString(node),
+      rule: `not: 1 - ${formatSoftTruthValue(operand)}`,
+      value,
+    });
+    return value;
+  }
+
+  const left = evaluateIntervalSoftLogic(node.left, assignment, trace, tNorm);
+  const right = evaluateIntervalSoftLogic(node.right, assignment, trace, tNorm);
+  const { value, rule } = evaluateIntervalFuzzyOperator(node.operator, left, right, tNorm);
+  trace.push({
+    expression: logicToString(node),
+    rule,
+    value,
+  });
+  return value;
+}
+
+function evaluateIntervalFuzzyOperator(operator, left, right, tNorm = "minimum") {
+  if (operator === "and") {
+    return {
+      value: intervalTNorm(left, right, tNorm),
+      rule: `and: ${formatIntervalFuzzyTNormRule(tNorm)}`,
+    };
+  }
+  if (operator === "or") {
+    return {
+      value: intervalSNorm(left, right, tNorm),
+      rule: `or: ${formatIntervalFuzzySNormRule(tNorm)}`,
+    };
+  }
+  if (tNorm === "minimum") {
+    if (operator === "xor") {
+      return { value: intervalAbsoluteDifference(left, right), rule: "xor: interval abs(A - B)" };
+    }
+    if (operator === "implies") {
+      return { value: intervalMaximum(intervalNot(left), right), rule: "implies: interval max(1 - A, B)" };
+    }
+    if (operator === "iff") {
+      return { value: intervalOneMinusAbsoluteDifference(left, right), rule: "iff: interval 1 - abs(A - B)" };
+    }
+  }
+  if (operator === "xor") {
+    const leftOnly = intervalTNorm(left, intervalNot(right), tNorm);
+    const rightOnly = intervalTNorm(intervalNot(left), right, tNorm);
+    return {
+      value: intervalSNorm(leftOnly, rightOnly, tNorm),
+      rule: "xor: interval (A and not B) or (not A and B)",
+    };
+  }
+  if (operator === "implies") {
+    return {
+      value: intervalSNorm(intervalNot(left), right, tNorm),
+      rule: `implies: interval not A or B using ${tNorm}`,
+    };
+  }
+  if (operator === "iff") {
+    const bothTrue = intervalTNorm(left, right, tNorm);
+    const bothFalse = intervalTNorm(intervalNot(left), intervalNot(right), tNorm);
+    return {
+      value: intervalSNorm(bothTrue, bothFalse, tNorm),
+      rule: "iff: interval (A and B) or (not A and not B)",
+    };
+  }
+  throw new Error(`Unsupported interval fuzzy operator '${operator}'.`);
+}
+
+function makeSoftTruthInterval(lower, upper) {
+  if (!Number.isFinite(lower) || !Number.isFinite(upper)) {
+    throw new Error("Truth intervals need finite lower and upper bounds.");
+  }
+  return {
+    lower: normalizeSoftTruth(Math.min(lower, upper)),
+    upper: normalizeSoftTruth(Math.max(lower, upper)),
+  };
+}
+
+function isSoftTruthInterval(value) {
+  return Boolean(value)
+    && typeof value === "object"
+    && Number.isFinite(value.lower)
+    && Number.isFinite(value.upper);
+}
+
+function intervalNot(interval) {
+  return makeSoftTruthInterval(1 - interval.upper, 1 - interval.lower);
+}
+
+function intervalTNorm(left, right, tNorm) {
+  if (tNorm === "product") {
+    return makeSoftTruthInterval(left.lower * right.lower, left.upper * right.upper);
+  }
+  if (tNorm === "lukasiewicz") {
+    return makeSoftTruthInterval(
+      Math.max(0, left.lower + right.lower - 1),
+      Math.max(0, left.upper + right.upper - 1),
+    );
+  }
+  return makeSoftTruthInterval(Math.min(left.lower, right.lower), Math.min(left.upper, right.upper));
+}
+
+function intervalSNorm(left, right, tNorm) {
+  if (tNorm === "product") {
+    return makeSoftTruthInterval(
+      left.lower + right.lower - left.lower * right.lower,
+      left.upper + right.upper - left.upper * right.upper,
+    );
+  }
+  if (tNorm === "lukasiewicz") {
+    return makeSoftTruthInterval(Math.min(1, left.lower + right.lower), Math.min(1, left.upper + right.upper));
+  }
+  return makeSoftTruthInterval(Math.max(left.lower, right.lower), Math.max(left.upper, right.upper));
+}
+
+function intervalMaximum(left, right) {
+  return makeSoftTruthInterval(Math.max(left.lower, right.lower), Math.max(left.upper, right.upper));
+}
+
+function intervalAbsoluteDifference(left, right) {
+  const overlaps = left.lower <= right.upper && right.lower <= left.upper;
+  const lower = overlaps
+    ? 0
+    : Math.min(Math.abs(left.lower - right.upper), Math.abs(right.lower - left.upper));
+  const upper = Math.max(
+    Math.abs(left.lower - right.lower),
+    Math.abs(left.lower - right.upper),
+    Math.abs(left.upper - right.lower),
+    Math.abs(left.upper - right.upper),
+  );
+  return makeSoftTruthInterval(lower, upper);
+}
+
+function intervalOneMinusAbsoluteDifference(left, right) {
+  const difference = intervalAbsoluteDifference(left, right);
+  return makeSoftTruthInterval(1 - difference.upper, 1 - difference.lower);
+}
+
+function formatIntervalFuzzyTNormRule(tNorm) {
+  if (tNorm === "product") return "interval product t-norm";
+  if (tNorm === "lukasiewicz") return "interval Lukasiewicz t-norm";
+  return "interval min t-norm";
+}
+
+function formatIntervalFuzzySNormRule(tNorm) {
+  if (tNorm === "product") return "interval product s-norm";
+  if (tNorm === "lukasiewicz") return "interval Lukasiewicz s-norm";
+  return "interval max s-norm";
+}
+
+function formatSoftTruthValue(value) {
+  if (isSoftTruthInterval(value)) {
+    return `[${formatNumber(value.lower)}, ${formatNumber(value.upper)}]`;
+  }
+  return formatNumber(value);
+}
+
 function formatSoftAssignment(assignment) {
   return Object.entries(assignment)
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([name, value]) => `${name}=${formatNumber(value)}`)
+    .map(([name, value]) => `${name}=${formatSoftTruthValue(value)}`)
     .join(", ") || "none";
 }
 

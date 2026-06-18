@@ -201,6 +201,8 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   const probability = analyzeLogicTruthValue("probabilistic logic P or Q with P=0.2 Q=0.5");
   const product = analyzeLogicTruthValue("fuzzy product logic P or Q with P=0.8 Q=0.6");
   const lukasiewicz = analyzeLogicTruthValue("fuzzy logic P and Q with P=0.8 Q=0.6 tnorm=lukasiewicz");
+  const interval = analyzeLogicTruthValue("interval fuzzy logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]");
+  const intervalProduct = analyzeLogicTruthValue("interval fuzzy product logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]");
 
   assert.equal(fuzzy.summary, "Fuzzy logic truth value");
   assert.equal(fuzzy.answer, "fuzzy truth = 0.7");
@@ -222,11 +224,23 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   assert.equal(artifactValue(lukasiewicz, "T-norm"), "lukasiewicz");
   assert.deepEqual(lukasiewicz.table.rows.slice(-1), [["P and Q", "and: max(0, 0.8 + 0.6 - 1)", "0.4"]]);
 
+  assert.equal(interval.summary, "Interval fuzzy logic truth value");
+  assert.equal(interval.answer, "fuzzy truth interval = [0.4, 0.7]");
+  assert.equal(artifactValue(interval, "Semantics"), "interval-valued fuzzy min/max");
+  assert.equal(artifactValue(interval, "Assignments"), "P=[0.2, 0.5], Q=[0.4, 0.7]");
+  assert.deepEqual(interval.table.rows.slice(-1), [["P or Q", "or: interval max s-norm", "[0.4, 0.7]"]]);
+
+  assert.equal(intervalProduct.answer, "fuzzy truth interval = [0.52, 0.85]");
+  assert.equal(artifactValue(intervalProduct, "Semantics"), "interval-valued fuzzy product t-norm");
+  assert.equal(artifactValue(intervalProduct, "T-norm"), "product");
+  assert.deepEqual(intervalProduct.table.rows.slice(-1), [["P or Q", "or: interval product s-norm", "[0.52, 0.85]"]]);
+
   assert.equal(probability.summary, "Probabilistic logic truth value");
   assert.equal(probability.answer, "probability = 0.6");
   assert.equal(artifactValue(probability, "Semantics"), "independent probability");
   assert.deepEqual(probability.table.rows.slice(-1), [["P or Q", "or: P(A)+P(B)-P(A)P(B)", "0.6"]]);
   assert.equal(analyzeUniversal("fuzzy logic P and Q with P=0.8 Q=0.6").summary, "Fuzzy logic truth value");
+  assert.equal(analyzeUniversal("interval fuzzy logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]").summary, "Interval fuzzy logic truth value");
 });
 
 runTest("tree export emits Graphviz DOT", () => {
