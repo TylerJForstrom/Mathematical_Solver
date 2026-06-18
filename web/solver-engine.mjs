@@ -8057,7 +8057,7 @@ function analyzeNonlinearRegressionModelComparison(statement) {
       {
         title: "Transform eligible models",
         expression: viableModels.map((model) => `${model.label}: ${model.transformedEquation}`).join("; "),
-        detail: "Exponential and power-law models use log-response transforms; logarithmic models transform x.",
+        detail: "Exponential and power-law models use log-response transforms; logarithmic models transform x; logistic growth uses damped nonlinear least squares.",
       },
       {
         title: "Score on original scale",
@@ -8156,21 +8156,15 @@ function fitPolynomialComparisonModel(xValues, yValues, degree, validation = {})
 function fitNonlinearRegressionFamily(xValues, yValues, family) {
   const definition = nonlinearRegressionFamilyDefinition(family);
   if (!definition.domain(xValues, yValues)) {
-    return {
-      family,
-      label: definition.label,
-      equation: "undefined",
-      transformedEquation: definition.transformedEquation,
-      status: definition.domainMessage,
-      viable: false,
-      sse: Number.NaN,
-      rSquared: Number.NaN,
-      aic: Number.NaN,
-      aicc: Number.NaN,
-      bic: Number.NaN,
-      fitted: [],
-      residuals: [],
-    };
+    return invalidNonlinearRegressionModel(family, definition, definition.domainMessage);
+  }
+
+  if (definition.fit) {
+    try {
+      return definition.fit(xValues, yValues);
+    } catch {
+      return invalidNonlinearRegressionModel(family, definition, "fit did not converge");
+    }
   }
 
   const transformedX = xValues.map(definition.transformX);
@@ -8178,30 +8172,48 @@ function fitNonlinearRegressionFamily(xValues, yValues, family) {
   const coefficients = fitPolynomialCoefficients(transformedX, transformedY, 1);
   const fitted = xValues.map((x) => normalizeNumber(definition.predict(coefficients, x)));
   if (fitted.some((value) => !Number.isFinite(value))) {
-    return {
-      family,
-      label: definition.label,
-      equation: "undefined",
-      transformedEquation: definition.transformedEquation,
-      status: "produced non-finite fitted values",
-      viable: false,
-      sse: Number.NaN,
-      rSquared: Number.NaN,
-      aic: Number.NaN,
-      aicc: Number.NaN,
-      bic: Number.NaN,
-      fitted: [],
-      residuals: [],
-    };
+    return invalidNonlinearRegressionModel(family, definition, "produced non-finite fitted values");
   }
 
-  const residuals = yValues.map((value, index) => normalizeNumber(value - fitted[index]));
+  return scoreNonlinearRegressionFit({
+    family,
+    label: definition.label,
+    equation: definition.formatEquation(coefficients),
+    transformedEquation: definition.transformedEquation,
+    coefficients,
+    fitted,
+    parameterCount: definition.parameterCount,
+    status: "fit",
+    predict: (x) => normalizeNumber(definition.predict(coefficients, x)),
+  }, yValues);
+}
+
+function invalidNonlinearRegressionModel(family, definition, status) {
+  return {
+    family,
+    label: definition.label,
+    equation: "undefined",
+    transformedEquation: definition.transformedEquation,
+    status,
+    viable: false,
+    sse: Number.NaN,
+    rSquared: Number.NaN,
+    aic: Number.NaN,
+    aicc: Number.NaN,
+    bic: Number.NaN,
+    fitted: [],
+    residuals: [],
+  };
+}
+
+function scoreNonlinearRegressionFit(model, yValues) {
+  const residuals = yValues.map((value, index) => normalizeNumber(value - model.fitted[index]));
   const sse = residuals.reduce((sum, value) => sum + value ** 2, 0);
   const meanY = mean(yValues);
   const tss = yValues.reduce((sum, value) => sum + (value - meanY) ** 2, 0);
   const rSquared = nearlyEqual(tss, 0) ? 1 : 1 - sse / tss;
   const n = yValues.length;
-  const parameterCount = 2;
+  const parameterCount = model.parameterCount ?? 2;
   const varianceEstimate = Math.max(sse / n, EPSILON);
   const aic = n * Math.log(varianceEstimate) + 2 * parameterCount;
   const aiccDenominator = n - parameterCount - 1;
@@ -8211,21 +8223,14 @@ function fitNonlinearRegressionFamily(xValues, yValues, family) {
   const bic = n * Math.log(varianceEstimate) + parameterCount * Math.log(n);
 
   return {
-    family,
-    label: definition.label,
-    equation: definition.formatEquation(coefficients),
-    transformedEquation: definition.transformedEquation,
-    coefficients,
-    fitted,
+    ...model,
     residuals,
     sse: normalizeNumber(sse),
     rSquared: normalizeNumber(rSquared),
     aic: normalizeNumber(aic),
     aicc: Number.isFinite(aicc) ? normalizeNumber(aicc) : Number.NaN,
     bic: normalizeNumber(bic),
-    status: "fit",
     viable: true,
-    predict: (x) => normalizeNumber(definition.predict(coefficients, x)),
   };
 }
 
@@ -8234,6 +8239,7 @@ function nonlinearRegressionFamilyDefinition(family) {
     linear: {
       label: "Linear",
       transformedEquation: "y = a + bx",
+      parameterCount: 2,
       domain: () => true,
       domainMessage: "",
       transformX: (x) => x,
@@ -8244,6 +8250,7 @@ function nonlinearRegressionFamilyDefinition(family) {
     exponential: {
       label: "Exponential",
       transformedEquation: "ln(y) = a + bx",
+      parameterCount: 2,
       domain: (_xValues, yValues) => yValues.every((value) => value > 0),
       domainMessage: "requires y > 0",
       transformX: (x) => x,
@@ -8254,6 +8261,7 @@ function nonlinearRegressionFamilyDefinition(family) {
     logarithmic: {
       label: "Logarithmic",
       transformedEquation: "y = a + b ln(x)",
+      parameterCount: 2,
       domain: (xValues) => xValues.every((value) => value > 0),
       domainMessage: "requires x > 0",
       transformX: (x) => Math.log(x),
@@ -8264,6 +8272,7 @@ function nonlinearRegressionFamilyDefinition(family) {
     power: {
       label: "Power-law",
       transformedEquation: "ln(y) = a + b ln(x)",
+      parameterCount: 2,
       domain: (xValues, yValues) => xValues.every((value) => value > 0) && yValues.every((value) => value > 0),
       domainMessage: "requires x > 0 and y > 0",
       transformX: (x) => Math.log(x),
@@ -8271,8 +8280,156 @@ function nonlinearRegressionFamilyDefinition(family) {
       predict: ([intercept, slope], x) => Math.exp(intercept) * x ** slope,
       formatEquation: ([intercept, slope]) => `y = ${formatNumber(Math.exp(intercept))} * x^${formatNumber(slope)}`,
     },
+    logistic: {
+      label: "Logistic growth",
+      transformedEquation: "y = L / (1 + e^(-(a + bx)))",
+      parameterCount: 3,
+      domain: (_xValues, yValues) => yValues.every((value) => value > 0),
+      domainMessage: "requires y > 0",
+      fit: fitLogisticGrowthRegressionFamily,
+    },
   };
   return definitions[family];
+}
+
+function fitLogisticGrowthRegressionFamily(xValues, yValues) {
+  const definition = nonlinearRegressionFamilyDefinition("logistic");
+  const maxY = Math.max(...yValues);
+  const minY = Math.min(...yValues);
+  const spread = Math.max(EPSILON, maxY - minY);
+  const starts = [1.05, 1.2, 1.5, 2, 3, 5, 10]
+    .map((multiplier) => Math.max(maxY + spread * 0.05, maxY * multiplier));
+  let best = null;
+
+  for (const asymptote of starts) {
+    const initial = initialLogisticGrowthParameters(xValues, yValues, asymptote);
+    const fit = runLogisticGrowthLeastSquares(xValues, yValues, initial);
+    if (fit && (!best || fit.sse < best.sse)) {
+      best = fit;
+    }
+  }
+
+  if (!best) {
+    throw new Error("fit did not converge");
+  }
+
+  const coefficients = best.parameters.map(normalizeNumber);
+  const fitted = xValues.map((x) => normalizeNumber(predictLogisticGrowth(coefficients, x)));
+  return scoreNonlinearRegressionFit({
+    family: "logistic",
+    label: definition.label,
+    equation: formatLogisticGrowthEquation(coefficients),
+    transformedEquation: definition.transformedEquation,
+    coefficients,
+    fitted,
+    parameterCount: definition.parameterCount,
+    status: `fit in ${best.iterations} iterations`,
+    predict: (x) => normalizeNumber(predictLogisticGrowth(coefficients, x)),
+  }, yValues);
+}
+
+function initialLogisticGrowthParameters(xValues, yValues, asymptote) {
+  const adjustedY = yValues.map((value) =>
+    Math.min(asymptote - EPSILON, Math.max(EPSILON, value)),
+  );
+  const logits = adjustedY.map((value) => Math.log(value / (asymptote - value)));
+  const [intercept, slope] = fitPolynomialCoefficients(xValues, logits, 1);
+  return [asymptote, intercept, slope];
+}
+
+function runLogisticGrowthLeastSquares(xValues, yValues, initialParameters) {
+  const minAsymptote = Math.max(...yValues) + EPSILON;
+  let parameters = [...initialParameters];
+  let damping = 1e-3;
+  let bestSse = logisticGrowthSse(xValues, yValues, parameters);
+
+  if (!Number.isFinite(bestSse)) {
+    return null;
+  }
+
+  for (let iteration = 1; iteration <= 200; iteration += 1) {
+    const normalMatrix = Array.from({ length: 3 }, () => Array(3).fill(0));
+    const normalVector = Array(3).fill(0);
+
+    for (let row = 0; row < xValues.length; row += 1) {
+      const x = xValues[row];
+      const prediction = predictLogisticGrowth(parameters, x);
+      const residual = yValues[row] - prediction;
+      const gradient = logisticGrowthGradient(parameters, x);
+      for (let i = 0; i < 3; i += 1) {
+        normalVector[i] += gradient[i] * residual;
+        for (let j = 0; j < 3; j += 1) {
+          normalMatrix[i][j] += gradient[i] * gradient[j];
+        }
+      }
+    }
+
+    for (let diagonal = 0; diagonal < 3; diagonal += 1) {
+      normalMatrix[diagonal][diagonal] += damping * (normalMatrix[diagonal][diagonal] || 1);
+    }
+
+    let step;
+    try {
+      step = solveLinearSystem(normalMatrix, normalVector);
+    } catch {
+      damping *= 10;
+      continue;
+    }
+
+    const candidate = parameters.map((value, index) => value + step[index]);
+    if (candidate[0] <= minAsymptote || candidate.some((value) => !Number.isFinite(value))) {
+      damping *= 10;
+      continue;
+    }
+
+    const candidateSse = logisticGrowthSse(xValues, yValues, candidate);
+    if (Number.isFinite(candidateSse) && candidateSse < bestSse) {
+      parameters = candidate;
+      if (Math.abs(bestSse - candidateSse) <= 1e-10 * Math.max(1, bestSse)) {
+        return { parameters, sse: candidateSse, iterations: iteration };
+      }
+      bestSse = candidateSse;
+      damping = Math.max(damping / 3, 1e-8);
+    } else {
+      damping *= 10;
+    }
+  }
+
+  return { parameters, sse: bestSse, iterations: 200 };
+}
+
+function logisticGrowthSse(xValues, yValues, parameters) {
+  return yValues.reduce((sum, value, index) => {
+    const prediction = predictLogisticGrowth(parameters, xValues[index]);
+    return sum + (value - prediction) ** 2;
+  }, 0);
+}
+
+function logisticGrowthGradient([asymptote, intercept, slope], x) {
+  const sigmoid = logisticGrowthSigmoid(intercept + slope * x);
+  const sensitivity = asymptote * sigmoid * (1 - sigmoid);
+  return [
+    sigmoid,
+    sensitivity,
+    sensitivity * x,
+  ];
+}
+
+function predictLogisticGrowth([asymptote, intercept, slope], x) {
+  return asymptote * logisticGrowthSigmoid(intercept + slope * x);
+}
+
+function logisticGrowthSigmoid(value) {
+  if (value >= 0) {
+    const exponent = Math.exp(-value);
+    return 1 / (1 + exponent);
+  }
+  const exponent = Math.exp(value);
+  return exponent / (1 + exponent);
+}
+
+function formatLogisticGrowthEquation([asymptote, intercept, slope]) {
+  return `y = ${formatNumber(asymptote)} / (1 + e^(${formatNumber(-intercept)} ${formatSignedTerm(-slope, "x")}))`;
 }
 
 function fitPolynomialCoefficients(xValues, yValues, degree) {
@@ -19914,12 +20071,13 @@ function parseNonlinearRegressionFamilies(text) {
   if (/\b(?:exponential|exp)\b/.test(source)) addFamily("exponential");
   if (/\b(?:logarithmic|log)\b/.test(source)) addFamily("logarithmic");
   if (/\b(?:power[-\s]?law|power)\b/.test(source)) addFamily("power");
+  if (/\b(?:logistic(?:\s+growth)?|sigmoid(?:al)?)\b/.test(source)) addFamily("logistic");
 
   if (!explicit && families.length < 2) {
-    return ["linear", "exponential", "logarithmic", "power"];
+    return ["linear", "exponential", "logarithmic", "power", "logistic"];
   }
   if (families.length < 2) {
-    throw new Error("Nonlinear regression model comparison needs at least two families, such as families=linear,exponential,power.");
+    throw new Error("Nonlinear regression model comparison needs at least two families, such as families=linear,exponential,power,logistic.");
   }
   return families;
 }
@@ -21803,7 +21961,9 @@ function isNonlinearRegressionModelComparisonQuestion(lower) {
     lower.includes("logarithmic") ||
     /\blog model\b/.test(lower) ||
     lower.includes("power-law") ||
-    lower.includes("power law");
+    lower.includes("power law") ||
+    lower.includes("logistic growth") ||
+    lower.includes("sigmoid");
   return wantsComparison && wantsRegression && namesNonlinearFamily;
 }
 

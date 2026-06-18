@@ -488,6 +488,18 @@ runTest("statistics mode compares nonlinear regression model families", () => {
   assert.equal(analyzeUniversal("compare nonlinear regression models x: 1,2,3,4,5; y: 2,4,8,16,32").summary, "nonlinear regression model comparison");
 });
 
+runTest("statistics mode compares logistic growth nonlinear models", () => {
+  const result = analyzeStatistics("compare nonlinear regression models x: 0,1,2,3,4,5,6,7,8; y: 1.8,4.7,11.9,26.9,50,73.1,88.1,95.3,98.2 families=linear,exponential,logistic");
+
+  assert.equal(result.answer, "best logistic growth model by AICc: y = 100.011536 / (1 + e^(4.002689 - 1.000588x))");
+  assert.equal(artifactValue(result, "Best family"), "Logistic growth");
+  assert.equal(artifactValue(result, "Best AICc"), "-61.515607");
+  assert.deepEqual(result.table.rows[2], ["Logistic growth", "y = 100.011536 / (1 + e^(4.002689 - 1.000588x))", "0.002915", "1", "-66.315607", "-61.515607", "-65.723934", "fit in 20 iterations"]);
+  assert.equal(result.graphs[0].expression, "Logistic growth best fit");
+  assert.equal(result.graphs[1].expression, "AICc by nonlinear regression family");
+  assert.equal(analyzeUniversal("compare nonlinear regression models x: 0,1,2,3,4,5,6,7,8; y: 1.8,4.7,11.9,26.9,50,73.1,88.1,95.3,98.2 families=linear,logistic").summary, "nonlinear regression model comparison");
+});
+
 runTest("statistics mode computes multiple linear regression", () => {
   const result = analyzeStatistics("multiple regression y: 4, 7, 9, 12, 15; x1: 1, 2, 3, 4, 5; x2: 0, 1, 0, 1, 1; predict x1=6 x2=0");
 
