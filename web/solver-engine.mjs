@@ -2700,7 +2700,70 @@ export function analyzeMatrix(statement) {
   let children;
   let steps;
 
-  if (lower.includes("rowspace") || lower.includes("row space") || lower.includes("row-space")) {
+  if (lower.includes("least squares") || lower.includes("least-squares")) {
+    const designMatrix = matrices[0];
+    const remainder = removeMatrixLiterals(statement);
+    const vectors = extractVectors(remainder);
+    if (vectors.length === 0) {
+      throw new Error("Least squares needs a right-hand side vector, e.g. least squares [[1,1],[1,2],[1,3]] [1,2,2].");
+    }
+    const rhs = vectors[0];
+    if (rhs.length !== designMatrix.length) {
+      throw new Error("Least squares needs the b vector length to match the number of rows of A.");
+    }
+
+    const transposed = transposeMatrix(designMatrix);
+    const normalMatrix = multiplyMatrices(transposed, designMatrix);
+    const normalRhs = multiplyMatrices(transposed, rhs.map((value) => [value])).map((row) => row[0]);
+    let solution;
+    try {
+      solution = solveLinearSystem(normalMatrix, normalRhs);
+    } catch {
+      throw new Error("The least-squares normal equations are singular; the columns of A are linearly dependent.");
+    }
+    const fitted = multiplyMatrices(designMatrix, solution.map((value) => [value])).map((row) => row[0]);
+    const residuals = rhs.map((value, index) => normalizeNumber(value - fitted[index]));
+    const residualNorm = normalizeNumber(Math.sqrt(residuals.reduce((sum, value) => sum + value * value, 0)));
+    const exact = residualNorm < 1e-9;
+
+    answer = `x = ${formatVector(solution)}`;
+    summary = "least-squares solution";
+    artifacts = [
+      ["A", formatMatrix(designMatrix)],
+      ["b", formatVector(rhs)],
+      ["Normal equations", "(AᵀA) x = Aᵀb"],
+      ["AᵀA", formatMatrix(normalMatrix)],
+      ["Aᵀb", formatVector(normalRhs)],
+      ["Least-squares solution", formatVector(solution)],
+      ["Residual vector", formatVector(residuals)],
+      ["Residual norm", formatNumber(residualNorm)],
+      ["Exact fit", exact ? "yes" : "no"],
+    ];
+    children = [
+      matrixNode("A", designMatrix),
+      matrixNode("AtA", normalMatrix),
+      matrixNode("x", solution.map((value) => [value])),
+    ];
+    steps = [
+      {
+        title: "Form the normal equations",
+        expression: "(AᵀA) x = Aᵀb",
+        detail: "Least squares minimizes ||Ax - b||^2 by projecting b onto the column space of A.",
+      },
+      {
+        title: "Solve for x",
+        expression: `x = ${formatVector(solution)}`,
+        detail: "Gaussian elimination solves the square normal-equation system.",
+      },
+      {
+        title: "Measure the residual",
+        expression: `||Ax - b|| = ${formatNumber(residualNorm)}`,
+        detail: exact
+          ? "The residual is ~0, so the system is consistent and x solves it exactly."
+          : "The residual is the smallest achievable error for this inconsistent system.",
+      },
+    ];
+  } else if (lower.includes("rowspace") || lower.includes("row space") || lower.includes("row-space")) {
     const result = rowSpaceBasis(matrices[0]);
     answer = result.basis.length ? `basis = ${formatVectorList(result.basis)}` : "row space = {0}";
     summary = "matrix row space";
@@ -27337,6 +27400,8 @@ function hasImaginaryUnit(text) {
 
 function isMatrixQuestion(lower) {
   return lower.includes("matrix") ||
+    lower.includes("least squares") ||
+    lower.includes("least-squares") ||
     lower.includes("determinant") ||
     wantsDominantEigenpair(lower) ||
     lower.startsWith("svd ") ||

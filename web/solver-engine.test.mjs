@@ -1749,6 +1749,33 @@ runTest("matrix mode computes inverses", () => {
   assert.equal(result.answer, "[[-2, 1], [1.5, -0.5]]");
 });
 
+runTest("matrix mode solves least-squares systems", () => {
+  const result = analyzeMatrix("least squares [[1,1],[1,2],[1,3]] [1,2,2]");
+
+  assert.equal(result.summary, "least-squares solution");
+  assert.equal(result.answer, "x = [0.666667, 0.5]");
+  assert.equal(artifactValue(result, "Least-squares solution"), "[0.666667, 0.5]");
+  assert.equal(artifactValue(result, "Residual norm"), "0.408248");
+  assert.equal(artifactValue(result, "Exact fit"), "no");
+  assert.equal(artifactValue(result, "AᵀA"), "[[3, 6], [6, 14]]");
+});
+
+runTest("matrix mode reports an exact least-squares fit and routes via Ask", () => {
+  const exact = analyzeMatrix("least squares [[1,0],[0,1]] [3,4]");
+  assert.equal(exact.answer, "x = [3, 4]");
+  assert.equal(artifactValue(exact, "Residual norm"), "0");
+  assert.equal(artifactValue(exact, "Exact fit"), "yes");
+
+  const routed = analyzeUniversal("least squares [[1,1],[1,2],[1,3]] [1,2,2]");
+  assert.equal(routed.summary, "least-squares solution");
+  assert.equal(routed.answer, "x = [0.666667, 0.5]");
+
+  assert.throws(
+    () => analyzeMatrix("least squares [[1,1],[1,2],[1,3]] [1,2]"),
+    /match the number of rows/,
+  );
+});
+
 runTest("matrix mode row reduces matrices", () => {
   const result = analyzeMatrix("rref [[1,2,1],[2,4,2],[1,1,0]]");
 

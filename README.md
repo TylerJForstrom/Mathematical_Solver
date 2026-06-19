@@ -48,6 +48,8 @@ The frontend currently supports:
   real and complex 2x2 eigenvalues/eigenvectors, nonsymmetric 3x3 real
   eigenvalues/eigenvectors, symmetric eigenvalue/eigenvector approximation for
   larger matrices, and dominant eigenpair approximation
+- Least-squares solutions of overdetermined systems through the normal equations
+  AᵀA x = Aᵀb, with the residual vector, residual norm, and an exact-fit check
 - Vector geometry: dot products, cross products, magnitudes, angles,
   projections, and point distances
 - Geometry formulas: circles, rectangles, triangles, Pythagorean theorem,
@@ -358,6 +360,8 @@ The same idea works for algebra and calculus:
   subspaces.
 - `qr [[1,1],[1,0],[0,1]]` uses Gram-Schmidt to return `Q`, `R`, and `Q*R`.
 - `svd [[3,1],[1,3]]` returns singular values plus `U`, `Sigma`, `V^T`, and reconstruction.
+- `least squares [[1,1],[1,2],[1,3]] [1,2,2]` solves the normal equations and
+  returns `x = [0.666667, 0.5]` with the residual vector and residual norm.
 - `nullspace [[1,2,1],[2,4,2],[1,1,0]]` extracts a basis from the RREF free variables.
 - `eigenvectors [[2,1],[1,2]]` solves the 2x2 characteristic polynomial and then
   finds each eigenspace.
