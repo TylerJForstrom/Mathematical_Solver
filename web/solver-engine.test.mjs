@@ -1582,6 +1582,33 @@ runTest("numerical mode rejects degenerate secant guesses", () => {
   assert.throws(() => analyzeNumerical("secant x^2 - 2 guess=2 guess2=2"), /two distinct starting guesses/);
 });
 
+runTest("numerical mode runs fixed-point iteration", () => {
+  const result = analyzeNumerical("fixed point cos(x) guess=0.5");
+
+  assert.equal(result.summary, "fixed-point iteration");
+  assert.equal(result.answer, "x ~= 0.739085");
+  assert.equal(result.table.headers.join(","), "Iter,x,g(x),|Δ|");
+  assert.equal(artifactValue(result, "Method"), "fixed-point iteration");
+  assert.equal(artifactValue(result, "Converged"), "yes");
+  assert.equal(result.graph.kind, "root-iterations");
+  assert.ok(result.graph.lines.some((series) => series.label === "Cobweb path"));
+  assert.ok(result.graph.lines.some((series) => series.label === "x = x"));
+});
+
+runTest("numerical mode accepts x = g(x) fixed-point form and routes via Ask", () => {
+  const result = analyzeNumerical("fixed point x = (x + 2/x)/2 guess=1");
+  assert.equal(result.answer, "x ~= 1.414214");
+  assert.equal(artifactValue(result, "Iteration map"), "g(x) = (x + 2/x)/2");
+
+  const routed = analyzeUniversal("fixed point cos(x) guess=0.5");
+  assert.equal(routed.summary, "fixed-point iteration");
+  assert.equal(routed.answer, "x ~= 0.739085");
+});
+
+runTest("numerical mode flags diverging fixed-point maps", () => {
+  assert.throws(() => analyzeNumerical("fixed point 2*x + 1 guess=1"), /diverged/);
+});
+
 runTest("numerical mode computes quadrature rules", () => {
   const simpson = analyzeNumerical("simpson integrate sin(x) from 0 to pi n=100");
   const trapezoid = analyzeNumerical("trapezoidal integrate x^2 from 0 to 3 n=6");
