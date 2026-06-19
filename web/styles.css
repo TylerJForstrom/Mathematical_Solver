@@ -181,14 +181,30 @@ input {
   padding: 0 11px;
 }
 
-.sample-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+.example-picker {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  max-width: 360px;
 }
 
-.sample-row button,
+#exampleSelect {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line, #cdd7d6);
+  background: var(--surface, #fff);
+  color: var(--teal-dark);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#exampleSelect:focus-visible {
+  outline: 2px solid var(--teal-dark);
+  outline-offset: 1px;
+}
+
 #flipAllButton {
   padding: 0 12px;
   color: var(--teal-dark);

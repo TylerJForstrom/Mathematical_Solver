@@ -2380,7 +2380,160 @@ export function analyzeStatistics(statement) {
   return analyzeDescriptiveStatistics(statement);
 }
 
-export function analyzeUniversal(question, values = {}) {
+export const PROBLEM_CATEGORIES = [
+  {
+    category: "Algebra",
+    examples: [
+      { label: "Solve a quadratic", sample: "solve x^2 - 5x + 6 = 0" },
+      { label: "Factor a polynomial", sample: "factor x^3 - 6x^2 + 11x - 6" },
+      { label: "Solve a linear system", sample: "solve system 2x + y = 5; x - y = 1" },
+      { label: "Polynomial inequality", sample: "solve x^2 - 5x + 6 > 0" },
+      { label: "Simplify an expression", sample: "2x + 3x - 4 + 10" },
+    ],
+  },
+  {
+    category: "Calculus",
+    examples: [
+      { label: "Derivative", sample: "what is the derivative of x^3 + 2x^2 - 7x" },
+      { label: "Integral", sample: "integrate x^2 + 3x" },
+      { label: "Limit", sample: "limit (x^2 - 1)/(x - 1) as x approaches 1" },
+      { label: "Improper integral", sample: "improper integral 1/x^2 from 1 to infinity" },
+      { label: "Series convergence", sample: "does sum 1/n^2 converge" },
+      { label: "Taylor series", sample: "taylor sin(x) order=5" },
+    ],
+  },
+  {
+    category: "Linear algebra",
+    examples: [
+      { label: "Determinant", sample: "det [[1,2],[3,4]]" },
+      { label: "Inverse", sample: "inverse [[1,2],[3,4]]" },
+      { label: "Eigenvalues", sample: "eigenvalues [[2,1],[1,2]]" },
+      { label: "Least-squares system", sample: "least squares [[1,1],[1,2],[1,3]] [1,2,2]" },
+      { label: "QR / SVD", sample: "svd [[3,1],[1,3]]" },
+    ],
+  },
+  {
+    category: "Graphing",
+    examples: [
+      { label: "Plot a function", sample: "graph x^2 - 4 from -5 to 5" },
+      { label: "Tangent line", sample: "graph tangent line x^2 at x=2 from 0 to 4" },
+      { label: "Curve intersections", sample: "intersect x^2 and 2x + 1" },
+    ],
+  },
+  {
+    category: "Numerical methods",
+    examples: [
+      { label: "Newton's method", sample: "newton x^3 - x - 2 guess=1" },
+      { label: "Secant method", sample: "secant x^2 - 2 guess=1 guess2=2" },
+      { label: "Fixed-point iteration", sample: "fixed point cos(x) guess=0.5" },
+      { label: "Gradient descent", sample: "gradient descent x^2 - 4x + 3 guess=0 rate=0.1" },
+      { label: "Numerical integration", sample: "simpson integrate sin(x) from 0 to pi n=100" },
+    ],
+  },
+  {
+    category: "Probability",
+    examples: [
+      { label: "Binomial probability", sample: "probability of 3 heads in 10 coin flips" },
+      { label: "Poisson probability", sample: "poisson lambda=3 at most k=2" },
+      { label: "Bayes theorem", sample: "bayes prior=0.01 sensitivity=0.99 specificity=0.95" },
+      { label: "Fit a distribution", sample: "fit normal to 10,11,12,12,13,13,13,14,14,15,16" },
+      { label: "Combinations", sample: "how many ways to choose 3 from 10" },
+    ],
+  },
+  {
+    category: "Statistics",
+    examples: [
+      { label: "Mean / median / spread", sample: "what is the average of 4, 8, 15, 16, 23, 42" },
+      { label: "Linear regression", sample: "regression for (1,2), (2,3), (3,5), (4,8); predict x=5" },
+      { label: "Correlation", sample: "pearson correlation x: 1,2,3,4,5; y: 2,4,5,4,7" },
+      { label: "t-test", sample: "t test sample 5.1, 4.9, 5.3, 5.0 mu=5" },
+      { label: "Confidence interval", sample: "95 confidence interval for 10, 12, 14, 16, 18" },
+    ],
+  },
+  {
+    category: "Time series",
+    examples: [
+      { label: "ARIMA forecast", sample: "arima(2,1,0) series: 10, 13, 15, 18, 22, 27, 31, 38 forecast=3" },
+      { label: "Exponential smoothing", sample: "holt exponential smoothing 10 13 15 18 22 27 31 38 forecast=4" },
+      { label: "Autocorrelation test", sample: "ljung-box series: 10, 12, 13, 15, 16, 18, 21, 22 lags=3" },
+    ],
+  },
+];
+
+// Rewrites common natural-language phrasings into the canonical forms the
+// solver routes on, so plain word problems map to the right problem type.
+export function interpretNaturalLanguage(rawQuestion) {
+  if (typeof rawQuestion !== "string") {
+    return rawQuestion;
+  }
+  let text = rawQuestion.trim().replace(/[?]+\s*$/g, "").trim();
+  if (!text) {
+    return rawQuestion;
+  }
+
+  // Spoken powers: "x squared" -> "x^2", "x cubed" -> "x^3".
+  text = text
+    .replace(/\b([a-z0-9]+)\s+squared\b/gi, "$1^2")
+    .replace(/\b([a-z0-9]+)\s+cubed\b/gi, "$1^3");
+  const lower = text.toLowerCase();
+
+  let match;
+  if ((match = text.match(/^(?:what(?:'s| is)\s+)?(?:the\s+)?(?:average|mean)\s+of\s+(.+)$/i))) {
+    return `mean of ${match[1].trim()}`;
+  }
+  if ((match = text.match(/^(?:what(?:'s| is)\s+)?(?:the\s+)?median\s+of\s+(.+)$/i))) {
+    return `median of ${match[1].trim()}`;
+  }
+  if ((match = text.match(/^(?:what(?:'s| is)\s+)?(?:the\s+)?(?:standard deviation|std dev|stdev)\s+of\s+(.+)$/i))) {
+    return `standard deviation of ${match[1].trim()}`;
+  }
+  if ((match = text.match(/^(?:what(?:'s| is)\s+)?(?:the\s+)?variance\s+of\s+(.+)$/i))) {
+    return `variance of ${match[1].trim()}`;
+  }
+  if ((match = text.match(/how many ways(?:\s+can\s+(?:i|we|you|one))?(?:\s+(?:are there\s+)?to)?\s+(?:choose|pick|select)\s+(\d+)\s+(?:[a-z]+\s+)?(?:from|out of|of)\s+(\d+)/i))) {
+    return `${match[2]} choose ${match[1]}`;
+  }
+  if ((match = text.match(/how many ways(?:\s+can\s+(?:i|we|you|one))?(?:\s+to)?\s+(?:arrange|order|line up)\s+(\d+)\s+(?:[a-z]+\s+)?(?:from|out of|of)\s+(\d+)/i))) {
+    return `permutations n=${match[2]} r=${match[1]}`;
+  }
+  if ((match = text.match(/probabilit\w*\s+of\s+(?:getting\s+|exactly\s+|having\s+|rolling\s+)?(\d+)\s+[a-z]+\s+(?:in|out of|from)\s+(\d+)\s+[a-z]+(?:.*?\b(?:p|probability)\s*(?:=|is|of)?\s*(\d*\.?\d+))?/i))) {
+    let probability = match[3];
+    if (!probability && /\b(coin|heads?|tails?|flip|toss)\b/.test(lower)) {
+      probability = "0.5";
+    }
+    if (probability) {
+      return `binomial n=${match[2]} p=${probability} k=${match[1]}`;
+    }
+  }
+  if ((match = text.match(/^(?:what(?:'s| is)\s+)?(?:the\s+)?derivative\s+of\s+(.+?)(?:\s+with respect to\s+[a-z])?$/i))) {
+    return `differentiate ${match[1].trim()}`;
+  }
+  if ((match = text.match(/^(?:what(?:'s| is)\s+)?(?:the\s+)?(?:gcd|greatest common (?:divisor|factor)|gcf)\s+of\s+(\d+)\s+and\s+(\d+)/i))) {
+    return `gcd ${match[1]} ${match[2]}`;
+  }
+  if ((match = text.match(/^(?:what(?:'s| is)\s+)?(?:the\s+)?(?:lcm|least common multiple)\s+of\s+(\d+)\s+and\s+(\d+)/i))) {
+    return `lcm ${match[1]} ${match[2]}`;
+  }
+  if ((match = text.match(/^(?:what(?:'s| is)\s+)?(\d*\.?\d+)\s*(?:%|percent)\s+of\s+(\d*\.?\d+)/i))) {
+    return `${match[1]}/100 * ${match[2]}`;
+  }
+
+  // Fallback: strip question framing and spoken operators, leaving canonical
+  // triggers (solve, find critical points of, factor, ...) intact.
+  let normalized = text
+    .replace(/^\s*(?:please\s+)?(?:can you|could you|help me|i want to|i need to|i would like to)\s+/i, "")
+    .replace(/^\s*(?:what(?:'s| is| are)|calculate|compute|evaluate|work out|how much is|tell me|give me)\s+(?:the\s+)?(?:value of\s+)?/i, "")
+    .replace(/\s+times\s+/gi, " * ")
+    .replace(/\s+multiplied by\s+/gi, " * ")
+    .replace(/\s+divided by\s+/gi, " / ")
+    .replace(/\s+plus\s+/gi, " + ")
+    .replace(/\s+minus\s+/gi, " - ")
+    .trim();
+  return normalized || text;
+}
+
+export function analyzeUniversal(rawQuestion, values = {}) {
+  const question = interpretNaturalLanguage(rawQuestion);
   const lower = question.toLowerCase();
   let routed;
   let routedLabel;
@@ -2521,14 +2674,18 @@ export function analyzeUniversal(question, values = {}) {
     );
   }
 
+  const wasRewritten = question.trim() !== rawQuestion.trim();
   return {
     ...routed,
-    details: `Universal Ask routed this to ${routedLabel}. ${routed.details}`,
+    problemType: routedLabel,
+    details: `Detected problem type: ${routedLabel}. ${routed.details}`,
     steps: [
       {
-        title: "Route question",
+        title: "Interpret the question",
         expression: routedLabel,
-        detail: "The universal solver detects the problem type, then uses the matching tree engine.",
+        detail: wasRewritten
+          ? `Read the natural-language question as "${question}", then routed it to the ${routedLabel} engine.`
+          : "The solver detects the problem type from the question, then uses the matching tree engine.",
       },
       ...routed.steps,
     ],

@@ -9,6 +9,7 @@ import {
   nodeChildren,
   nodeLabel,
   nodeTone,
+  PROBLEM_CATEGORIES,
   suggestProblemHelp,
 } from "./solver-engine.mjs";
 
@@ -59,7 +60,7 @@ const state = {
 
 const elements = {
   modeButtons: document.querySelectorAll("[data-mode]"),
-  sampleButtons: document.querySelectorAll("[data-sample]"),
+  exampleSelect: document.querySelector("#exampleSelect"),
   statementInput: document.querySelector("#statementInput"),
   variableInput: document.querySelector("#variableInput"),
   compareInput: document.querySelector("#compareInput"),
@@ -191,7 +192,7 @@ function renderAnalysis(analysis) {
     elements.valuesPanel.innerHTML = "";
   }
 
-  elements.modeBadge.textContent = MODE_CONFIG[state.mode].label;
+  elements.modeBadge.textContent = analysis.problemType ?? MODE_CONFIG[state.mode].label;
   elements.summaryBadge.textContent = analysis.summary;
   elements.variableCount.textContent = String(analysis.variables.length);
   elements.resultLabel.textContent = analysis.answer;
@@ -530,15 +531,35 @@ for (const button of elements.modeButtons) {
   button.addEventListener("click", () => setMode(button.dataset.mode, true));
 }
 
-for (const button of elements.sampleButtons) {
-  button.addEventListener("click", () => {
-    const mode = button.dataset.sampleMode;
-    setMode(mode, false);
-    elements.statementInput.value = button.dataset.sample;
-    elements.compareInput.value = button.dataset.compare ?? MODE_CONFIG[mode].compare;
-    update();
-  });
+function populateExampleSelect() {
+  const fragment = document.createDocumentFragment();
+  for (const { category, examples } of PROBLEM_CATEGORIES) {
+    const group = document.createElement("optgroup");
+    group.label = category;
+    for (const { label, sample } of examples) {
+      const option = document.createElement("option");
+      option.value = sample;
+      option.textContent = label;
+      group.appendChild(option);
+    }
+    fragment.appendChild(group);
+  }
+  elements.exampleSelect.appendChild(fragment);
 }
+
+populateExampleSelect();
+
+elements.exampleSelect.addEventListener("change", () => {
+  const sample = elements.exampleSelect.value;
+  if (!sample) {
+    return;
+  }
+  setMode("ask", false);
+  elements.statementInput.value = sample;
+  update();
+  // Reset the dropdown label back to the placeholder for the next pick.
+  elements.exampleSelect.selectedIndex = 0;
+});
 
 if (!loadInitialState()) {
   setMode("ask", true);
@@ -548,14 +569,12 @@ function loadInitialState() {
   const params = new URLSearchParams(window.location.search);
   const sampleLabel = params.get("sample");
   if (sampleLabel) {
-    const sampleButton = [...elements.sampleButtons].find(
-      (button) => button.textContent.trim().toLowerCase() === sampleLabel.toLowerCase(),
-    );
-    if (sampleButton) {
-      const mode = sampleButton.dataset.sampleMode;
-      setMode(mode, false);
-      elements.statementInput.value = sampleButton.dataset.sample;
-      elements.compareInput.value = sampleButton.dataset.compare ?? MODE_CONFIG[mode].compare;
+    const example = PROBLEM_CATEGORIES
+      .flatMap((entry) => entry.examples)
+      .find((item) => item.label.toLowerCase() === sampleLabel.toLowerCase());
+    if (example) {
+      setMode("ask", false);
+      elements.statementInput.value = example.sample;
       update();
       return true;
     }

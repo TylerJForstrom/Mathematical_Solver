@@ -39,6 +39,8 @@ import {
   analyzeTaylor,
   analyzeTreeExport,
   analyzeUniversal,
+  interpretNaturalLanguage,
+  PROBLEM_CATEGORIES,
   analyzeVector,
   suggestProblemHelp,
 } from "./solver-engine.mjs";
@@ -2493,4 +2495,40 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("sum k^2 from k=1 to 5").answer, "sum = 55");
   assert.equal(analyzeUniversal("circle radius=3").summary, "circle geometry");
   assert.equal(analyzeUniversal("distance between (1,2) and (4,6)").summary, "coordinate distance");
+});
+
+runTest("natural-language parser maps word problems to the right solver", () => {
+  const avg = analyzeUniversal("What is the average of 4, 8, 15, 16, 23, 42?");
+  assert.equal(avg.problemType, "Statistics");
+  assert.equal(avg.answer, "mean = 18");
+
+  const choose = analyzeUniversal("how many ways can I choose 3 from 10");
+  assert.equal(choose.problemType, "Combinatorics");
+  assert.equal(choose.answer, "C(10, 3) = 120");
+
+  const coin = analyzeUniversal("probability of 3 heads in 10 coin flips");
+  assert.equal(coin.problemType, "Statistics");
+  assert.equal(coin.answer, "P(X = 3) = 0.117188");
+
+  const deriv = analyzeUniversal("what is the derivative of x squared");
+  assert.equal(deriv.problemType, "Derivative");
+  assert.equal(deriv.answer, "2x");
+
+  assert.equal(analyzeUniversal("the gcd of 84 and 126").answer, "gcd(84, 126) = 42");
+  assert.equal(analyzeUniversal("what is 15% of 200").answer, "30");
+  assert.equal(analyzeUniversal("calculate 5 + 3 * 2").answer, "11");
+  assert.equal(analyzeUniversal("median of 3, 1, 4, 1, 5, 9, 2").answer, "median = 3");
+});
+
+runTest("natural-language parser preserves canonical inputs and exposes problemType", () => {
+  // Canonical phrasings must not be mangled by the interpreter.
+  assert.equal(interpretNaturalLanguage("solve x^2 - 5x + 6 = 0"), "solve x^2 - 5x + 6 = 0");
+  assert.equal(interpretNaturalLanguage("find critical points of x^3 - 3x"), "find critical points of x^3 - 3x");
+  assert.equal(interpretNaturalLanguage("differentiate x^3"), "differentiate x^3");
+  assert.equal(interpretNaturalLanguage("what is the derivative of x squared"), "differentiate x^2");
+
+  const result = analyzeUniversal("solve x^2 - 5x + 6 = 0");
+  assert.equal(result.problemType, "Equation");
+  assert.ok(PROBLEM_CATEGORIES.length >= 8);
+  assert.ok(PROBLEM_CATEGORIES.every((entry) => entry.category && entry.examples.length > 0));
 });

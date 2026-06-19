@@ -10,6 +10,12 @@ closed-form differential equations, and explain the work step by step.
 The frontend currently supports:
 
 - Universal Ask mode that routes common math questions to the right solver
+- A natural-language parser that reads plain word problems ("what is the average
+  of 4, 8, 15", "how many ways to choose 3 from 10", "probability of 3 heads in
+  10 coin flips", "what is the derivative of x squared"), maps them to the
+  matching problem type, and shows that detected type with the solution
+- A categorized example dropdown that lists the solvable problem types instead of
+  a wall of buttons, keeping the interface compact
 - Propositional logic evaluation, truth tables, DPLL SAT solving with unsat-core
   diagnostics, and semantic tableaux proof trees
 - Karnaugh maps for two- to four-variable Boolean minimization with optional
