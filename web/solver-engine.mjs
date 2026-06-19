@@ -4445,6 +4445,9 @@ export function analyzeNumerical(statement) {
   if (request.kind === "integral") {
     return analyzeNumericalIntegration(request, expression);
   }
+  if (request.kind === "fixed-point") {
+    return analyzeFixedPointIteration(request, expression);
+  }
 
   const evaluator = numericFunctionFromExpression(expression);
   const steps = [
@@ -4507,6 +4510,158 @@ export function analyzeNumerical(statement) {
       ["f(root)", formatNumber(evaluator(result.root))],
     ],
     ...(graph ? { graph } : {}),
+  };
+}
+
+function analyzeFixedPointIteration(request, expression) {
+  if (expression.kind === "equation") {
+    throw new Error("Fixed-point iteration expects an iteration map g(x), not an equation.");
+  }
+  const evaluator = numericFunctionFromExpression(expression);
+  const trace = fixedPointTrace(evaluator, request.guess);
+  const steps = [
+    {
+      title: "Parse fixed-point problem",
+      expression: `${request.variable} = ${request.expression}`,
+      detail: `The solver iterates ${request.variable} <- g(${request.variable}) and looks for a point where g(${request.variable}) = ${request.variable}.`,
+    },
+    {
+      title: "Iterate the map",
+      expression: `${request.variable} ~= ${formatNumber(trace.root)}`,
+      detail: trace.converged
+        ? "Each step feeds the previous output back into g until successive values stop changing."
+        : "The iteration did not settle within the iteration cap; the map may not be a contraction near this start.",
+    },
+  ];
+
+  const graph = buildFixedPointGraph(evaluator, request, trace);
+  return {
+    mode: "numerical",
+    tree: expression,
+    answer: `${request.variable} ~= ${formatNumber(trace.root)}`,
+    summary: "fixed-point iteration",
+    details: "Fixed-point iteration with a cobweb convergence trace",
+    variables: mathVariables(expression),
+    metrics: treeMetrics(expression),
+    steps,
+    table: fixedPointTable(request, trace),
+    artifacts: [
+      ["Method", "fixed-point iteration"],
+      ["Iteration map", `g(${request.variable}) = ${request.expression}`],
+      ["Initial guess", formatNumber(request.guess)],
+      ["Iterations", formatNumber(trace.iterations.length)],
+      ["Converged", trace.converged ? "yes" : "no"],
+      ["Fixed point", `${request.variable} ~= ${formatNumber(trace.root)}`],
+      ["g(fixed point)", formatNumber(evaluator(trace.root))],
+    ],
+    ...(graph ? { graph } : {}),
+  };
+}
+
+function fixedPointTrace(evaluator, start) {
+  let x = start;
+  const iterations = [];
+  for (let index = 0; index < 100; index += 1) {
+    const mapped = evaluator(x);
+    if (!Number.isFinite(mapped)) {
+      throw new Error("Fixed-point iteration hit a non-finite value; the map may diverge from this start.");
+    }
+    if (Math.abs(mapped) > 1e12) {
+      throw new Error("Fixed-point iteration diverged; rearrange the equation so |g'(x)| < 1 near the root.");
+    }
+    const delta = mapped - x;
+    iterations.push({
+      iteration: index,
+      x: normalizeNumber(x),
+      mapped: normalizeNumber(mapped),
+      delta: normalizeNumber(delta),
+    });
+    if (Math.abs(delta) < 1e-10) {
+      return { root: normalizeNumber(mapped), iterations, converged: true };
+    }
+    x = mapped;
+  }
+  return { root: normalizeNumber(x), iterations, converged: false };
+}
+
+function fixedPointTable(request, trace) {
+  const rows = visibleRootIterations(trace.iterations);
+  return {
+    headers: ["Iter", request.variable, `g(${request.variable})`, "|Δ|"],
+    rows: rows.map((row) => row.iteration === "..."
+      ? ["...", "...", "...", "..."]
+      : [
+          String(row.iteration),
+          formatNumber(row.x),
+          formatNumber(row.mapped),
+          formatNumber(Math.abs(row.delta)),
+        ]),
+  };
+}
+
+function buildFixedPointGraph(evaluator, request, trace) {
+  const xMarkers = trace.iterations.flatMap((row) => [row.x, row.mapped]).filter(Number.isFinite);
+  if (xMarkers.length === 0) {
+    return null;
+  }
+  const rawXMin = Math.min(...xMarkers);
+  const rawXMax = Math.max(...xMarkers);
+  const rawSpan = rawXMax - rawXMin;
+  const span = rawSpan > 0 ? rawSpan : Math.max(1, Math.abs(rawXMin) * 0.5);
+  const xMin = normalizeNumber(rawXMin - span * 0.25);
+  const xMax = normalizeNumber(rawXMax + span * 0.25);
+  const functionPoints = sampleNumericFunction(evaluator, xMin, xMax, 121);
+  if (functionPoints.length < 2) {
+    return null;
+  }
+
+  // Cobweb path: vertical to the curve, horizontal to the y = x diagonal, repeat.
+  const cobwebPoints = [];
+  const cobwebSource = trace.iterations.slice(0, 24);
+  cobwebSource.forEach((row, index) => {
+    if (index === 0) {
+      cobwebPoints.push({ x: row.x, y: row.x });
+    }
+    cobwebPoints.push({ x: row.x, y: row.mapped });
+    cobwebPoints.push({ x: row.mapped, y: row.mapped });
+  });
+  const finiteCobweb = cobwebPoints.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+
+  const diagonalLine = {
+    label: `${request.variable} = ${request.variable}`,
+    className: "graph-line-muted",
+    points: [
+      { x: xMin, y: xMin },
+      { x: xMax, y: xMax },
+    ],
+  };
+  const scatterPoints = trace.iterations
+    .map((row) => ({ x: row.x, y: row.mapped }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  const allYValues = [
+    ...functionPoints.map((point) => point.y),
+    ...finiteCobweb.map((point) => point.y),
+    xMin,
+    xMax,
+  ];
+
+  return {
+    expression: `g(${request.variable}) = ${request.expression}`,
+    kind: "root-iterations",
+    scatterLabel: "Iterations",
+    xMin,
+    xMax,
+    yMin: Math.min(...allYValues),
+    yMax: Math.max(...allYValues),
+    points: functionPoints,
+    scatter: scatterPoints,
+    lines: [
+      { label: `g(${request.variable})`, points: functionPoints },
+      diagonalLine,
+      ...(finiteCobweb.length >= 2
+        ? [{ label: "Cobweb path", className: "graph-line-muted", points: finiteCobweb }]
+        : []),
+    ],
   };
 }
 
@@ -18803,6 +18958,9 @@ function extractNumericalQuestion(statement) {
   if (isNumericalIntegrationQuestion(lower)) {
     return extractNumericalIntegrationQuestion(statement);
   }
+  if (isFixedPointQuestion(lower)) {
+    return extractFixedPointQuestion(statement);
+  }
 
   const method = lower.includes("newton")
     ? "newton"
@@ -18872,6 +19030,40 @@ function extractNumericalQuestion(statement) {
     secondGuess,
     low,
     high,
+  };
+}
+
+function extractFixedPointQuestion(statement) {
+  let expression = statement
+    .replace(/^(fixed[\s-]?point(?:\s+iteration)?)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+
+  const guessMatch = expression.match(/\b(?:guess|x0|start)\s*=\s*([-+]?\d*\.?\d+)/i);
+  let guess = 0.5;
+  if (guessMatch) {
+    guess = Number(guessMatch[1]);
+    expression = expression.replace(guessMatch[0], "").trim();
+  }
+
+  // Accept an "x = g(x)" or "g(x) = ..." form by keeping the right-hand iteration map.
+  if (expression.includes("=")) {
+    const parts = expression.split("=");
+    expression = parts.slice(1).join("=").trim();
+  }
+
+  if (!expression) {
+    throw new Error("Fixed-point iteration needs an iteration map, e.g. fixed point cos(x) guess=0.5.");
+  }
+  if (!Number.isFinite(guess)) {
+    throw new Error("Fixed-point iteration needs a finite starting guess.");
+  }
+
+  return {
+    kind: "fixed-point",
+    expression,
+    variable: "x",
+    guess,
   };
 }
 
@@ -26181,6 +26373,7 @@ function isNumericalOdeQuestion(lower) {
 
 function isNumericalQuestion(lower) {
   return isNumericalIntegrationQuestion(lower) ||
+    isFixedPointQuestion(lower) ||
     lower.startsWith("newton ") ||
     lower.startsWith("secant ") ||
     lower.startsWith("bisection ") ||
@@ -26198,6 +26391,12 @@ function isNumericalIntegrationQuestion(lower) {
     lower.startsWith("numerical integral ") ||
     lower.startsWith("approximate integral ") ||
     ((lower.includes("simpson") || lower.includes("trapezoid")) && lower.includes("integrate"));
+}
+
+function isFixedPointQuestion(lower) {
+  return lower.startsWith("fixed point ") ||
+    lower.startsWith("fixed-point ") ||
+    lower.startsWith("fixedpoint ");
 }
 
 function isSystemQuestion(lower) {
