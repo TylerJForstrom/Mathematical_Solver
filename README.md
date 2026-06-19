@@ -191,6 +191,9 @@ The frontend currently supports:
   and root-finding graphs
 - Fixed-point iteration for x = g(x) maps with a convergence/divergence verdict,
   delta-tracking iteration table, and a cobweb plot against the y = x diagonal
+- Gradient-descent minimization of a one-variable function with a configurable
+  learning rate, a per-step gradient table, divergence detection, and a descent
+  path traced over the function plot
 - Simpson's rule and trapezoidal-rule numerical integration
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
@@ -385,6 +388,9 @@ The same idea works for algebra and calculus:
 - `fixed point cos(x) guess=0.5` iterates the map `x <- g(x)`, returns the fixed
   point `x ~= 0.739085`, and plots a cobweb path; the `x = g(x)` form (such as
   `fixed point x = (x + 2/x)/2 guess=1`) is also accepted.
+- `gradient descent x^2 - 4x + 3 guess=0 rate=0.1` steps against the gradient to
+  the minimum `x ~= 2, f = -1`, tracing the descent over the function plot;
+  `rate=`/`guess=`/`iters=` tune the search and an unstable `rate=` is flagged.
 - `bisection x^2 - 4 interval 0 3` tracks midpoint brackets and plots the
   root-finding iterations.
 - `simpson integrate sin(x) from 0 to pi n=100` approximates a definite

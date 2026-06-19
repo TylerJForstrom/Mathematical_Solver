@@ -2087,6 +2087,35 @@ runTest("numerical mode flags diverging fixed-point maps", () => {
   assert.throws(() => analyzeNumerical("fixed point 2*x + 1 guess=1"), /diverged/);
 });
 
+runTest("numerical mode minimizes with gradient descent", () => {
+  const result = analyzeNumerical("gradient descent x^2 - 4x + 3 guess=0 rate=0.1");
+
+  assert.equal(result.summary, "gradient descent minimum");
+  assert.equal(result.answer, "x ~= 2, f = -1");
+  assert.equal(artifactValue(result, "Method"), "gradient descent");
+  assert.equal(artifactValue(result, "Learning rate"), "0.1");
+  assert.equal(artifactValue(result, "Converged"), "yes");
+  assert.equal(artifactValue(result, "Minimum"), "x ~= 2");
+  assert.equal(artifactValue(result, "f(min)"), "-1");
+  assert.equal(result.table.headers.join(","), "Iter,x,f(x),f'(x),Next x");
+  assert.equal(result.graph.kind, "root-iterations");
+  assert.ok(result.graph.lines.some((series) => series.label === "Descent path"));
+});
+
+runTest("numerical mode finds a nonzero gradient-descent minimum and routes via Ask", () => {
+  const result = analyzeNumerical("gradient descent (x-3)^2 + 1 guess=0 rate=0.2");
+  assert.equal(result.answer, "x ~= 3, f = 1");
+
+  const routed = analyzeUniversal("gradient descent x^2 - 4x + 3 guess=0 rate=0.1");
+  assert.equal(routed.summary, "gradient descent minimum");
+  assert.equal(routed.answer, "x ~= 2, f = -1");
+});
+
+runTest("numerical mode flags diverging gradient descent", () => {
+  assert.throws(() => analyzeNumerical("gradient descent x^2 guess=1 rate=5"), /diverged/);
+  assert.throws(() => analyzeNumerical("gradient descent x^2 guess=0 rate=0"), /positive learning rate/);
+});
+
 runTest("numerical mode computes quadrature rules", () => {
   const simpson = analyzeNumerical("simpson integrate sin(x) from 0 to pi n=100");
   const trapezoid = analyzeNumerical("trapezoidal integrate x^2 from 0 to 3 n=6");

@@ -4462,6 +4462,9 @@ export function analyzeNumerical(statement) {
   if (request.kind === "fixed-point") {
     return analyzeFixedPointIteration(request, expression);
   }
+  if (request.kind === "gradient-descent") {
+    return analyzeGradientDescent(request, expression);
+  }
 
   const evaluator = numericFunctionFromExpression(expression);
   const steps = [
@@ -4674,6 +4677,172 @@ function buildFixedPointGraph(evaluator, request, trace) {
       diagonalLine,
       ...(finiteCobweb.length >= 2
         ? [{ label: "Cobweb path", className: "graph-line-muted", points: finiteCobweb }]
+        : []),
+    ],
+  };
+}
+
+function analyzeGradientDescent(request, expression) {
+  if (expression.kind === "equation") {
+    throw new Error("Gradient descent expects a function to minimize, not an equation.");
+  }
+  const evaluator = numericFunctionFromExpression(expression);
+  const trace = gradientDescentTrace(evaluator, request.guess, request.rate, request.maxIterations);
+  const finalSlope = trace.iterations.at(-1)?.slope;
+  const steps = [
+    {
+      title: "Parse the objective",
+      expression: `f(${request.variable}) = ${request.expression}`,
+      detail: `Gradient descent searches for a local minimum of f(${request.variable}).`,
+    },
+    {
+      title: "Step downhill",
+      expression: `${request.variable} <- ${request.variable} - ${formatNumber(request.rate)} * f'(${request.variable})`,
+      detail: "Each step moves against the gradient, scaled by the learning rate.",
+    },
+    {
+      title: trace.converged ? "Reach a flat gradient" : "Stop at the iteration cap",
+      expression: `${request.variable} ~= ${formatNumber(trace.minimum)}, f = ${formatNumber(trace.value)}`,
+      detail: trace.converged
+        ? "Descent stops once the gradient is essentially zero."
+        : "The gradient was still nonzero at the iteration cap; try more iterations or a different rate.",
+    },
+  ];
+
+  const graph = buildGradientDescentGraph(evaluator, request, trace);
+  return {
+    mode: "numerical",
+    tree: expression,
+    answer: `${request.variable} ~= ${formatNumber(trace.minimum)}, f = ${formatNumber(trace.value)}`,
+    summary: "gradient descent minimum",
+    details: "Gradient-descent minimization with a step-by-step descent trace",
+    variables: mathVariables(expression),
+    metrics: treeMetrics(expression),
+    steps,
+    table: gradientDescentTable(request, trace),
+    artifacts: [
+      ["Method", "gradient descent"],
+      ["Function", request.expression],
+      ["Initial guess", formatNumber(request.guess)],
+      ["Learning rate", formatNumber(request.rate)],
+      ["Iterations", formatNumber(trace.iterations.length)],
+      ["Converged", trace.converged ? "yes" : "no"],
+      ["Minimum", `${request.variable} ~= ${formatNumber(trace.minimum)}`],
+      ["f(min)", formatNumber(trace.value)],
+      ["Gradient at min", formatOptionalNumber(finalSlope)],
+    ],
+    ...(graph ? { graph } : {}),
+  };
+}
+
+function gradientDescentTrace(evaluator, start, rate, maxIterations) {
+  let x = start;
+  const iterations = [];
+  for (let index = 0; index < maxIterations; index += 1) {
+    const y = evaluator(x);
+    if (!Number.isFinite(y)) {
+      throw new Error("Gradient descent hit a non-finite function value; try a smaller rate or a different guess.");
+    }
+    const slope = numericGradient(evaluator, x);
+    if (!Number.isFinite(slope)) {
+      throw new Error("Gradient descent hit a non-finite gradient; try a different guess.");
+    }
+    const next = x - rate * slope;
+    iterations.push({
+      iteration: index,
+      x: normalizeNumber(x),
+      y: normalizeNumber(y),
+      slope: normalizeNumber(slope),
+      next: normalizeNumber(next),
+    });
+    if (Math.abs(slope) < 1e-8) {
+      return { minimum: normalizeNumber(x), value: normalizeNumber(y), iterations, converged: true };
+    }
+    if (!Number.isFinite(next) || Math.abs(next) > 1e12) {
+      throw new Error("Gradient descent diverged; try a smaller learning rate.");
+    }
+    if (Math.abs(next - x) < 1e-12) {
+      const settledValue = evaluator(next);
+      return {
+        minimum: normalizeNumber(next),
+        value: Number.isFinite(settledValue) ? normalizeNumber(settledValue) : normalizeNumber(y),
+        iterations,
+        converged: true,
+      };
+    }
+    x = next;
+  }
+  const finalValue = evaluator(x);
+  return {
+    minimum: normalizeNumber(x),
+    value: Number.isFinite(finalValue) ? normalizeNumber(finalValue) : Number.NaN,
+    iterations,
+    converged: false,
+  };
+}
+
+function numericGradient(evaluator, x) {
+  // Scale the finite-difference step with the magnitude of x so the derivative
+  // does not silently underflow to zero (and look "converged") far from the start.
+  const h = 1e-6 * Math.max(1, Math.abs(x));
+  return (evaluator(x + h) - evaluator(x - h)) / (2 * h);
+}
+
+function gradientDescentTable(request, trace) {
+  const rows = visibleRootIterations(trace.iterations);
+  return {
+    headers: ["Iter", request.variable, "f(x)", "f'(x)", "Next x"],
+    rows: rows.map((row) => row.iteration === "..."
+      ? ["...", "...", "...", "...", "..."]
+      : [
+          String(row.iteration),
+          formatNumber(row.x),
+          formatNumber(row.y),
+          formatOptionalNumber(row.slope),
+          formatOptionalNumber(row.next),
+        ]),
+  };
+}
+
+function buildGradientDescentGraph(evaluator, request, trace) {
+  const xMarkers = trace.iterations.flatMap((row) => [row.x, row.next]).filter(Number.isFinite);
+  xMarkers.push(trace.minimum);
+  const finiteXMarkers = xMarkers.filter(Number.isFinite);
+  if (finiteXMarkers.length === 0) {
+    return null;
+  }
+  const rawXMin = Math.min(...finiteXMarkers);
+  const rawXMax = Math.max(...finiteXMarkers);
+  const rawSpan = rawXMax - rawXMin;
+  const span = rawSpan > 0 ? rawSpan : Math.max(1, Math.abs(rawXMin) * 0.5);
+  const xMin = normalizeNumber(rawXMin - span * 0.25);
+  const xMax = normalizeNumber(rawXMax + span * 0.25);
+  const functionPoints = sampleNumericFunction(evaluator, xMin, xMax, 121);
+  if (functionPoints.length < 2) {
+    return null;
+  }
+  const descentPoints = trace.iterations
+    .map((row) => ({ x: row.x, y: row.y }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  const allYValues = [
+    ...functionPoints.map((point) => point.y),
+    ...descentPoints.map((point) => point.y),
+    trace.value,
+  ].filter(Number.isFinite);
+  return {
+    expression: `f(${request.variable}) = ${request.expression}`,
+    kind: "root-iterations",
+    scatterLabel: "Descent steps",
+    xMin,
+    xMax,
+    yMin: Math.min(...allYValues),
+    yMax: Math.max(...allYValues),
+    points: functionPoints,
+    scatter: descentPoints,
+    lines: [
+      { label: "f(x)", points: functionPoints },
+      ...(descentPoints.length >= 2
+        ? [{ label: "Descent path", className: "graph-line-muted", points: descentPoints }]
         : []),
     ],
   };
@@ -19345,6 +19514,9 @@ function extractNumericalQuestion(statement) {
   if (isFixedPointQuestion(lower)) {
     return extractFixedPointQuestion(statement);
   }
+  if (isGradientDescentQuestion(lower)) {
+    return extractGradientDescentQuestion(statement);
+  }
 
   const method = lower.includes("newton")
     ? "newton"
@@ -19448,6 +19620,62 @@ function extractFixedPointQuestion(statement) {
     expression,
     variable: "x",
     guess,
+  };
+}
+
+function extractGradientDescentQuestion(statement) {
+  let expression = statement
+    .replace(/^gradient\s+descent\s+/i, "")
+    .replace(/^(?:minimize|minimise)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+
+  const guessMatch = expression.match(/\b(?:guess|x0|start)\s*=\s*([-+]?\d*\.?\d+)/i);
+  let guess = 0;
+  if (guessMatch) {
+    guess = Number(guessMatch[1]);
+    expression = expression.replace(guessMatch[0], "").trim();
+  }
+
+  const rateMatch = expression.match(/\b(?:rate|lr|step)\s*=\s*([-+]?\d*\.?\d+)/i);
+  let rate = 0.1;
+  if (rateMatch) {
+    rate = Number(rateMatch[1]);
+    expression = expression.replace(rateMatch[0], "").trim();
+  }
+
+  const iterationMatch = expression.match(/\b(?:iterations|iters|max)\s*=\s*(\d+)/i);
+  let maxIterations = 200;
+  if (iterationMatch) {
+    maxIterations = Number(iterationMatch[1]);
+    expression = expression.replace(iterationMatch[0], "").trim();
+  }
+
+  if (expression.includes("=")) {
+    const parts = expression.split("=");
+    expression = parts.slice(1).join("=").trim();
+  }
+
+  if (!expression) {
+    throw new Error("Gradient descent needs a function, e.g. gradient descent x^2 - 4x + 3 guess=0 rate=0.1.");
+  }
+  if (!Number.isFinite(guess)) {
+    throw new Error("Gradient descent needs a finite starting guess.");
+  }
+  if (!Number.isFinite(rate) || rate <= 0) {
+    throw new Error("Gradient descent needs a positive learning rate.");
+  }
+  if (!Number.isSafeInteger(maxIterations) || maxIterations < 1 || maxIterations > 100000) {
+    throw new Error("Gradient descent iterations must be an integer from 1 to 100000.");
+  }
+
+  return {
+    kind: "gradient-descent",
+    expression,
+    variable: "x",
+    guess,
+    rate,
+    maxIterations,
   };
 }
 
@@ -26766,6 +26994,7 @@ function isNumericalOdeQuestion(lower) {
 function isNumericalQuestion(lower) {
   return isNumericalIntegrationQuestion(lower) ||
     isFixedPointQuestion(lower) ||
+    isGradientDescentQuestion(lower) ||
     lower.startsWith("newton ") ||
     lower.startsWith("secant ") ||
     lower.startsWith("bisection ") ||
@@ -26789,6 +27018,10 @@ function isFixedPointQuestion(lower) {
   return lower.startsWith("fixed point ") ||
     lower.startsWith("fixed-point ") ||
     lower.startsWith("fixedpoint ");
+}
+
+function isGradientDescentQuestion(lower) {
+  return lower.startsWith("gradient descent ");
 }
 
 function isSystemQuestion(lower) {
