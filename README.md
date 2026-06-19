@@ -149,7 +149,7 @@ The frontend currently supports:
   two-sample variance F tests and Levene equal-variance tests,
   one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
-  permutation tests, ANCOVA with covariate-adjusted means, one-way MANOVA, one-way ANOVA, Welch ANOVA, repeated-measures ANOVA,
+  permutation tests, two-sample Kolmogorov-Smirnov tests, ANCOVA with covariate-adjusted means, one-way MANOVA, one-way ANOVA, Welch ANOVA, repeated-measures ANOVA,
   two-way ANOVA with interaction, Mann-Whitney U with exact small-sample p-values when there are no ties,
   Wilcoxon signed-rank with exact
   small-sample p-values when absolute differences are untied,
@@ -482,6 +482,8 @@ The same idea works for algebra and calculus:
   without relying on a large-sample chi-square approximation.
 - `permutation test group1: 10,12,9; group2: 8,7,11 resamples=2000 seed=5`
   shuffles group labels into a reproducible nonparametric p-value.
+- `ks test group1: 1,2,3,4; group2: 3,4,5,6` compares two empirical CDFs
+  and reports the maximum distribution gap.
 - `kaplan-meier times: 5,6,6,8,10; events: 1,1,0,1,0` estimates a
   right-censored survival curve and reports median survival.
 - `log-rank group1 times: 5,6,6,8,10 events: 1,1,0,1,0; group2 times: 4,6,7,9,12 events: 1,0,1,1,0`
@@ -611,7 +613,7 @@ The demo includes:
   Jarque-Bera and Anderson-Darling normality tests, equal-variance tests,
   one-sample/two-sample/paired t tests,
   one-proportion/two-proportion z tests,
-  proportion confidence intervals, permutation tests, ANOVA, chi-square tests
+  proportion confidence intervals, permutation tests, two-sample Kolmogorov-Smirnov tests, ANOVA, chi-square tests
   of goodness-of-fit and independence, Fisher exact tests,
   nonparametric rank tests including exact small-sample Mann-Whitney and
   Wilcoxon signed-rank p-values with Hodges-Lehmann shift estimates,

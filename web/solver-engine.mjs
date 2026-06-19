@@ -2064,6 +2064,10 @@ export function analyzeStatistics(statement) {
     return analyzePermutationTest(statement);
   }
 
+  if (isKolmogorovSmirnovQuestion(lower)) {
+    return analyzeKolmogorovSmirnovTest(statement);
+  }
+
   if (isCustomNonlinearRegressionModelComparisonQuestion(lower)) {
     return analyzeCustomNonlinearRegressionModelComparison(statement);
   }
@@ -2383,6 +2387,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isMultivariateStatsQuestion(lower, question)) {
     routed = analyzeStatistics(question);
     routedLabel = "Multivariate statistics";
+  } else if (isKolmogorovSmirnovQuestion(lower)) {
+    routed = analyzeStatistics(question);
+    routedLabel = "Kolmogorov-Smirnov test";
   } else if (isMatrixQuestion(lower)) {
     routed = analyzeMatrix(question);
     routedLabel = "Matrix";
@@ -5150,6 +5157,83 @@ function analyzeTwoSampleTTest(statement) {
       ["Hedges g", formatNumber(hedgesG)],
       [`Hedges g ${effectIntervalLabel}`, formatEffectSizeInterval(hedgesGInterval)],
       ["Effect size CI method", "approximate t interval"],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function analyzeKolmogorovSmirnovTest(statement) {
+  const { left, right, alternative, alpha } = parseKolmogorovSmirnovInput(statement);
+  if (left.length < 1 || right.length < 1) {
+    throw new Error("Kolmogorov-Smirnov tests need at least one value in each group.");
+  }
+
+  const result = twoSampleKolmogorovSmirnov(left, right, alternative);
+  const decision = result.pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
+  const directionLabel = alternative === "greater"
+    ? "group1 CDF > group2 CDF"
+    : alternative === "less"
+      ? "group1 CDF < group2 CDF"
+      : "two-sided CDF difference";
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode([...left, ...right], [
+      statsMetricNode("D", result.statistic),
+      statsMetricNode("D+", result.dPlus),
+      statsMetricNode("D-", result.dMinus),
+      statsMetricNode("P", result.pValue),
+    ], "KS"),
+    answer: `D = ${formatNumber(result.statistic)}, p = ${formatNumber(result.pValue)}`,
+    summary: "two-sample Kolmogorov-Smirnov test",
+    details: "Empirical CDF distribution comparison",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode([...left, ...right])),
+    steps: [
+      {
+        title: "Read independent samples",
+        expression: `n1 = ${formatNumber(left.length)}, n2 = ${formatNumber(right.length)}`,
+        detail: "The two-sample KS test compares the full empirical distributions rather than only their centers.",
+      },
+      {
+        title: "Build empirical CDFs",
+        expression: `unique support values = ${formatNumber(result.rows.length)}`,
+        detail: "At each observed value the solver computes the share of each group at or below that value.",
+      },
+      {
+        title: "Find maximum CDF gap",
+        expression: `D+ = ${formatNumber(result.dPlus)}, D- = ${formatNumber(result.dMinus)}, D = ${formatNumber(result.statistic)}`,
+        detail: "D is the largest vertical gap between the two empirical CDFs.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `p = ${formatNumber(result.pValue)}`,
+        detail: result.method,
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the two samples were not drawn from the same distribution.",
+      },
+    ],
+    table: {
+      headers: ["Value", "F1(x)", "F2(x)", "F1-F2", "F2-F1"],
+      rows: result.rows.map((row) => [
+        formatNumber(row.value),
+        formatNumber(row.leftCdf),
+        formatNumber(row.rightCdf),
+        formatNumber(row.leftMinusRight),
+        formatNumber(row.rightMinusLeft),
+      ]),
+    },
+    artifacts: [
+      ["Alternative", directionLabel],
+      ["D+ statistic", formatNumber(result.dPlus)],
+      ["D- statistic", formatNumber(result.dMinus)],
+      ["D statistic", formatNumber(result.statistic)],
+      ["Effective n", formatNumber(result.effectiveCount)],
+      ["p-value", formatNumber(result.pValue)],
+      ["p-value method", result.method],
       ["Decision", decision],
     ],
   };
@@ -20219,6 +20303,78 @@ function permutationPValue(distribution, observedDifference, alternative) {
   return normalizeNumber((extreme + 1) / (distribution.length + 1));
 }
 
+function twoSampleKolmogorovSmirnov(left, right, alternative) {
+  const sortedLeft = [...left].sort(compareNumbers);
+  const sortedRight = [...right].sort(compareNumbers);
+  const support = [...new Set([...sortedLeft, ...sortedRight])].sort(compareNumbers);
+  let leftIndex = 0;
+  let rightIndex = 0;
+  let dPlus = 0;
+  let dMinus = 0;
+  const rows = [];
+
+  for (const value of support) {
+    while (leftIndex < sortedLeft.length && sortedLeft[leftIndex] <= value) {
+      leftIndex += 1;
+    }
+    while (rightIndex < sortedRight.length && sortedRight[rightIndex] <= value) {
+      rightIndex += 1;
+    }
+    const leftCdf = leftIndex / sortedLeft.length;
+    const rightCdf = rightIndex / sortedRight.length;
+    const leftMinusRight = leftCdf - rightCdf;
+    const rightMinusLeft = rightCdf - leftCdf;
+    dPlus = Math.max(dPlus, leftMinusRight);
+    dMinus = Math.max(dMinus, rightMinusLeft);
+    rows.push({
+      value,
+      leftCdf: normalizeNumber(leftCdf),
+      rightCdf: normalizeNumber(rightCdf),
+      leftMinusRight: normalizeNumber(leftMinusRight),
+      rightMinusLeft: normalizeNumber(rightMinusLeft),
+    });
+  }
+
+  const statistic = alternative === "greater"
+    ? dPlus
+    : alternative === "less"
+      ? dMinus
+      : Math.max(dPlus, dMinus);
+  const effectiveCount = (sortedLeft.length * sortedRight.length) / (sortedLeft.length + sortedRight.length);
+  const pValue = alternative === "two-sided"
+    ? twoSidedKolmogorovSmirnovPValue(statistic, effectiveCount)
+    : oneSidedKolmogorovSmirnovPValue(statistic, effectiveCount);
+
+  return {
+    statistic: normalizeNumber(statistic),
+    dPlus: normalizeNumber(dPlus),
+    dMinus: normalizeNumber(dMinus),
+    effectiveCount: normalizeNumber(effectiveCount),
+    pValue: normalizeNumber(pValue),
+    method: alternative === "two-sided"
+      ? "Asymptotic two-sided Kolmogorov distribution approximation."
+      : "Asymptotic one-sided Kolmogorov-Smirnov approximation.",
+    rows,
+  };
+}
+
+function twoSidedKolmogorovSmirnovPValue(statistic, effectiveCount) {
+  if (statistic <= 0) return 1;
+  const lambda = (Math.sqrt(effectiveCount) + 0.12 + 0.11 / Math.sqrt(effectiveCount)) * statistic;
+  let sum = 0;
+  for (let term = 1; term <= 100; term += 1) {
+    const component = (-1) ** (term - 1) * Math.exp(-2 * term ** 2 * lambda ** 2);
+    sum += component;
+    if (Math.abs(component) < 1e-12) break;
+  }
+  return clampProbability(2 * sum);
+}
+
+function oneSidedKolmogorovSmirnovPValue(statistic, effectiveCount) {
+  if (statistic <= 0) return 1;
+  return clampProbability(Math.exp(-2 * effectiveCount * statistic ** 2));
+}
+
 function shuffleCopy(values, random) {
   const shuffled = [...values];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
@@ -20951,6 +21107,42 @@ function parseTwoSampleInput(text) {
   }
 
   throw new Error("Use two-sample t-test group1: 10, 12, 9; group2: 8, 7, 11.");
+}
+
+function parseKolmogorovSmirnovInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const alternative = parseAlternative(text);
+  const labeledMatch = cleaned.match(
+    /\b(?:group|sample|data)?\s*1\s*[:=]\s*([^;]+);\s*(?:group|sample|data)?\s*2\s*[:=]\s*([^;]+)/i,
+  );
+  if (labeledMatch) {
+    return {
+      alpha,
+      alternative,
+      left: parseNumbers(labeledMatch[1]),
+      right: parseNumbers(labeledMatch[2]),
+    };
+  }
+
+  const chunks = cleaned
+    .replace(/\bkolmogorov(?:-|\s*)smirnov\b/gi, "")
+    .replace(/\btwo-?sample\b/gi, "")
+    .replace(/\bks\b/gi, "")
+    .replace(/\btest\b/gi, "")
+    .split(";")
+    .map((chunk) => parseNumbers(chunk))
+    .filter((values) => values.length > 0);
+
+  if (chunks.length >= 2) {
+    return {
+      alpha,
+      alternative,
+      left: chunks[0],
+      right: chunks[1],
+    };
+  }
+
+  throw new Error("Use ks test group1: 1, 2, 3; group2: 2, 4, 6.");
 }
 
 function parsePairedInput(text) {
@@ -25202,6 +25394,13 @@ function isFisherExactQuestion(lower) {
   return lower.includes("fisher exact") ||
     lower.includes("fisher's exact") ||
     lower.includes("fisher test");
+}
+
+function isKolmogorovSmirnovQuestion(lower) {
+  return lower.includes("kolmogorov-smirnov") ||
+    lower.includes("kolmogorov smirnov") ||
+    /\bks\s+test\b/.test(lower) ||
+    /\btwo[-\s]?sample\s+ks\b/.test(lower);
 }
 
 function isNormalityQuestion(lower) {

@@ -1280,6 +1280,19 @@ runTest("statistics mode computes two-sample tests", () => {
   assert.equal(artifactValue(result, "Effect size CI method"), "approximate t interval");
 });
 
+runTest("statistics mode computes two-sample Kolmogorov-Smirnov tests", () => {
+  const result = analyzeStatistics("ks test group1: 1, 2, 3, 4; group2: 3, 4, 5, 6 alpha=0.05");
+
+  assert.equal(result.summary, "two-sample Kolmogorov-Smirnov test");
+  assert.equal(result.answer, "D = 0.5, p = 0.534416");
+  assert.equal(artifactValue(result, "D+ statistic"), "0.5");
+  assert.equal(artifactValue(result, "D- statistic"), "0");
+  assert.equal(artifactValue(result, "Effective n"), "2");
+  assert.equal(artifactValue(result, "Decision"), "fail to reject H0 at alpha=0.05");
+  assert.deepEqual(result.table.rows[1], ["2", "0.5", "0", "0.5", "-0.5"]);
+  assert.deepEqual(result.table.rows.at(-1), ["6", "1", "1", "0", "0"]);
+});
+
 runTest("statistics mode computes equal-variance tests", () => {
   const fTest = analyzeStatistics("f-test variance group1: 10, 12, 9, 11; group2: 8, 7, 11, 9");
   const levene = analyzeStatistics("levene group1: 8,9,10; group2: 12,14,16; group3: 9,11,15");
@@ -2071,6 +2084,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("bootstrap mean data 10, 12, 14, 16, 18 resamples=1000 seed=7 confidence=95").summary, "bootstrap confidence interval");
   assert.equal(analyzeUniversal("normality test data 10, 12, 13, 15, 30, 31, 32, 33").summary, "Jarque-Bera normality test");
   assert.equal(analyzeUniversal("anderson-darling normality data 10, 12, 13, 15, 30, 31, 32, 33").summary, "Anderson-Darling normality test");
+  assert.equal(analyzeUniversal("ks test group1: 1, 2, 3, 4; group2: 3, 4, 5, 6").summary, "two-sample Kolmogorov-Smirnov test");
   assert.equal(analyzeUniversal("permutation test group1: 10, 12, 9; group2: 8, 7, 11 resamples=2000 seed=5").summary, "permutation test");
   assert.equal(analyzeUniversal("adjust p-values p: 0.003, 0.02, 0.04, 0.20, 0.001 alpha=0.05").summary, "multiple-testing correction");
   assert.equal(analyzeUniversal("kaplan-meier times: 5, 6, 6, 8, 10; events: 1, 1, 0, 1, 0").summary, "Kaplan-Meier survival");
