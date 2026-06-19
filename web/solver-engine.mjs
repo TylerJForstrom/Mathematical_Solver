@@ -163,7 +163,9 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
     },
     {
       title: "Paired test",
-      when: () => wantsStats && /\b(paired|matched|before|after|wilcoxon)\b/.test(lower),
+      when: () => wantsStats &&
+        /\b(paired|matched|before|after|wilcoxon)\b/.test(lower) &&
+        !/\b(categorical|contingency|mcnemar)\b/.test(lower),
       reason: "I detected paired or before/after data.",
       needs: [
         "Before values and after values with the same length",
@@ -221,15 +223,16 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
     },
     {
       title: "Contingency table test",
-      when: () => wantsStats && /\b(chi[-\s]?square|chisquare|fisher|contingency|independence)\b/.test(lower),
+      when: () => wantsStats && /\b(chi[-\s]?square|chisquare|fisher|mcnemar|categorical|contingency|independence)\b/.test(lower),
       reason: "I detected a categorical-count test.",
       needs: [
         "A count table written as a matrix",
-        "Use Fisher exact for 2x2 tables or chi-square independence for larger tables",
+        "Use Fisher exact for unpaired 2x2 tables, McNemar for paired 2x2 tables, or chi-square independence for larger tables",
       ],
       examples: [
         ["Chi-square", "statistics", "chi-square independence [[30,10],[20,40]]"],
         ["Fisher exact", "statistics", "fisher exact [[1,9],[11,3]]"],
+        ["McNemar", "statistics", "mcnemar [[20,5],[15,60]]"],
       ],
     },
     {
@@ -2153,6 +2156,10 @@ export function analyzeStatistics(statement) {
     return analyzeFisherExactTest(statement);
   }
 
+  if (isMcNemarQuestion(lower)) {
+    return analyzeMcNemarTest(statement);
+  }
+
   if (lower.includes("chi-square") || lower.includes("chi square") || lower.includes("chisquare")) {
     return analyzeChiSquare(statement);
   }
@@ -2390,6 +2397,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isKolmogorovSmirnovQuestion(lower)) {
     routed = analyzeStatistics(question);
     routedLabel = "Kolmogorov-Smirnov test";
+  } else if (isMcNemarQuestion(lower)) {
+    routed = analyzeStatistics(question);
+    routedLabel = "McNemar test";
   } else if (isMatrixQuestion(lower)) {
     routed = analyzeMatrix(question);
     routedLabel = "Matrix";
@@ -7161,6 +7171,130 @@ function computeFisherExactTest(table) {
     twoSidedP: normalizeNumber(Math.min(1, twoSidedP)),
     oddsRatio: Number.isFinite(oddsRatio) ? normalizeNumber(oddsRatio) : oddsRatio,
   };
+}
+
+function analyzeMcNemarTest(statement) {
+  const request = parseMcNemarInput(statement);
+  const result = computeMcNemarTest(request.table, request.alternative);
+  const decision = result.exactPValue < request.alpha
+    ? `reject H0 at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject H0 at alpha=${formatNumber(request.alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: {
+      kind: "statsRegression",
+      label: "MCNEMAR",
+      children: [
+        matrixNode("PAIRED", request.table),
+        statsMetricNode("B", result.beforeYesAfterNo),
+        statsMetricNode("C", result.beforeNoAfterYes),
+        statsMetricNode("P", result.exactPValue),
+      ],
+    },
+    answer: `exact p = ${formatNumber(result.exactPValue)}, matched odds ratio = ${formatFisherOddsRatio(result.matchedOddsRatio)}`,
+    summary: "McNemar paired categorical test",
+    details: "Paired 2x2 marginal-homogeneity test",
+    variables: [],
+    metrics: treeMetrics(matrixNode("PAIRED", request.table)),
+    steps: [
+      {
+        title: "Read paired 2x2 table",
+        expression: formatMatrix(request.table),
+        detail: "Rows are the first condition and columns are the second condition, so only discordant pairs drive McNemar's test.",
+      },
+      {
+        title: "Count discordant pairs",
+        expression: `b = ${formatNumber(result.beforeYesAfterNo)}, c = ${formatNumber(result.beforeNoAfterYes)}`,
+        detail: "Concordant yes/yes and no/no pairs do not distinguish the two marginal probabilities.",
+      },
+      {
+        title: "Compute exact binomial p-value",
+        expression: `p = ${formatNumber(result.exactPValue)}`,
+        detail: "Under marginal homogeneity, either discordant direction is equally likely.",
+      },
+      {
+        title: "Compute continuity-corrected chi-square",
+        expression: `X^2 = ${formatNumber(result.correctedChiSquare)}, p = ${formatNumber(result.correctedPValue)}`,
+        detail: "The large-sample approximation uses one degree of freedom and continuity correction.",
+      },
+      {
+        title: "Compute matched-pair odds ratio",
+        expression: `OR = ${formatFisherOddsRatio(result.matchedOddsRatio)}`,
+        detail: "The matched odds ratio is b/c, comparing the two discordant directions.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values suggest the paired binary outcome changed between conditions.",
+      },
+    ],
+    table: {
+      headers: ["Cell", "Count", "Role"],
+      rows: [
+        ["yes -> yes", formatNumber(request.table[0][0]), "concordant"],
+        ["yes -> no", formatNumber(result.beforeYesAfterNo), "discordant b"],
+        ["no -> yes", formatNumber(result.beforeNoAfterYes), "discordant c"],
+        ["no -> no", formatNumber(request.table[1][1]), "concordant"],
+      ],
+    },
+    artifacts: [
+      ["Paired table", formatMatrix(request.table)],
+      ["Discordant total", formatNumber(result.discordantTotal)],
+      ["b: yes -> no", formatNumber(result.beforeYesAfterNo)],
+      ["c: no -> yes", formatNumber(result.beforeNoAfterYes)],
+      ["Alternative", request.alternative],
+      ["Exact p-value", formatNumber(result.exactPValue)],
+      ["Continuity-corrected chi-square", formatNumber(result.correctedChiSquare)],
+      ["Chi-square approximation p", formatNumber(result.correctedPValue)],
+      ["Matched odds ratio", formatFisherOddsRatio(result.matchedOddsRatio)],
+      ["Decision", decision],
+    ],
+  };
+}
+
+function computeMcNemarTest(table, alternative) {
+  validateTwoByTwoTable(table, "McNemar test");
+  const beforeYesAfterNo = table[0][1];
+  const beforeNoAfterYes = table[1][0];
+  const discordantTotal = beforeYesAfterNo + beforeNoAfterYes;
+  if (discordantTotal <= 0) {
+    throw new Error("McNemar test needs at least one discordant pair.");
+  }
+  const exactPValue = exactMcNemarPValue(beforeYesAfterNo, beforeNoAfterYes, alternative);
+  const correctedChiSquare = ((Math.max(0, Math.abs(beforeYesAfterNo - beforeNoAfterYes) - 1)) ** 2) / discordantTotal;
+  const correctedPValue = chiSquareRightTailApprox(correctedChiSquare, 1);
+  const matchedOddsRatio = beforeNoAfterYes === 0
+    ? (beforeYesAfterNo === 0 ? Number.NaN : Number.POSITIVE_INFINITY)
+    : beforeYesAfterNo / beforeNoAfterYes;
+  return {
+    beforeYesAfterNo,
+    beforeNoAfterYes,
+    discordantTotal,
+    exactPValue: normalizeNumber(exactPValue),
+    correctedChiSquare: normalizeNumber(correctedChiSquare),
+    correctedPValue: normalizeNumber(correctedPValue),
+    matchedOddsRatio: Number.isFinite(matchedOddsRatio) ? normalizeNumber(matchedOddsRatio) : matchedOddsRatio,
+  };
+}
+
+function exactMcNemarPValue(beforeYesAfterNo, beforeNoAfterYes, alternative) {
+  const discordantTotal = beforeYesAfterNo + beforeNoAfterYes;
+  if (alternative === "greater") {
+    return binomialTailProbability(beforeYesAfterNo, discordantTotal, "greater");
+  }
+  if (alternative === "less") {
+    return binomialTailProbability(beforeYesAfterNo, discordantTotal, "less");
+  }
+  const smaller = Math.min(beforeYesAfterNo, beforeNoAfterYes);
+  return clampProbability(2 * binomialTailProbability(smaller, discordantTotal, "less"));
+}
+
+function binomialTailProbability(successes, total, direction) {
+  if (direction === "greater") {
+    return sumRange(successes, total, (value) => binomialProbability(total, 0.5, value));
+  }
+  return sumRange(0, successes, (value) => binomialProbability(total, 0.5, value));
 }
 
 function validateTwoByTwoTable(table, context) {
@@ -21477,6 +21611,29 @@ function parseFisherExactInput(text) {
   return { alpha, table };
 }
 
+function parseMcNemarInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const alternative = parseAlternative(text);
+  const matrix = extractMatrices(cleaned)[0];
+  if (matrix) {
+    validateTwoByTwoTable(matrix, "McNemar test");
+    return { alpha, alternative, table: matrix };
+  }
+
+  const beforeYesAfterNo = readNamedNumber(cleaned, ["b", "yesno", "yes_no", "yesToNo", "yes-to-no"], Number.NaN);
+  const beforeNoAfterYes = readNamedNumber(cleaned, ["c", "noyes", "no_yes", "noToYes", "no-to-yes"], Number.NaN);
+  if (Number.isSafeInteger(beforeYesAfterNo) && Number.isSafeInteger(beforeNoAfterYes)) {
+    const table = [
+      [0, beforeYesAfterNo],
+      [beforeNoAfterYes, 0],
+    ];
+    validateTwoByTwoTable(table, "McNemar test");
+    return { alpha, alternative, table };
+  }
+
+  throw new Error("Use mcnemar [[20,5],[15,60]] or mcnemar b=5 c=15.");
+}
+
 function parseHypergeometricInput(text) {
   const numbers = parseNumbers(text);
   const population = readNamedNumber(text, ["population", "total", "size"], numbers[0]);
@@ -25401,6 +25558,13 @@ function isKolmogorovSmirnovQuestion(lower) {
     lower.includes("kolmogorov smirnov") ||
     /\bks\s+test\b/.test(lower) ||
     /\btwo[-\s]?sample\s+ks\b/.test(lower);
+}
+
+function isMcNemarQuestion(lower) {
+  return lower.includes("mcnemar") ||
+    lower.includes("paired categorical") ||
+    lower.includes("matched pairs categorical") ||
+    lower.includes("marginal homogeneity");
 }
 
 function isNormalityQuestion(lower) {

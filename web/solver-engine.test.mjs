@@ -392,6 +392,10 @@ runTest("input assistant suggests structured problem formats", () => {
   assert.equal(twoSample.title, "Two-sample t-test");
   assert.equal(twoSample.examples[0][2], "two-sample t-test group1: 10, 12, 9; group2: 8, 7, 11");
 
+  const mcnemarHelp = suggestProblemHelp("mcnemar paired categorical", "statistics", "Categorical test needs counts.");
+  assert.equal(mcnemarHelp.title, "Contingency table test");
+  assert.equal(mcnemarHelp.examples[2][2], "mcnemar [[20,5],[15,60]]");
+
   const correlation = suggestProblemHelp("pearson correlation", "statistics", "Pearson correlation needs x and y lists.");
   assert.equal(correlation.title, "Correlation or regression");
   assert.ok(correlation.needs.some((need) => need.includes("x and y")));
@@ -1341,6 +1345,21 @@ runTest("statistics mode computes Fisher exact tests", () => {
   assert.deepEqual(result.table.rows[1], ["1", "0.001346", "two-sided"]);
 });
 
+runTest("statistics mode computes McNemar paired categorical tests", () => {
+  const result = analyzeStatistics("mcnemar [[20,5],[15,60]] alpha=0.05");
+  const discordantOnly = analyzeStatistics("mcnemar b=5 c=15");
+
+  assert.equal(result.summary, "McNemar paired categorical test");
+  assert.equal(result.answer, "exact p = 0.041389, matched odds ratio = 0.333333");
+  assert.equal(artifactValue(result, "Discordant total"), "20");
+  assert.equal(artifactValue(result, "Exact p-value"), "0.041389");
+  assert.equal(artifactValue(result, "Continuity-corrected chi-square"), "4.05");
+  assert.equal(artifactValue(result, "Chi-square approximation p"), "0.041686");
+  assert.equal(artifactValue(result, "Decision"), "reject H0 at alpha=0.05");
+  assert.deepEqual(result.table.rows[1], ["yes -> no", "5", "discordant b"]);
+  assert.equal(discordantOnly.answer, "exact p = 0.041389, matched odds ratio = 0.333333");
+});
+
 runTest("statistics mode computes paired t-tests", () => {
   const result = analyzeStatistics("paired t-test before: 10, 12, 9; after: 11, 14, 10");
 
@@ -2085,6 +2104,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("normality test data 10, 12, 13, 15, 30, 31, 32, 33").summary, "Jarque-Bera normality test");
   assert.equal(analyzeUniversal("anderson-darling normality data 10, 12, 13, 15, 30, 31, 32, 33").summary, "Anderson-Darling normality test");
   assert.equal(analyzeUniversal("ks test group1: 1, 2, 3, 4; group2: 3, 4, 5, 6").summary, "two-sample Kolmogorov-Smirnov test");
+  assert.equal(analyzeUniversal("mcnemar [[20,5],[15,60]]").summary, "McNemar paired categorical test");
   assert.equal(analyzeUniversal("permutation test group1: 10, 12, 9; group2: 8, 7, 11 resamples=2000 seed=5").summary, "permutation test");
   assert.equal(analyzeUniversal("adjust p-values p: 0.003, 0.02, 0.04, 0.20, 0.001 alpha=0.05").summary, "multiple-testing correction");
   assert.equal(analyzeUniversal("kaplan-meier times: 5, 6, 6, 8, 10; events: 1, 1, 0, 1, 0").summary, "Kaplan-Meier survival");

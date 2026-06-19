@@ -154,7 +154,8 @@ The frontend currently supports:
   Wilcoxon signed-rank with exact
   small-sample p-values when absolute differences are untied,
   Kruskal-Wallis, chi-square goodness-of-fit, chi-square independence tests
-  for contingency tables, Fisher exact tests for 2x2 tables, binomial
+  for contingency tables, Fisher exact tests for 2x2 tables, McNemar paired
+  categorical tests, binomial
   probability, Poisson probability, normal probability, inverse-normal percentiles,
   Student t, chi-square, and F distribution probabilities/critical values, geometric
   probability, exponential probability, uniform probability, hypergeometric
@@ -480,6 +481,8 @@ The same idea works for algebra and calculus:
   variables are associated and reports expected counts plus Cramer's V.
 - `fisher exact [[1,9],[11,3]]` gives an exact 2x2 table p-value and odds ratio
   without relying on a large-sample chi-square approximation.
+- `mcnemar [[20,5],[15,60]]` tests paired binary outcomes with an exact
+  discordant-pair p-value and matched odds ratio.
 - `permutation test group1: 10,12,9; group2: 8,7,11 resamples=2000 seed=5`
   shuffles group labels into a reproducible nonparametric p-value.
 - `ks test group1: 1,2,3,4; group2: 3,4,5,6` compares two empirical CDFs
@@ -614,7 +617,7 @@ The demo includes:
   one-sample/two-sample/paired t tests,
   one-proportion/two-proportion z tests,
   proportion confidence intervals, permutation tests, two-sample Kolmogorov-Smirnov tests, ANOVA, chi-square tests
-  of goodness-of-fit and independence, Fisher exact tests,
+  of goodness-of-fit and independence, Fisher exact tests, McNemar paired categorical tests,
   nonparametric rank tests including exact small-sample Mann-Whitney and
   Wilcoxon signed-rank p-values with Hodges-Lehmann shift estimates,
   Kaplan-Meier survival analysis, log-rank tests,
