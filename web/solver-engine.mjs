@@ -4465,6 +4465,14 @@ export function analyzeNumerical(statement) {
       expression: `${request.variable} ~= ${formatNumber(result.root)}`,
       detail: "Newton's method repeatedly follows tangent lines toward a root.",
     });
+  } else if (request.method === "secant") {
+    result = secantRootTrace(evaluator, request.guess, request.secondGuess);
+    summary = "secant root";
+    steps.push({
+      title: "Apply the secant method",
+      expression: `${request.variable} ~= ${formatNumber(result.root)}`,
+      detail: "The secant method draws a line through the last two points and follows it to the axis, approximating Newton's method without needing a derivative.",
+    });
   } else {
     result = bisectionRootTrace(evaluator, request.low, request.high);
     summary = "bisection root";
@@ -4491,6 +4499,8 @@ export function analyzeNumerical(statement) {
       ["Function", request.expression],
       ...(request.method === "newton"
         ? [["Initial guess", formatNumber(request.guess)]]
+        : request.method === "secant"
+        ? [["Initial guesses", `${formatNumber(request.guess)}, ${formatNumber(request.secondGuess)}`]]
         : [["Initial bracket", `[${formatNumber(request.low)}, ${formatNumber(request.high)}]`]]),
       ["Iterations", formatNumber(result.iterations.length)],
       ["Root", `${request.variable} ~= ${formatNumber(result.root)}`],
@@ -18794,11 +18804,22 @@ function extractNumericalQuestion(statement) {
     return extractNumericalIntegrationQuestion(statement);
   }
 
-  const method = lower.includes("newton") ? "newton" : "bisection";
+  const method = lower.includes("newton")
+    ? "newton"
+    : lower.includes("secant")
+    ? "secant"
+    : "bisection";
   let expression = statement
-    .replace(/^(newton|bisection|numerical root|root of|find root of|solve numerically)\s+/i, "")
+    .replace(/^(newton|secant|bisection|numerical root|root of|find root of|solve numerically)\s+/i, "")
     .replace(/[?!.]+$/, "")
     .trim();
+
+  const secondGuessMatch = expression.match(/\b(?:guess2|second\s*guess)\s*=\s*([-+]?\d*\.?\d+)/i);
+  let secondGuess = Number.NaN;
+  if (secondGuessMatch) {
+    secondGuess = Number(secondGuessMatch[1]);
+    expression = expression.replace(secondGuessMatch[0], "").trim();
+  }
 
   const guessMatch = expression.match(/\bguess\s*=\s*([-+]?\d*\.?\d+)/i);
   const intervalMatch = expression.match(/\b(?:interval|between)\s*=?\s*([-+]?\d*\.?\d+)\s*,?\s+([-+]?\d*\.?\d+)/i);
@@ -18819,11 +18840,36 @@ function extractNumericalQuestion(statement) {
     throw new Error("Numerical solving needs a valid guess or interval.");
   }
 
+  if (method === "secant") {
+    const startA = guessMatch ? guess : intervalMatch ? low : 1;
+    let startB;
+    if (Number.isFinite(secondGuess)) {
+      startB = secondGuess;
+    } else if (intervalMatch) {
+      startB = high;
+    } else {
+      startB = startA + 1;
+    }
+    if (!Number.isFinite(startA) || !Number.isFinite(startB) || nearlyEqual(startA, startB)) {
+      throw new Error("The secant method needs two distinct starting guesses, e.g. secant x^2 - 2 guess=1 guess2=2.");
+    }
+    return {
+      expression,
+      variable: "x",
+      method,
+      guess: startA,
+      secondGuess: startB,
+      low,
+      high,
+    };
+  }
+
   return {
     expression,
     variable: "x",
     method,
     guess,
+    secondGuess,
     low,
     high,
   };
@@ -20157,6 +20203,21 @@ function rootIterationTable(request, result) {
     };
   }
 
+  if (request.method === "secant") {
+    return {
+      headers: ["Iter", "Prev x", "Curr x", "f(x)", "Next x"],
+      rows: rows.map((row) => row.iteration === "..."
+        ? ["...", "...", "...", "...", "..."]
+        : [
+            String(row.iteration),
+            formatNumber(row.previous),
+            formatNumber(row.x),
+            formatNumber(row.y),
+            formatOptionalNumber(row.next),
+          ]),
+    };
+  }
+
   return {
     headers: ["Iter", "Low", "High", "Mid", "f(mid)"],
     rows: rows.map((row) => row.iteration === "..."
@@ -20185,6 +20246,8 @@ function visibleRootIterations(iterations) {
 function buildRootIterationGraph(evaluator, request, result) {
   const xMarkers = request.method === "newton"
     ? result.iterations.flatMap((row) => [row.x, row.next])
+    : request.method === "secant"
+    ? result.iterations.flatMap((row) => [row.previous, row.x, row.next])
     : result.iterations.flatMap((row) => [row.low, row.high, row.mid]);
   xMarkers.push(result.root);
   const finiteXMarkers = xMarkers.filter(Number.isFinite);
@@ -20205,7 +20268,7 @@ function buildRootIterationGraph(evaluator, request, result) {
 
   const iterationPoints = result.iterations
     .map((row) => ({
-      x: request.method === "newton" ? row.x : row.mid,
+      x: request.method === "newton" || request.method === "secant" ? row.x : row.mid,
       y: row.y,
     }))
     .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
@@ -20222,11 +20285,28 @@ function buildRootIterationGraph(evaluator, request, result) {
           ],
         }))
     : [];
+  const secantLines = request.method === "secant"
+    ? result.iterations
+        .filter((row) => Number.isFinite(row.previous) && Number.isFinite(row.x) && Number.isFinite(row.next))
+        .slice(0, 6)
+        .map((row, index) => {
+          const previousValue = evaluator(row.previous);
+          return {
+            label: index === 0 ? "Secant steps" : "",
+            className: "graph-line-muted",
+            points: [
+              { x: row.previous, y: Number.isFinite(previousValue) ? normalizeNumber(previousValue) : row.y },
+              { x: row.next, y: 0 },
+            ],
+          };
+        })
+    : [];
   const allYValues = [
     0,
     ...functionPoints.map((point) => point.y),
     ...iterationPoints.map((point) => point.y),
     ...tangentLines.flatMap((series) => series.points.map((point) => point.y)),
+    ...secantLines.flatMap((series) => series.points.map((point) => point.y)),
   ];
 
   return {
@@ -20242,6 +20322,7 @@ function buildRootIterationGraph(evaluator, request, result) {
     lines: [
       { label: "f(x)", points: functionPoints },
       ...tangentLines,
+      ...secantLines,
     ],
   };
 }
@@ -20365,6 +20446,54 @@ function bisectionRootTrace(evaluator, lowStart, highStart) {
 
 function bisectionRoot(evaluator, lowStart, highStart) {
   return bisectionRootTrace(evaluator, lowStart, highStart).root;
+}
+
+function secantRootTrace(evaluator, firstGuess, secondGuess) {
+  let previous = firstGuess;
+  let current = secondGuess;
+  let previousValue = evaluator(previous);
+  if (!Number.isFinite(previousValue)) {
+    throw new Error("The secant method needs a finite function value at the first guess.");
+  }
+  const iterations = [];
+  for (let index = 0; index < 60; index += 1) {
+    const currentValue = evaluator(current);
+    if (!Number.isFinite(currentValue)) {
+      throw new Error("The secant method hit a non-finite function value; try different guesses.");
+    }
+    const row = {
+      iteration: index,
+      previous: normalizeNumber(previous),
+      x: normalizeNumber(current),
+      y: normalizeNumber(currentValue),
+      next: Number.NaN,
+    };
+    iterations.push(row);
+    if (Math.abs(currentValue) < 1e-9) {
+      return { root: normalizeNumber(current), iterations };
+    }
+
+    const denominator = currentValue - previousValue;
+    if (!Number.isFinite(denominator) || nearlyEqual(denominator, 0)) {
+      throw new Error("The secant method hit a flat secant line; try different guesses.");
+    }
+    const next = current - (currentValue * (current - previous)) / denominator;
+    if (!Number.isFinite(next)) {
+      throw new Error("The secant method diverged; try bisection with an interval.");
+    }
+    row.next = normalizeNumber(next);
+    if (Math.abs(next - current) < 1e-12) {
+      return { root: normalizeNumber(next), iterations };
+    }
+    previous = current;
+    previousValue = currentValue;
+    current = next;
+  }
+  return { root: normalizeNumber(current), iterations };
+}
+
+function secantRoot(evaluator, firstGuess, secondGuess) {
+  return secantRootTrace(evaluator, firstGuess, secondGuess).root;
 }
 
 function descriptiveSummary(values) {
@@ -26053,6 +26182,7 @@ function isNumericalOdeQuestion(lower) {
 function isNumericalQuestion(lower) {
   return isNumericalIntegrationQuestion(lower) ||
     lower.startsWith("newton ") ||
+    lower.startsWith("secant ") ||
     lower.startsWith("bisection ") ||
     lower.startsWith("numerical root ") ||
     lower.startsWith("root of ") ||
