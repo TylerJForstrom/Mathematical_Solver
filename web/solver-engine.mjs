@@ -2481,6 +2481,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isNumberTheoryQuestion(lower)) {
     routed = analyzeNumberTheory(question);
     routedLabel = "Number theory";
+  } else if (isConvergenceQuestion(lower)) {
+    routed = analyzeSeriesConvergence(question);
+    routedLabel = "Series convergence";
   } else if (isSequenceQuestion(lower)) {
     routed = analyzeSequence(question);
     routedLabel = "Sequence";
@@ -4595,6 +4598,292 @@ function extractIntersectionQuestion(statement) {
   }
 
   return { first, second, variable: "x", xMin, xMax };
+}
+
+export function analyzeSeriesConvergence(statement) {
+  const request = extractConvergenceQuestion(statement);
+  const term = parseMath(request.expression);
+  if (term.kind === "equation") {
+    throw new Error("Series convergence expects a general term, such as converge sum 1/n^2.");
+  }
+  const variable = request.variable;
+  const termAt = (n) => {
+    try {
+      const value = evaluateMath(term, { [variable]: n });
+      return Number.isFinite(value) ? value : Number.NaN;
+    } catch {
+      return Number.NaN;
+    }
+  };
+
+  const verdict = decideSeriesConvergence(termAt);
+  const partials = seriesPartialSums(termAt, 40);
+  const verdictWord = verdict.converges === true
+    ? "converges"
+    : verdict.converges === false
+    ? "diverges"
+    : "inconclusive";
+
+  const steps = [
+    {
+      title: "Read the general term",
+      expression: `a(${variable}) = ${formatMath(term)}`,
+      detail: "Convergence is decided from how the terms behave as the index grows.",
+    },
+    {
+      title: "Apply the divergence (nth-term) test",
+      expression: `lim a(${variable}) ${verdict.nthLimit !== undefined && Number.isFinite(verdict.nthLimit) ? `≈ ${formatNumber(verdict.nthLimit)}` : "→ 0"}`,
+      detail: verdict.test === "nth-term test"
+        ? verdict.detail
+        : "The terms approach 0, so the nth-term test is inconclusive and a stronger test is needed.",
+    },
+    {
+      title: "Apply the deciding test",
+      expression: `${verdictWord} by the ${verdict.test}`,
+      detail: verdict.detail,
+    },
+  ];
+
+  const partialPoints = partials.map((row) => ({ x: row.n, y: row.partial }));
+  const yValues = partialPoints.map((point) => point.y).filter(Number.isFinite);
+  const graph = partialPoints.length >= 2 && yValues.length > 0
+    ? {
+        expression: `S_k = partial sums of ${request.expression}`,
+        kind: "convergence",
+        scatterLabel: "Partial sums",
+        xMin: partialPoints[0].x,
+        xMax: partialPoints[partialPoints.length - 1].x,
+        yMin: Math.min(...yValues),
+        yMax: Math.max(...yValues),
+        points: partialPoints,
+        scatter: partialPoints,
+        lines: [{ label: "Partial sums S_k", points: partialPoints }],
+      }
+    : null;
+
+  return {
+    mode: "sequence",
+    tree: term,
+    answer: verdictWord,
+    summary: "series convergence",
+    details: "Series convergence by numeric nth-term, ratio, p-series, and alternating tests",
+    variables: mathVariables(term),
+    metrics: treeMetrics(term),
+    steps,
+    table: {
+      headers: [variable, `a(${variable})`, `S_${variable}`],
+      rows: partials.slice(0, 12).map((row) => [
+        String(row.n),
+        formatNumber(row.term),
+        formatNumber(row.partial),
+      ]),
+    },
+    artifacts: [
+      ["General term", `a(${variable}) = ${formatMath(term)}`],
+      ["Verdict", verdictWord],
+      ["Deciding test", verdict.test],
+      ["nth-term limit", Number.isFinite(verdict.nthLimit) ? formatNumber(verdict.nthLimit) : "0"],
+      ...(Number.isFinite(verdict.ratioL) ? [["Ratio test L", formatNumber(verdict.ratioL)]] : []),
+      ...(Number.isFinite(verdict.decayP) ? [["Decay exponent p", formatNumber(verdict.decayP)]] : []),
+      ["Alternating", verdict.alternating ? "yes" : "no"],
+      ...(partials.length > 0 ? [[`Partial sum S_${partials[partials.length - 1].n}`, formatNumber(partials[partials.length - 1].partial)]] : []),
+    ],
+    ...(graph ? { graph } : {}),
+  };
+}
+
+function decideSeriesConvergence(termAt) {
+  const magnitudeAt = (n) => Math.abs(termAt(n));
+  const m6 = magnitudeAt(1e6);
+  const m7 = magnitudeAt(1e7);
+  const nthLimit = Number.isFinite(m7) ? m7 : (Number.isFinite(m6) ? m6 : Number.NaN);
+
+  // Divergence (nth-term) test: only fire when the terms clearly settle away from 0.
+  if (Number.isFinite(m6) && Number.isFinite(m7) && m6 > 1e-3 && m7 > 1e-3) {
+    const relativeChange = Math.abs(m7 - m6) / Math.max(m6, 1e-12);
+    if (relativeChange < 0.05) {
+      return {
+        converges: false,
+        test: "nth-term test",
+        nthLimit: m7,
+        ratioL: Number.NaN,
+        decayP: Number.NaN,
+        alternating: false,
+        detail: `The terms approach ${formatNumber(m7)} ≠ 0, so the series cannot converge.`,
+      };
+    }
+  }
+
+  const ratio = estimateRatioLimit(termAt);
+  const ratioL = ratio ? ratio.L : Number.NaN;
+  if (ratio && Number.isFinite(ratio.L)) {
+    if (ratio.L < 0.99) {
+      return {
+        converges: true,
+        test: "ratio test",
+        nthLimit,
+        ratioL: ratio.L,
+        decayP: Number.NaN,
+        alternating: isAlternatingTerm(termAt),
+        detail: `lim |a(n+1)/a(n)| ≈ ${formatNumber(ratio.L)} < 1, so the series converges absolutely.`,
+      };
+    }
+    if (ratio.L > 1.01) {
+      return {
+        converges: false,
+        test: "ratio test",
+        nthLimit,
+        ratioL: ratio.L,
+        decayP: Number.NaN,
+        alternating: false,
+        detail: `lim |a(n+1)/a(n)| ≈ ${formatNumber(ratio.L)} > 1, so the series diverges.`,
+      };
+    }
+  }
+
+  // Ratio test inconclusive (limit ≈ 1): use a power-law comparison and the alternating test.
+  const alternating = isAlternatingTerm(termAt);
+  const decayP = estimateDecayExponent(termAt);
+  if (Number.isFinite(decayP) && decayP > 1.005) {
+    return {
+      converges: true,
+      test: "comparison with a p-series",
+      nthLimit,
+      ratioL,
+      decayP,
+      alternating,
+      detail: `|a(n)| decays like 1/n^${formatNumber(decayP)} with p ≈ ${formatNumber(decayP)} > 1, so the series converges${alternating ? " absolutely" : ""}.`,
+    };
+  }
+  if (alternating && isDecreasingToZero(termAt)) {
+    return {
+      converges: true,
+      test: "alternating series test",
+      nthLimit,
+      ratioL,
+      decayP,
+      alternating: true,
+      detail: "The terms alternate in sign and |a(n)| decreases to 0, so the series converges conditionally.",
+    };
+  }
+  if (Number.isFinite(decayP)) {
+    return {
+      converges: false,
+      test: "comparison with a p-series",
+      nthLimit,
+      ratioL,
+      decayP,
+      alternating,
+      detail: `|a(n)| decays like 1/n^${formatNumber(decayP)} with p ≈ ${formatNumber(decayP)} ≤ 1, so the series diverges.`,
+    };
+  }
+  return {
+    converges: null,
+    test: "inconclusive",
+    nthLimit,
+    ratioL,
+    decayP: Number.NaN,
+    alternating,
+    detail: "The numeric tests were inconclusive for this series.",
+  };
+}
+
+function estimateRatioLimit(termAt) {
+  const probes = [10, 30, 100, 300, 1000, 3000, 10000, 30000, 100000];
+  let last = null;
+  for (const n of probes) {
+    const current = termAt(n);
+    const next = termAt(n + 1);
+    if (Number.isFinite(current) && Number.isFinite(next) && current !== 0) {
+      const ratio = Math.abs(next / current);
+      if (Number.isFinite(ratio)) {
+        last = { L: ratio, at: n };
+      }
+    }
+  }
+  return last;
+}
+
+function estimateDecayExponent(termAt) {
+  const low = 1e3;
+  const candidates = [1e6, 1e5, 1e4];
+  const magnitudeLow = Math.abs(termAt(low));
+  if (!(magnitudeLow > 0) || !Number.isFinite(magnitudeLow)) {
+    return Number.NaN;
+  }
+  for (const high of candidates) {
+    const magnitudeHigh = Math.abs(termAt(high));
+    if (magnitudeHigh > 0 && Number.isFinite(magnitudeHigh)) {
+      return (Math.log(magnitudeLow) - Math.log(magnitudeHigh)) / (Math.log(high) - Math.log(low));
+    }
+  }
+  return Number.NaN;
+}
+
+function isAlternatingTerm(termAt) {
+  let count = 0;
+  let flips = 0;
+  for (let n = 50; n < 62; n += 1) {
+    const current = termAt(n);
+    const next = termAt(n + 1);
+    if (Number.isFinite(current) && Number.isFinite(next) && current !== 0 && next !== 0) {
+      count += 1;
+      if (current * next < 0) {
+        flips += 1;
+      }
+    }
+  }
+  return count >= 6 && flips === count;
+}
+
+function isDecreasingToZero(termAt) {
+  let previous = Math.abs(termAt(100));
+  if (!Number.isFinite(previous)) {
+    return false;
+  }
+  for (let n = 110; n <= 200; n += 10) {
+    const current = Math.abs(termAt(n));
+    if (!Number.isFinite(current) || current > previous + 1e-12) {
+      return false;
+    }
+    previous = current;
+  }
+  const tail = Math.abs(termAt(1e5));
+  return Number.isFinite(tail) && tail < 1e-2;
+}
+
+function seriesPartialSums(termAt, count, startN = 1) {
+  const rows = [];
+  let sum = 0;
+  for (let n = startN; rows.length < count && n < startN + count + 25; n += 1) {
+    const term = termAt(n);
+    if (!Number.isFinite(term)) {
+      if (rows.length === 0) {
+        continue;
+      }
+      break;
+    }
+    sum += term;
+    rows.push({ n, term: normalizeNumber(term), partial: normalizeNumber(sum) });
+  }
+  return rows;
+}
+
+function extractConvergenceQuestion(statement) {
+  const text = statement
+    .replace(/[?]+$/g, " ")
+    .replace(/\b[a-z]\s*=\s*-?\d+/gi, " ")
+    .replace(/\b(does|determine|test|check|whether|the|series|infinite|sum|summation|of|convergence|converges?|convergent|diverges?|divergent|from|to|infinity|inf)\b/gi, " ")
+    .replace(/∑/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    throw new Error("Series convergence needs a general term, such as converge sum 1/n^2.");
+  }
+  const parsed = parseMath(text);
+  const names = mathVariables(parsed);
+  const variable = names.includes("n") ? "n" : (names[0] || "n");
+  return { expression: text, variable };
 }
 
 export function analyzeFourierSeries(statement) {
@@ -27130,6 +27419,17 @@ function isSequenceQuestion(lower) {
     lower.startsWith("sigma ") ||
     lower.startsWith("summation ") ||
     lower.startsWith("series ");
+}
+
+function isConvergenceQuestion(lower) {
+  return lower.startsWith("converge ") ||
+    lower.startsWith("convergence ") ||
+    lower.startsWith("converges ") ||
+    lower.startsWith("convergent ") ||
+    lower.startsWith("series convergence ") ||
+    lower.includes("convergence test") ||
+    lower.includes("convergence of") ||
+    ((lower.includes(" converge") || lower.includes(" diverge")) && lower.includes("sum"));
 }
 
 function isGraphQuestion(lower) {

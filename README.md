@@ -54,6 +54,9 @@ The frontend currently supports:
   coordinate distance, midpoint, and slope
 - Sequences and series: arithmetic sequences, geometric sequences, infinite
   geometric sums, and finite sigma notation
+- Series convergence tests that classify a general term with the nth-term,
+  ratio, p-series comparison, and alternating-series tests, naming the deciding
+  test and plotting the partial sums
 - Polynomial derivatives with power, sum, difference, product, and quotient rules
 - Multivariable calculus: partial derivatives, gradient vectors, and
   directional derivatives at a point
@@ -345,6 +348,10 @@ The same idea works for algebra and calculus:
   `distance between (1,2) and (4,6)` evaluate geometry formula trees.
 - `arithmetic sequence a1=3 d=5 n=10`, `geometric sequence a1=2 r=3 n=5`,
   and `sum k^2 from k=1 to 5` evaluate sequence and series trees.
+- `converge sum 1/n^2` reports `converges` by p-series comparison, `converge 1/n`
+  reports `diverges`, `converge 1/2^n` decides by the ratio test, and
+  `converge (-1)^n/n` converges by the alternating-series test; each plots the
+  running partial sums.
 - `rref [[1,2,1],[2,4,2],[1,1,0]]` becomes a row-operation tree with rank and pivots.
 - `row space [[1,2,1],[2,4,2],[1,1,0]]` and
   `column space [[1,2,1],[2,4,2],[1,1,0]]` return bases for the fundamental

@@ -30,6 +30,7 @@ import {
   analyzeNumberTheory,
   analyzeOptimization,
   analyzeSequence,
+  analyzeSeriesConvergence,
   analyzeSimplification,
   analyzeStatistics,
   analyzeSystem,
@@ -526,6 +527,40 @@ runTest("sequence mode computes sequences and series", () => {
   assert.equal(analyzeSequence("infinite geometric series a1=5 r=0.2").answer, "S_inf = 6.25");
   assert.equal(analyzeSequence("sum k^2 from k=1 to 5").answer, "sum = 55");
   assert.equal(analyzeSequence("sum k=1 to 4 of 2k + 1").answer, "sum = 24");
+});
+
+runTest("series convergence mode classifies standard series", () => {
+  const pSeries = analyzeSeriesConvergence("converge sum 1/n^2");
+  assert.equal(pSeries.summary, "series convergence");
+  assert.equal(pSeries.answer, "converges");
+  assert.equal(artifactValue(pSeries, "Deciding test"), "comparison with a p-series");
+  assert.deepEqual(pSeries.table.rows[0], ["1", "1", "1"]);
+  assert.equal(pSeries.graph.kind, "convergence");
+  assert.equal(pSeries.graph.points.length, 40);
+
+  assert.equal(analyzeSeriesConvergence("converge 1/n").answer, "diverges");
+  assert.equal(artifactValue(analyzeSeriesConvergence("converge 1/n"), "Deciding test"), "comparison with a p-series");
+});
+
+runTest("series convergence mode applies ratio, nth-term, and alternating tests", () => {
+  const geometric = analyzeSeriesConvergence("converge 1/2^n");
+  assert.equal(geometric.answer, "converges");
+  assert.equal(artifactValue(geometric, "Deciding test"), "ratio test");
+
+  const harmonicTail = analyzeSeriesConvergence("converge n/(n+1)");
+  assert.equal(harmonicTail.answer, "diverges");
+  assert.equal(artifactValue(harmonicTail, "Deciding test"), "nth-term test");
+
+  const alternating = analyzeSeriesConvergence("converge (-1)^n/n");
+  assert.equal(alternating.answer, "converges");
+  assert.equal(artifactValue(alternating, "Deciding test"), "alternating series test");
+  assert.equal(artifactValue(alternating, "Alternating"), "yes");
+});
+
+runTest("series convergence mode routes through Universal Ask", () => {
+  const routed = analyzeUniversal("does sum 1/n converge");
+  assert.equal(routed.summary, "series convergence");
+  assert.equal(routed.answer, "diverges");
 });
 
 runTest("geometry mode computes formulas and coordinate geometry", () => {
