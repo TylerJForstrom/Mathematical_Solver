@@ -938,7 +938,11 @@ export function analyzeLogicBdd(statement) {
 export function analyzeLogicTruthValue(statement) {
   const request = extractLogicTruthValueQuestion(statement);
   const tree = parseLogic(request.expression);
-  const expressionVariables = logicVariables(tree);
+  const evidenceTree = request.evidenceExpression ? parseLogic(request.evidenceExpression) : null;
+  const expressionVariables = [...new Set([
+    ...logicVariables(tree),
+    ...(evidenceTree ? logicVariables(evidenceTree) : []),
+  ])].sort();
   const variables = request.dependence
     ? mergeProbabilityModelVariables(expressionVariables, request.dependence)
     : expressionVariables;
@@ -955,8 +959,16 @@ export function analyzeLogicTruthValue(statement) {
       ? buildCorrelatedProbabilityModel(variables, assignment, request.dependence)
       : null;
   }
+  if (evidenceTree && !probabilityModel) {
+    throw new Error("Evidence-conditioned probability queries need a joint, correlated, conditional, or Bayesian-network probability model.");
+  }
   const trace = [];
-  const result = probabilityModel
+  const evidenceResult = probabilityModel && evidenceTree
+    ? evaluateProbabilityEvidenceQuery(tree, evidenceTree, probabilityModel, trace)
+    : null;
+  const result = evidenceResult
+    ? evidenceResult.value
+    : probabilityModel
     ? evaluateCorrelatedProbabilityLogic(tree, probabilityModel, trace)
     : request.interval
     ? evaluateIntervalSoftLogic(tree, assignment, trace, request.tNorm)
@@ -969,7 +981,9 @@ export function analyzeLogicTruthValue(statement) {
       ? `interval-valued ${formatFuzzySemantics(request.tNorm)}`
       : formatFuzzySemantics(request.tNorm);
   const answer = request.kind === "probability"
-    ? `probability = ${formatNumber(result)}`
+    ? evidenceResult
+      ? `conditional probability = ${formatNumber(result)}`
+      : `probability = ${formatNumber(result)}`
     : request.interval
       ? `fuzzy truth interval = ${formatSoftTruthValue(result)}`
       : `fuzzy truth = ${formatNumber(result)}`;
@@ -979,7 +993,7 @@ export function analyzeLogicTruthValue(statement) {
     tree,
     answer,
     summary: probabilityModel
-      ? formatProbabilityModelSummary(probabilityModel)
+      ? formatProbabilityModelSummary(probabilityModel, Boolean(evidenceResult))
       : request.kind === "probability"
       ? "Probabilistic logic truth value"
       : request.interval
@@ -1008,7 +1022,7 @@ export function analyzeLogicTruthValue(statement) {
         title: "Evaluate graded operators",
         expression: answer,
         detail: probabilityModel
-          ? formatProbabilityModelEvaluationDetail(probabilityModel)
+          ? formatProbabilityModelEvaluationDetail(probabilityModel, Boolean(evidenceResult))
           : request.kind === "probability"
           ? "Assuming independent variables, AND multiplies probabilities and OR uses inclusion-exclusion."
           : request.interval
@@ -1030,6 +1044,7 @@ export function analyzeLogicTruthValue(statement) {
       ...(request.kind === "fuzzy" ? [["T-norm", request.tNorm]] : []),
       ["Assignments", formatSoftAssignment(assignment)],
       ...(probabilityModel ? formatProbabilityModelArtifacts(probabilityModel) : []),
+      ...(evidenceResult ? formatEvidenceProbabilityArtifacts(evidenceResult) : []),
       ["Result", formatSoftTruthValue(result)],
       ["Operator count", formatNumber(treeMetrics(tree).operators)],
     ],
@@ -26105,11 +26120,10 @@ function extractLogicTruthValueQuestion(question) {
   const values = interval
     ? parseIntervalSoftLogicAssignments(question)
     : parseSoftLogicAssignments(question);
-  const expression = stripSoftLogicAssignments(stripProbabilityDependenceSpecs(tNormRequest.text))
+  const rawExpression = stripSoftLogicAssignments(stripProbabilityDependenceSpecs(tNormRequest.text))
     .replace(/[?!.]+$/, "")
     .replace(/^(?:evaluate|compute|calculate|find|show)\s+(?:the\s+)?/i, "")
     .replace(/^(?:(?:interval[-\s]?valued|interval|correlated|conditional|bayesian\s+network)\s+)?(?:fuzzy\s+logic|fuzzy|soft\s+logic|graded\s+truth|truth\s+values?|probabilistic\s+logic|probability\s+logic|prob\s+logic|probability)\s*:?\s*/i, "")
-    .replace(/\b(?:using|with|given|where|values?|truth\s+values?|truth\s+intervals?|degrees?)\b/gi, " ")
     .replace(/\bcorrelated\s+(?:probability|probabilistic)\b/gi, " ")
     .replace(/\bconditional\s+(?:probability|probabilistic)\b/gi, " ")
     .replace(/\bbayesian\s+network\s+(?:probability|probabilistic)\b/gi, " ")
@@ -26117,14 +26131,41 @@ function extractLogicTruthValueQuestion(question) {
     .replace(/\b(?:fuzzy|truth|graded)\s+intervals?\b/gi, " ")
     .replace(/\b(?:fuzzy\s+logic|soft\s+logic|fuzzy|graded\s+truth|probabilistic\s+logic|probability\s+logic|prob\s+logic|independent\s+probability|correlated\s+probability\s+logic|conditional\s+probability\s+logic|bayesian\s+network\s+probability\s+logic)\b/gi, " ")
     .replace(/\b(?:logic|boolean|propositional|expression|statement)\b/gi, " ")
-    .replace(/^\s*(?:of|for)\s+/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const queryParts = splitProbabilityEvidenceExpression(rawExpression, kind);
+  const expression = cleanLogicTruthExpressionText(queryParts.expression);
+  const evidenceExpression = queryParts.evidence
+    ? cleanLogicTruthExpressionText(queryParts.evidence)
+    : null;
 
   if (!expression) {
     throw new Error("Graded logic needs a statement, such as fuzzy logic P and Q with P=0.8 Q=0.4.");
   }
-  return { kind, expression, values, tNorm: tNormRequest.tNorm, interval, dependence };
+  if (queryParts.evidence && !evidenceExpression) {
+    throw new Error("Conditional probability queries need evidence after 'given', such as P given R.");
+  }
+  return { kind, expression, evidenceExpression, values, tNorm: tNormRequest.tNorm, interval, dependence };
+}
+
+function splitProbabilityEvidenceExpression(text, kind) {
+  if (kind !== "probability") {
+    return { expression: text, evidence: null };
+  }
+  const match = text.match(/\b(?:given|conditioned\s+on|assuming|evidence)\b/i);
+  if (!match) {
+    return { expression: text, evidence: null };
+  }
+  return {
+    expression: text.slice(0, match.index),
+    evidence: text.slice(match.index + match[0].length),
+  };
+}
+
+function cleanLogicTruthExpressionText(text) {
+  return text
+    .replace(/\b(?:using|with|given|where|values?|truth\s+values?|truth\s+intervals?|degrees?)\b/gi, " ")
+    .replace(/^\s*(?:of|for)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function extractFuzzyTNorm(question) {
@@ -28513,6 +28554,39 @@ function evaluateCorrelatedProbabilityLogic(node, model, trace) {
   return value;
 }
 
+function evaluateProbabilityEvidenceQuery(query, evidence, model, trace) {
+  const queryProbability = evaluateCorrelatedProbabilityLogic(query, model, trace);
+  const evidenceProbability = evaluateCorrelatedProbabilityLogic(evidence, model, trace);
+  if (evidenceProbability <= EPSILON) {
+    throw new Error("Evidence has probability 0, so the conditional probability is undefined.");
+  }
+  const jointProbability = probabilityOfJointTruth(query, evidence, model);
+  const value = normalizeSoftTruth(jointProbability / evidenceProbability);
+  trace.push({
+    expression: `${logicToString(query)} given ${logicToString(evidence)}`,
+    rule: "conditional: P(query and evidence) / P(evidence)",
+    value,
+  });
+  return {
+    value,
+    query,
+    evidence,
+    queryProbability,
+    evidenceProbability,
+    jointProbability,
+  };
+}
+
+function probabilityOfJointTruth(leftNode, rightNode, model) {
+  return normalizeSoftTruth(
+    model.states.reduce((sum, state) => (
+      evaluateLogic(leftNode, state.assignment) && evaluateLogic(rightNode, state.assignment)
+        ? sum + state.probability
+        : sum
+    ), 0),
+  );
+}
+
 function correlatedNodeProbability(node, model) {
   return normalizeSoftTruth(
     model.states.reduce((sum, state) => (
@@ -28527,7 +28601,11 @@ function formatProbabilityModelSemantics(model) {
   return "correlated probability";
 }
 
-function formatProbabilityModelSummary(model) {
+function formatProbabilityModelSummary(model, hasEvidence = false) {
+  if (hasEvidence) {
+    if (model.source === "bayesian-network") return "Bayesian network conditional probability";
+    return "Evidence-conditioned probabilistic logic truth value";
+  }
   if (model.source === "bayesian-network") return "Bayesian network probabilistic logic truth value";
   if (model.source === "conditional") return "Conditional probabilistic logic truth value";
   return "Correlated probabilistic logic truth value";
@@ -28543,7 +28621,10 @@ function formatProbabilityModelInputDetail(model) {
   return "Each event receives a marginal probability; the pair receives a joint or correlation constraint.";
 }
 
-function formatProbabilityModelEvaluationDetail(model) {
+function formatProbabilityModelEvaluationDetail(model, hasEvidence = false) {
+  if (hasEvidence) {
+    return "The joint distribution sums evidence states, then divides the query-and-evidence probability by the evidence probability.";
+  }
   if (model.source === "bayesian-network") {
     return "The network expands to a full joint distribution, then sums the states where the propositional expression is true.";
   }
@@ -28598,6 +28679,16 @@ function formatBayesianNetworkProbabilityArtifacts(model) {
       `cond(${conditional.child}|${conditional.parent})=${formatNumber(conditional.whenParentTrue)}, cond(${conditional.child}|not ${conditional.parent})=${formatNumber(conditional.whenParentFalse)}`
     )).join("; ")],
     ["State count", formatNumber(model.states.length)],
+  ];
+}
+
+function formatEvidenceProbabilityArtifacts(evidenceResult) {
+  return [
+    ["Query", logicToString(evidenceResult.query)],
+    ["Evidence", logicToString(evidenceResult.evidence)],
+    ["P(query)", formatNumber(evidenceResult.queryProbability)],
+    ["P(evidence)", formatNumber(evidenceResult.evidenceProbability)],
+    ["P(query and evidence)", formatNumber(evidenceResult.jointProbability)],
   ];
 }
 

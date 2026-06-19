@@ -18,7 +18,8 @@ The frontend currently supports:
 - Fuzzy truth-value evaluation with min/max, product, Lukasiewicz, and
   interval-valued t-norms, plus independent and correlated probability
   truth-value evaluation, conditional-probability tables, and small binary
-  Bayesian networks for propositional statements
+  Bayesian networks with evidence-conditioned queries for propositional
+  statements
 - Graphviz DOT export for parsed math and logic expression trees
 - Boolean algebra simplification with identity, domination, complement,
   idempotent, absorption, consensus, De Morgan, double-negation, implication,
@@ -314,6 +315,9 @@ The same idea works for algebra and calculus:
 - `bayesian network probability logic P or R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2`
   expands a three-event binary Bayesian network to its joint distribution and
   returns `probability = 0.74`.
+- `bayesian network probability logic P given R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2`
+  conditions the network on evidence and returns
+  `conditional probability = 0.72`.
 - `dot tree x^2 + 2x + 1` exports the parsed expression tree as Graphviz DOT
   with node and edge tables.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.
@@ -558,8 +562,8 @@ The demo includes:
 - Karnaugh-map simplification with optional don't-care cells through Ask mode
 - Reduced ordered BDDs through Ask mode
 - Fuzzy t-norm, interval-valued, independent-probability, and
-  correlated/conditional/Bayesian-network probability truth-value logic through
-  Ask mode
+  correlated/conditional/Bayesian-network probability truth-value logic with
+  evidence through Ask mode
 - Graphviz DOT tree export through Ask mode
 - Number theory and modular arithmetic through Ask mode
 - Polynomial inequalities with interval answers through Ask mode
@@ -664,5 +668,5 @@ These are good ways to make the project more impressive mathematically:
 16. Add one-click SVG or PNG rendering for exported Graphviz parse trees.
 17. Add Boolean operations directly on BDDs, including apply, restrict, and
    variable reordering heuristics.
-18. Generalize probabilistic logic to larger joint distributions, multi-parent
-   Bayesian-network nodes, and probability queries with explicit evidence.
+18. Generalize probabilistic logic to larger joint distributions and
+   multi-parent Bayesian-network nodes.

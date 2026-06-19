@@ -207,6 +207,7 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   const correlatedFromRho = analyzeLogicTruthValue("correlated probability logic P and Q with P=0.6 Q=0.5 corr(P,Q)=0.5");
   const conditional = analyzeLogicTruthValue("conditional probability logic P or Q with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3");
   const bayesianNetwork = analyzeLogicTruthValue("bayesian network probability logic P or R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2");
+  const bayesianEvidence = analyzeLogicTruthValue("bayesian network probability logic P given R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2");
 
   assert.equal(fuzzy.summary, "Fuzzy logic truth value");
   assert.equal(fuzzy.answer, "fuzzy truth = 0.7");
@@ -296,11 +297,21 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
     ["P=false, Q=false, R=false", "0.224"],
   ]);
 
+  assert.equal(bayesianEvidence.summary, "Bayesian network conditional probability");
+  assert.equal(bayesianEvidence.answer, "conditional probability = 0.72");
+  assert.equal(artifactValue(bayesianEvidence, "Query"), "P");
+  assert.equal(artifactValue(bayesianEvidence, "Evidence"), "R");
+  assert.equal(artifactValue(bayesianEvidence, "P(query)"), "0.6");
+  assert.equal(artifactValue(bayesianEvidence, "P(evidence)"), "0.5");
+  assert.equal(artifactValue(bayesianEvidence, "P(query and evidence)"), "0.36");
+  assert.deepEqual(bayesianEvidence.table.rows.slice(-1), [["P given R", "conditional: P(query and evidence) / P(evidence)", "0.72"]]);
+
   assert.equal(analyzeUniversal("fuzzy logic P and Q with P=0.8 Q=0.6").summary, "Fuzzy logic truth value");
   assert.equal(analyzeUniversal("interval fuzzy logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]").summary, "Interval fuzzy logic truth value");
   assert.equal(analyzeUniversal("correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35").summary, "Correlated probabilistic logic truth value");
   assert.equal(analyzeUniversal("conditional probability logic P or Q with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3").summary, "Conditional probabilistic logic truth value");
   assert.equal(analyzeUniversal("bayesian network probability logic P or R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2").summary, "Bayesian network probabilistic logic truth value");
+  assert.equal(analyzeUniversal("bayesian network probability logic P given R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2").summary, "Bayesian network conditional probability");
 });
 
 runTest("tree export emits Graphviz DOT", () => {
