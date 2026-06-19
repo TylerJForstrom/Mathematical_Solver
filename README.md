@@ -14,6 +14,10 @@ The frontend currently supports:
   of 4, 8, 15", "how many ways to choose 3 from 10", "probability of 3 heads in
   10 coin flips", "what is the derivative of x squared"), maps them to the
   matching problem type, and shows that detected type with the solution
+- Multi-part question handling: a question that bundles several sub-questions
+  ("(a) differentiate x^3 (b) integrate x^2 (c) mean of 2, 4, 6, 8", or numbered
+  / line-separated parts) is split, each part is routed to its own engine, and
+  the result lists a labeled problem type and answer per part
 - A categorized example dropdown that lists the solvable problem types instead of
   a wall of buttons, keeping the interface compact
 - Propositional logic evaluation, truth tables, DPLL SAT solving with unsat-core

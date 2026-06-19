@@ -2458,6 +2458,13 @@ export const PROBLEM_CATEGORIES = [
       { label: "Autocorrelation test", sample: "ljung-box series: 10, 12, 13, 15, 16, 18, 21, 22 lags=3" },
     ],
   },
+  {
+    category: "Multi-part questions",
+    examples: [
+      { label: "Several questions at once", sample: "(a) differentiate x^3 (b) integrate x^2 (c) mean of 2, 4, 6, 8" },
+      { label: "Numbered parts", sample: "1) solve x^2 - 5x + 6 = 0 2) det [[1,2],[3,4]] 3) 10 choose 3" },
+    ],
+  },
 ];
 
 // Rewrites common natural-language phrasings into the canonical forms the
@@ -2532,7 +2539,143 @@ export function interpretNaturalLanguage(rawQuestion) {
   return normalized || text;
 }
 
-export function analyzeUniversal(rawQuestion, values = {}) {
+// Splits a question that bundles several sub-questions into labeled parts.
+// Recognizes "(a) ... (b) ...", "1) ... 2) ...", line-separated, or multiple
+// "?"-terminated questions. Returns null when the input is a single question.
+function splitQuestionParts(rawQuestion) {
+  const text = String(rawQuestion == null ? "" : rawQuestion).trim();
+  if (text.length < 8) {
+    return null;
+  }
+
+  const lettered = detectSequentialMarkers(text, /\(\s*([a-z])\s*\)/gi, (index) => String.fromCharCode(97 + index));
+  if (lettered) {
+    return lettered;
+  }
+  // Require whitespace after the marker so a decimal like "1.5" or a coordinate
+  // like "(2,3)" is never mistaken for a "1." / "2)" part marker.
+  const numbered = detectSequentialMarkers(text, /(?:^|[\s;])\(?(\d{1,2})[).]\s/g, (index) => String(index + 1));
+  if (numbered) {
+    return numbered;
+  }
+
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length >= 2 && lines.length <= 12) {
+    const lineParts = lines
+      .map((line, index) => ({ label: String(index + 1), text: line.replace(/^\(?\s*[a-z0-9]\s*[).:]\s*/i, "").trim() }))
+      .filter((part) => part.text);
+    if (lineParts.length >= 2) {
+      return lineParts;
+    }
+  }
+
+  const questions = text.split(/\?+/).map((chunk) => chunk.trim()).filter(Boolean);
+  if (questions.length >= 2 && questions.length <= 12) {
+    return questions.map((question, index) => ({ label: String(index + 1), text: question }));
+  }
+
+  return null;
+}
+
+// Keeps only markers that continue the expected sequence (a, b, c... or 1, 2,
+// 3...), so a stray "(x)" inside a part is ignored rather than mistaken for a
+// part boundary. Returns null unless at least two sequential markers are found.
+function detectSequentialMarkers(text, regex, expected) {
+  const matches = [...text.matchAll(regex)];
+  if (matches.length < 2) {
+    return null;
+  }
+  const chosen = [];
+  for (const match of matches) {
+    if (match[1].toLowerCase() === expected(chosen.length)) {
+      chosen.push({ index: match.index, length: match[0].length });
+    }
+  }
+  if (chosen.length < 2) {
+    return null;
+  }
+  const parts = [];
+  for (let i = 0; i < chosen.length; i += 1) {
+    const start = chosen[i].index + chosen[i].length;
+    const end = i + 1 < chosen.length ? chosen[i + 1].index : text.length;
+    const body = text.slice(start, end).replace(/^[\s).:,-]+/, "").replace(/[\s;]+$/, "").trim();
+    parts.push({ label: expected(i), text: body });
+  }
+  return parts.every((part) => part.text.length > 0) ? parts : null;
+}
+
+function isMultiPartQuestion(rawQuestion) {
+  const parts = splitQuestionParts(rawQuestion);
+  return Array.isArray(parts) && parts.length >= 2;
+}
+
+function shortenErrorMessage(message) {
+  const text = String(message || "not supported").replace(/\s+/g, " ").trim();
+  return text.length > 90 ? `${text.slice(0, 87)}...` : text;
+}
+
+// Solves a bundled question by routing each part on its own and reporting a
+// labeled answer per part.
+export function analyzeMultiPart(rawQuestion, values = {}) {
+  const parts = splitQuestionParts(rawQuestion);
+  if (!parts || parts.length < 2) {
+    throw new Error("Multi-part mode needs at least two labeled parts, e.g. '(a) differentiate x^3 (b) integrate x^2'.");
+  }
+
+  const results = parts.map((part) => {
+    try {
+      const solved = analyzeUniversal(part.text, values, { allowMultiPart: false });
+      return {
+        label: part.label,
+        text: part.text,
+        type: solved.problemType ?? solved.summary ?? "solved",
+        answer: solved.answer,
+        ok: true,
+      };
+    } catch (error) {
+      return {
+        label: part.label,
+        text: part.text,
+        type: "unsupported",
+        answer: shortenErrorMessage(error.message),
+        ok: false,
+      };
+    }
+  });
+
+  const solvedCount = results.filter((result) => result.ok).length;
+  const tree = statsDatasetNode(
+    [],
+    results.map((result) => statsMetricNode(`(${result.label}) ${result.type}`, result.ok ? 1 : 0)),
+    "PARTS",
+  );
+
+  return {
+    mode: "statistics",
+    problemType: "Multi-part",
+    tree,
+    answer: `${solvedCount} of ${results.length} parts answered`,
+    summary: "multi-part question",
+    details: "Each part is detected, routed to the matching engine, and answered separately",
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: results.map((result) => ({
+      title: `Part (${result.label}) — ${result.type}`,
+      expression: result.answer,
+      detail: result.ok ? `Question: ${result.text}` : `Couldn't solve "${result.text}" — ${result.answer}`,
+    })),
+    table: {
+      headers: ["Part", "Problem type", "Answer"],
+      rows: results.map((result) => [`(${result.label})`, result.type, result.answer]),
+    },
+    artifacts: results.map((result) => [`Part (${result.label})`, `${result.type}: ${result.answer}`]),
+  };
+}
+
+export function analyzeUniversal(rawQuestion, values = {}, options = {}) {
+  if (options.allowMultiPart !== false && isMultiPartQuestion(rawQuestion)) {
+    return analyzeMultiPart(rawQuestion, values);
+  }
   const question = interpretNaturalLanguage(rawQuestion);
   const lower = question.toLowerCase();
   let routed;

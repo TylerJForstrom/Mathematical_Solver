@@ -39,6 +39,7 @@ import {
   analyzeTaylor,
   analyzeTreeExport,
   analyzeUniversal,
+  analyzeMultiPart,
   interpretNaturalLanguage,
   PROBLEM_CATEGORIES,
   analyzeVector,
@@ -2518,6 +2519,40 @@ runTest("natural-language parser maps word problems to the right solver", () => 
   assert.equal(analyzeUniversal("what is 15% of 200").answer, "30");
   assert.equal(analyzeUniversal("calculate 5 + 3 * 2").answer, "11");
   assert.equal(analyzeUniversal("median of 3, 1, 4, 1, 5, 9, 2").answer, "median = 3");
+});
+
+runTest("multi-part mode answers each labeled part separately", () => {
+  const result = analyzeUniversal("(a) differentiate x^3 (b) integrate x^2 (c) mean of 2, 4, 6, 8");
+
+  assert.equal(result.problemType, "Multi-part");
+  assert.equal(result.summary, "multi-part question");
+  assert.equal(result.answer, "3 of 3 parts answered");
+  assert.equal(result.table.headers.join(","), "Part,Problem type,Answer");
+  assert.deepEqual(result.table.rows, [
+    ["(a)", "Derivative", "3x^2"],
+    ["(b)", "Integral", "0.333333x^3 + C"],
+    ["(c)", "Statistics", "mean = 5"],
+  ]);
+});
+
+runTest("multi-part mode ignores stray (x) and degrades on unsupported parts", () => {
+  const calc = analyzeUniversal("(a) differentiate sin(x) (b) integrate cos(x)");
+  assert.equal(calc.problemType, "Multi-part");
+  assert.deepEqual(calc.table.rows, [
+    ["(a)", "Derivative", "cos(x)"],
+    ["(b)", "Integral", "sin(x) + C"],
+  ]);
+
+  const mixed = analyzeMultiPart("(a) mean of 1,2,3,4,5 (b) find the MLE of theta for a power distribution");
+  assert.equal(mixed.answer, "1 of 2 parts answered");
+  assert.equal(mixed.table.rows[0][2], "mean = 3");
+  assert.equal(mixed.table.rows[1][1], "unsupported");
+});
+
+runTest("multi-part mode leaves single questions alone", () => {
+  assert.equal(analyzeUniversal("solve x^2 - 5x + 6 = 0").problemType, "Equation");
+  assert.equal(analyzeUniversal("mean of 2, 4, 6").summary, "descriptive statistics");
+  assert.throws(() => analyzeMultiPart("mean of 2, 4, 6"), /at least two/);
 });
 
 runTest("natural-language parser preserves canonical inputs and exposes problemType", () => {
