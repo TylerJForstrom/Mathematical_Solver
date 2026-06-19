@@ -202,6 +202,9 @@ The frontend currently supports:
   learning rate, a per-step gradient table, divergence detection, and a descent
   path traced over the function plot
 - Simpson's rule and trapezoidal-rule numerical integration
+- Improper integrals with infinite bounds, evaluated as the limit of integrals
+  over a growing interval with a convergence/divergence verdict, a geometric
+  tail extrapolation, a slice-area table, and a partial-integral plot
 - Expression-tree visualization for every mode
 - Step-by-step explanations for the transformations being applied
 
@@ -412,6 +415,9 @@ The same idea works for algebra and calculus:
   root-finding iterations.
 - `simpson integrate sin(x) from 0 to pi n=100` approximates a definite
   integral numerically and returns `integral ~= 2`.
+- `improper integral 1/x^2 from 1 to infinity` returns `integral ~= 1`,
+  `improper integral 1/x from 1 to infinity` reports `diverges`, and
+  `improper integral 1/(1+x^2) from -infinity to infinity` recovers `~= 3.141593`.
 - `ode dy/dt = 0.3y y0=2 t=5`, `newton cooling ambient=70 initial=100 k=0.2 t=10`,
   and `logistic r=0.4 K=100 y0=10 t=8` solve closed-form differential equations.
 - `ode system dx/dt = y; dy/dt = -2*x - 3*y; x0=1 y0=0 t=1`

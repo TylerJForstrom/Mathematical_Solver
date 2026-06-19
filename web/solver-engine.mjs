@@ -2435,6 +2435,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isLimitQuestion(lower)) {
     routed = analyzeLimit(question);
     routedLabel = "Limit";
+  } else if (isImproperIntegralQuestion(lower)) {
+    routed = analyzeImproperIntegral(question);
+    routedLabel = "Improper integral";
   } else if (isNumericalIntegrationQuestion(lower)) {
     routed = analyzeNumerical(question);
     routedLabel = "Numerical integration";
@@ -5479,6 +5482,221 @@ function analyzeNumericalIntegration(request, expression) {
       ["Step size", formatNumber(result.stepSize)],
       ["Approximation", formatNumber(result.value)],
     ],
+  };
+}
+
+export function analyzeImproperIntegral(statement) {
+  const request = extractImproperIntegralQuestion(statement);
+  const expression = parseMath(request.expression);
+  if (expression.kind === "equation") {
+    throw new Error("Improper integrals expect an integrand expression, not an equation.");
+  }
+  const evaluator = (value) => evaluateMath(expression, { [request.variable]: value });
+
+  const boundLabel = `${request.lowerInfinite ? (request.lowerSign < 0 ? "-infinity" : "infinity") : formatNumber(request.lower)} to ${request.upperInfinite ? (request.upperSign < 0 ? "-infinity" : "infinity") : formatNumber(request.upper)}`;
+
+  let result;
+  if (request.lowerInfinite && request.upperInfinite) {
+    const right = integrateImproperTail(evaluator, 0, 1);
+    const left = integrateImproperTail(evaluator, 0, -1);
+    result = {
+      converged: right.converged && left.converged,
+      value: normalizeNumber(right.value + left.value),
+      chunks: [...left.chunks.slice().reverse(), ...right.chunks],
+      lastContribution: Math.max(right.lastContribution, left.lastContribution),
+    };
+  } else if (request.upperInfinite) {
+    result = integrateImproperTail(evaluator, request.lower, 1);
+  } else {
+    result = integrateImproperTail(evaluator, request.upper, -1);
+  }
+
+  const converged = result.converged;
+  const answer = converged ? `integral ~= ${formatNumber(result.value)}` : "diverges";
+  const summary = converged ? "convergent improper integral" : "divergent improper integral";
+
+  // Cumulative partial integral after each chunk, for the convergence plot.
+  let running = 0;
+  const cumulative = result.chunks.map((chunk, index) => {
+    running += chunk.contribution;
+    return { index: index + 1, to: chunk.to, contribution: chunk.contribution, cumulative: normalizeNumber(running) };
+  });
+  const partialPoints = cumulative.map((row) => ({ x: row.index, y: row.cumulative }));
+  const yValues = partialPoints.map((point) => point.y).filter(Number.isFinite);
+
+  const steps = [
+    {
+      title: "Set up the improper integral",
+      expression: `integral of ${formatMath(expression)} d${request.variable}, ${boundLabel}`,
+      detail: "An infinite limit is handled as the limit of integrals over a growing finite interval.",
+    },
+    {
+      title: "Accumulate the tail",
+      expression: converged
+        ? `tail contributions shrink toward 0`
+        : `tail contributions stay ~${formatNumber(result.lastContribution)}`,
+      detail: "Each successive interval adds the next slice of area; convergence means those slices vanish.",
+    },
+    {
+      title: "Report the limit",
+      expression: answer,
+      detail: converged
+        ? "The partial integrals approach a finite limit, so the integral converges."
+        : "The partial integrals do not settle, so the integral diverges.",
+    },
+  ];
+
+  const graph = partialPoints.length >= 2 && yValues.length > 0
+    ? {
+        expression: `partial integral of ${formatMath(expression)}`,
+        kind: "convergence",
+        scatterLabel: "Partial integrals",
+        xMin: partialPoints[0].x,
+        xMax: partialPoints[partialPoints.length - 1].x,
+        yMin: Math.min(0, ...yValues),
+        yMax: Math.max(...yValues),
+        points: partialPoints,
+        scatter: partialPoints,
+        lines: [{ label: "Partial integral", points: partialPoints }],
+      }
+    : null;
+
+  return {
+    mode: "numerical",
+    tree: expression,
+    answer,
+    summary,
+    details: "Improper integral evaluated as the limit of integrals over a growing interval",
+    variables: mathVariables(expression),
+    metrics: treeMetrics(expression),
+    steps,
+    table: {
+      headers: ["Upper bound", "Slice area", "Cumulative"],
+      rows: cumulative.map((row) => [
+        formatNumber(row.to),
+        formatNumber(row.contribution),
+        formatNumber(row.cumulative),
+      ]),
+    },
+    artifacts: [
+      ["Integrand", `${formatMath(expression)}`],
+      ["Bounds", boundLabel],
+      ["Convergence", converged ? "converges" : "diverges"],
+      ...(converged ? [["Value", formatNumber(result.value)]] : []),
+      ["Final slice area", formatNumber(result.lastContribution)],
+    ],
+    ...(graph ? { graph } : {}),
+  };
+}
+
+function integrateImproperTail(evaluator, start, direction) {
+  const magnitudes = [10, 100, 1000, 1e4, 1e5, 1e6, 1e7, 1e8];
+  let previous = start;
+  const chunks = [];
+  for (const magnitude of magnitudes) {
+    const bound = direction > 0 ? magnitude : -magnitude;
+    if (direction > 0 && bound <= previous) {
+      continue;
+    }
+    if (direction < 0 && bound >= previous) {
+      continue;
+    }
+    const low = direction > 0 ? previous : bound;
+    const high = direction > 0 ? bound : previous;
+    let contribution;
+    try {
+      contribution = approximateDefiniteIntegral(evaluator, low, high, 200, "simpson").value;
+    } catch {
+      throw new Error("The integrand is singular on the finite part of the interval; only infinite-bound improper integrals with a finite integrand are supported.");
+    }
+    if (!Number.isFinite(contribution)) {
+      break;
+    }
+    chunks.push({ from: previous, to: bound, contribution: normalizeNumber(contribution) });
+    previous = bound;
+    if (Math.abs(contribution) < 1e-13) {
+      break;
+    }
+  }
+
+  const total = chunks.reduce((sum, chunk) => sum + chunk.contribution, 0);
+  const magnitudesList = chunks.map((chunk) => Math.abs(chunk.contribution));
+  const count = magnitudesList.length;
+  let converged = false;
+  let value = normalizeNumber(total);
+  const lastContribution = count > 0 ? magnitudesList[count - 1] : Number.POSITIVE_INFINITY;
+
+  if (count > 0 && magnitudesList[count - 1] < 1e-12) {
+    // The tail slices have already vanished, so the running total is the limit.
+    converged = true;
+  } else if (count >= 3) {
+    // Successive slices over [B, 10B] shrinking geometrically => convergent tail.
+    const ratioA = magnitudesList[count - 2] > 0 ? magnitudesList[count - 1] / magnitudesList[count - 2] : Number.POSITIVE_INFINITY;
+    const ratioB = magnitudesList[count - 3] > 0 ? magnitudesList[count - 2] / magnitudesList[count - 3] : Number.POSITIVE_INFINITY;
+    const ratio = (ratioA + ratioB) / 2;
+    if (Number.isFinite(ratio) && ratio < 0.95) {
+      converged = true;
+      // Sum the remaining geometric tail beyond the last computed slice.
+      const remaining = chunks[count - 1].contribution * ratio / (1 - ratio);
+      value = normalizeNumber(total + remaining);
+    }
+  }
+
+  return {
+    value,
+    converged,
+    chunks,
+    lastContribution: normalizeNumber(lastContribution),
+  };
+}
+
+function extractImproperIntegralQuestion(statement) {
+  let text = statement
+    .replace(/^improper\s+(?:integral|integrate)\s+/i, "")
+    .replace(/^(?:integral|integrate)\s+/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+
+  let variable = "x";
+  const withRespectTo = text.match(/\b(?:with respect to|wrt)\s+([a-z])\b/i);
+  if (withRespectTo) {
+    variable = withRespectTo[1];
+    text = text.replace(withRespectTo[0], " ").trim();
+  } else {
+    const differential = text.match(/\bd([a-z])\b/i);
+    if (differential) {
+      variable = differential[1];
+      text = text.replace(differential[0], " ").trim();
+    }
+  }
+
+  const boundsMatch = text.match(/\bfrom\s+(.+?)\s+to\s+(.+)$/i);
+  if (!boundsMatch) {
+    throw new Error("Improper integrals need bounds, e.g. improper integral 1/x^2 from 1 to infinity.");
+  }
+  const lowerToken = boundsMatch[1].trim();
+  const upperToken = boundsMatch[2].trim();
+  const expression = text.slice(0, boundsMatch.index).trim();
+  if (!expression) {
+    throw new Error("Improper integrals need an integrand expression.");
+  }
+
+  const infinitePattern = /^[+-]?\s*(?:infinity|infty|inf|∞)$/i;
+  const lowerInfinite = infinitePattern.test(lowerToken);
+  const upperInfinite = infinitePattern.test(upperToken);
+  if (!lowerInfinite && !upperInfinite) {
+    throw new Error("Improper integrals need at least one infinite bound; use Simpson's rule for finite integrals.");
+  }
+
+  return {
+    expression,
+    variable,
+    lower: lowerInfinite ? null : evaluateBoundExpression(lowerToken),
+    upper: upperInfinite ? null : evaluateBoundExpression(upperToken),
+    lowerInfinite,
+    upperInfinite,
+    lowerSign: /^-/.test(lowerToken) ? -1 : 1,
+    upperSign: /^-/.test(upperToken) ? -1 : 1,
   };
 }
 
@@ -27533,6 +27751,12 @@ function isIntegralQuestion(lower) {
     lower.startsWith("integral of ") ||
     lower.startsWith("find the integral of ") ||
     lower.startsWith("antiderivative of ");
+}
+
+function isImproperIntegralQuestion(lower) {
+  return lower.startsWith("improper integral ") ||
+    lower.startsWith("improper integrate ") ||
+    (lower.startsWith("improper ") && lower.includes("integral"));
 }
 
 function isOptimizationQuestion(lower) {

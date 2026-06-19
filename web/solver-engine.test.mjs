@@ -12,6 +12,7 @@ import {
   analyzeGraph,
   analyzeIntersection,
   analyzeInequality,
+  analyzeImproperIntegral,
   analyzeIntegral,
   analyzeLaplaceTransform,
   analyzeLimit,
@@ -1912,6 +1913,37 @@ runTest("integral mode applies polynomial power rules", () => {
 
   assert.equal(result.summary, "indefinite integral");
   assert.equal(result.answer, "0.333333x^3 + 1.5x^2 + C");
+});
+
+runTest("improper integral mode evaluates convergent infinite integrals", () => {
+  const result = analyzeImproperIntegral("improper integral 1/x^2 from 1 to infinity");
+
+  assert.equal(result.summary, "convergent improper integral");
+  assert.equal(artifactValue(result, "Convergence"), "converges");
+  assert.ok(Math.abs(Number(artifactValue(result, "Value")) - 1) < 1e-3);
+  assert.equal(result.graph.kind, "convergence");
+  assert.equal(result.table.headers.join(","), "Upper bound,Slice area,Cumulative");
+
+  const decay = analyzeImproperIntegral("improper integral e^(-x) from 0 to infinity");
+  assert.ok(Math.abs(Number(artifactValue(decay, "Value")) - 1) < 1e-3);
+
+  const both = analyzeImproperIntegral("improper integral 1/(1+x^2) from -infinity to infinity");
+  assert.ok(Math.abs(Number(artifactValue(both, "Value")) - Math.PI) < 1e-2);
+});
+
+runTest("improper integral mode flags divergent integrals and routes via Ask", () => {
+  const divergent = analyzeImproperIntegral("improper integral 1/x from 1 to infinity");
+  assert.equal(divergent.summary, "divergent improper integral");
+  assert.equal(divergent.answer, "diverges");
+  assert.equal(artifactValue(divergent, "Convergence"), "diverges");
+
+  const routed = analyzeUniversal("improper integral 1/x^2 from 1 to infinity");
+  assert.equal(routed.summary, "convergent improper integral");
+
+  assert.throws(
+    () => analyzeImproperIntegral("improper integral 1/x^2 from 0 to 5"),
+    /at least one infinite bound/,
+  );
 });
 
 runTest("integral mode evaluates definite integrals", () => {
