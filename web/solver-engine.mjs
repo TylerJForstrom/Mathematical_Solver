@@ -2426,6 +2426,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isFourierQuestion(lower)) {
     routed = analyzeFourierSeries(question);
     routedLabel = "Fourier series";
+  } else if (isIntersectionQuestion(lower)) {
+    routed = analyzeIntersection(question);
+    routedLabel = "Intersection";
   } else if (isGraphQuestion(lower)) {
     routed = analyzeGraph(question);
     routedLabel = "Graph";
@@ -4370,6 +4373,228 @@ export function analyzeGraph(statement) {
       yMax,
     },
   };
+}
+
+export function analyzeIntersection(statement) {
+  const request = extractIntersectionQuestion(statement);
+  const firstExpr = parseMath(request.first);
+  const secondExpr = parseMath(request.second);
+  if (firstExpr.kind === "equation" || secondExpr.kind === "equation") {
+    throw new Error("Intersection expects two function expressions, such as intersect x^2 and 2x + 1.");
+  }
+
+  const firstEval = numericFunctionFromExpression(firstExpr);
+  const secondEval = numericFunctionFromExpression(secondExpr);
+  const intersections = findCurveIntersections(firstEval, secondEval, request.xMin, request.xMax);
+
+  const firstLabel = `y = ${formatMath(firstExpr)}`;
+  const secondLabel = `y = ${formatMath(secondExpr)}`;
+  const firstPoints = sampleFunction(firstExpr, request.variable, request.xMin, request.xMax, 161);
+  const secondPoints = sampleFunction(secondExpr, request.variable, request.xMin, request.xMax, 161);
+
+  const answer = intersections.length === 0
+    ? `No intersections in [${formatNumber(request.xMin)}, ${formatNumber(request.xMax)}]`
+    : intersections
+        .map((point) => `(${formatNumber(point.x)}, ${formatNumber(point.y)})`)
+        .join(", ");
+
+  const steps = [
+    {
+      title: "Parse both functions",
+      expression: `${firstLabel}; ${secondLabel}`,
+      detail: "Each side becomes an expression tree evaluated as a function of the variable.",
+    },
+    {
+      title: "Set the curves equal",
+      expression: `${formatMath(firstExpr)} = ${formatMath(secondExpr)}`,
+      detail: "Intersections are the roots of the difference f(x) - g(x).",
+    },
+    {
+      title: "Scan for sign changes",
+      expression: `${formatNumber(request.xMin)} <= ${request.variable} <= ${formatNumber(request.xMax)}`,
+      detail: "The solver samples the difference and brackets each sign change, then bisects to a root.",
+    },
+    {
+      title: "Report intersections",
+      expression: answer,
+      detail: intersections.length === 0
+        ? "No crossing was found in the requested range; widen the range or check the functions."
+        : `${intersections.length} intersection point${intersections.length === 1 ? "" : "s"} located.`,
+    },
+  ];
+
+  const intersectionPoints = intersections.map((point) => ({ x: point.x, y: point.y }));
+  const yValues = [
+    ...firstPoints.map((point) => point.y),
+    ...secondPoints.map((point) => point.y),
+    ...intersectionPoints.map((point) => point.y),
+  ].filter(Number.isFinite);
+  const graph = (firstPoints.length >= 2 && secondPoints.length >= 2 && yValues.length > 0)
+    ? {
+        expression: `${firstLabel} and ${secondLabel}`,
+        kind: "intersection",
+        scatterLabel: "Intersections",
+        xMin: request.xMin,
+        xMax: request.xMax,
+        yMin: Math.min(...yValues),
+        yMax: Math.max(...yValues),
+        points: firstPoints,
+        scatter: intersectionPoints,
+        lines: [
+          { label: firstLabel, points: firstPoints },
+          { label: secondLabel, points: secondPoints },
+        ],
+      }
+    : null;
+
+  return {
+    mode: "graph",
+    tree: firstExpr,
+    answer,
+    summary: "curve intersection",
+    details: "Curve intersection by bracketing roots of the difference",
+    variables: uniqueOrdered([...mathVariables(firstExpr), ...mathVariables(secondExpr)]),
+    metrics: treeMetrics(firstExpr),
+    steps,
+    table: {
+      headers: ["#", request.variable, "y"],
+      rows: intersections.map((point, index) => [
+        String(index + 1),
+        formatNumber(point.x),
+        formatNumber(point.y),
+      ]),
+    },
+    artifacts: [
+      ["Function 1", firstLabel],
+      ["Function 2", secondLabel],
+      ["Range", `[${formatNumber(request.xMin)}, ${formatNumber(request.xMax)}]`],
+      ["Intersections", formatNumber(intersections.length)],
+      ...intersections.map((point, index) => [
+        `Point ${index + 1}`,
+        `(${formatNumber(point.x)}, ${formatNumber(point.y)})`,
+      ]),
+    ],
+    ...(graph ? { graph } : {}),
+  };
+}
+
+function findCurveIntersections(firstEval, secondEval, xMin, xMax, samples = 400) {
+  const difference = (x) => {
+    try {
+      const value = firstEval(x) - secondEval(x);
+      return Number.isFinite(value) ? value : Number.NaN;
+    } catch {
+      return Number.NaN;
+    }
+  };
+
+  const roots = [];
+  const addRoot = (candidate) => {
+    if (!Number.isFinite(candidate)) {
+      return;
+    }
+    if (roots.some((existing) => Math.abs(existing - candidate) < 1e-6)) {
+      return;
+    }
+    roots.push(candidate);
+  };
+
+  let previousX = xMin;
+  let previousDiff = difference(xMin);
+  if (previousDiff === 0) {
+    addRoot(xMin);
+  }
+  for (let index = 1; index <= samples; index += 1) {
+    const x = xMin + ((xMax - xMin) * index) / samples;
+    const currentDiff = difference(x);
+    if (Number.isFinite(previousDiff) && Number.isFinite(currentDiff)) {
+      if (currentDiff === 0) {
+        addRoot(x);
+      } else if (previousDiff !== 0 && previousDiff * currentDiff < 0) {
+        const root = refineIntersectionRoot(difference, previousX, x);
+        addRoot(root);
+      }
+    }
+    previousX = x;
+    previousDiff = currentDiff;
+  }
+
+  return roots
+    .sort((left, right) => left - right)
+    .map((root) => ({ x: normalizeNumber(root), y: normalizeNumber(firstEval(root)) }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+}
+
+function refineIntersectionRoot(difference, left, right) {
+  let low = left;
+  let high = right;
+  let lowValue = difference(low);
+  let highValue = difference(high);
+  if (!Number.isFinite(lowValue) || !Number.isFinite(highValue) || lowValue * highValue > 0) {
+    return Number.NaN;
+  }
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const mid = (low + high) / 2;
+    const midValue = difference(mid);
+    if (!Number.isFinite(midValue)) {
+      return Number.NaN;
+    }
+    if (Math.abs(midValue) < 1e-12) {
+      return mid;
+    }
+    if (lowValue * midValue < 0) {
+      high = mid;
+      highValue = midValue;
+    } else {
+      low = mid;
+      lowValue = midValue;
+    }
+  }
+  return (low + high) / 2;
+}
+
+function extractIntersectionQuestion(statement) {
+  let text = statement
+    .replace(/^intersect(?:ion|ions)?\s+(?:of\s+|between\s+|point[s]?\s+of\s+)?/i, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+
+  let xMin = -10;
+  let xMax = 10;
+  const rangeMatch = text.match(/\bfrom\s+(-?\d*\.?\d+)\s+to\s+(-?\d*\.?\d+)/i);
+  if (rangeMatch) {
+    xMin = Number(rangeMatch[1]);
+    xMax = Number(rangeMatch[2]);
+    text = text.replace(rangeMatch[0], "").trim();
+  }
+
+  let parts;
+  if (/\sand\s/i.test(text)) {
+    parts = text.split(/\sand\s/i);
+  } else if (text.includes("=")) {
+    parts = text.split("=");
+  } else {
+    throw new Error("Intersection needs two functions, e.g. intersect x^2 and 2x + 1.");
+  }
+  if (parts.length !== 2) {
+    throw new Error("Intersection compares exactly two functions, e.g. intersect x^2 and 2x + 1.");
+  }
+
+  const cleanSide = (side) => side
+    .replace(/^\s*y\s*=\s*/i, "")
+    .replace(/^\s*f\s*\(\s*x\s*\)\s*=\s*/i, "")
+    .replace(/^\s*g\s*\(\s*x\s*\)\s*=\s*/i, "")
+    .trim();
+  const first = cleanSide(parts[0]);
+  const second = cleanSide(parts[1]);
+  if (!first || !second) {
+    throw new Error("Intersection needs two non-empty functions, e.g. intersect x^2 and 2x + 1.");
+  }
+  if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || xMin >= xMax) {
+    throw new Error("Intersection needs a valid range, e.g. intersect x^2 and 2x + 1 from -5 to 5.");
+  }
+
+  return { first, second, variable: "x", xMin, xMax };
 }
 
 export function analyzeFourierSeries(statement) {
@@ -26914,6 +27139,12 @@ function isGraphQuestion(lower) {
     lower.startsWith("tangent line ") ||
     lower.startsWith("tangent ") ||
     lower.startsWith("linearization ");
+}
+
+function isIntersectionQuestion(lower) {
+  return lower.startsWith("intersect ") ||
+    lower.startsWith("intersection ") ||
+    lower.startsWith("intersections ");
 }
 
 function isFourierQuestion(lower) {

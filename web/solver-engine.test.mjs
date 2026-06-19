@@ -10,6 +10,7 @@ import {
   analyzeFourierSeries,
   analyzeGeometry,
   analyzeGraph,
+  analyzeIntersection,
   analyzeInequality,
   analyzeIntegral,
   analyzeLaplaceTransform,
@@ -1995,6 +1996,39 @@ runTest("graph mode overlays tangent lines", () => {
   assert.equal(result.graph.lines.length, 2);
   assert.equal(result.graph.lines[1].className, "graph-line-accent");
   assert.deepEqual(result.table.rows.find((row) => row[0] === "2"), ["2", "4", "4"]);
+});
+
+runTest("intersection mode locates where two curves meet", () => {
+  const result = analyzeIntersection("intersect x^2 and 2x + 1");
+
+  assert.equal(result.summary, "curve intersection");
+  assert.equal(result.answer, "(-0.414214, 0.171573), (2.414214, 5.828427)");
+  assert.equal(artifactValue(result, "Intersections"), "2");
+  assert.equal(artifactValue(result, "Point 1"), "(-0.414214, 0.171573)");
+  assert.equal(artifactValue(result, "Point 2"), "(2.414214, 5.828427)");
+  assert.deepEqual(result.table.rows, [
+    ["1", "-0.414214", "0.171573"],
+    ["2", "2.414214", "5.828427"],
+  ]);
+  assert.equal(result.graph.kind, "intersection");
+  assert.equal(result.graph.lines.length, 2);
+  assert.equal(result.graph.scatter.length, 2);
+});
+
+runTest("intersection mode reads the y = f(x) form and routes via Ask", () => {
+  const result = analyzeIntersection("intersection of y = x^2 and y = x + 6 from -5 to 5");
+  assert.equal(result.answer, "(-2, 4), (3, 9)");
+
+  const routed = analyzeUniversal("intersect x^2 and 2x + 1");
+  assert.equal(routed.summary, "curve intersection");
+  assert.equal(routed.answer, "(-0.414214, 0.171573), (2.414214, 5.828427)");
+});
+
+runTest("intersection mode reports an empty range and rejects single functions", () => {
+  const empty = analyzeIntersection("intersect x^2 + 5 and 1 from -3 to 3");
+  assert.equal(empty.answer, "No intersections in [-3, 3]");
+  assert.equal(artifactValue(empty, "Intersections"), "0");
+  assert.throws(() => analyzeIntersection("intersect x^2"), /two functions/);
 });
 
 runTest("fourier mode computes partial series coefficients", () => {

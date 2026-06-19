@@ -72,6 +72,8 @@ The frontend currently supports:
 - Two-variable linear programming with feasible-vertex enumeration and
   constrained objective optimization
 - Function graphing with sampled SVG plots and tangent-line overlays
+- Curve intersections that bracket and bisect the roots of f(x) - g(x), report
+  every crossing point, and plot both curves with the intersections marked
 - Fourier series partial sums with numerically integrated sine/cosine
   coefficients and plotted approximations
 - Differential equations: exponential growth/decay, Newton cooling, logistic
@@ -378,6 +380,10 @@ The same idea works for algebra and calculus:
 - `graph x^2 - 4 from -5 to 5` samples a function tree into plot points.
 - `graph tangent line x^2 at x=2 from 0 to 4` differentiates the function,
   finds the tangent slope, and overlays the line `y = 4x - 4`.
+- `intersect x^2 and 2x + 1` solves `f(x) = g(x)` over the range, returning the
+  crossings `(-0.414214, 0.171573)` and `(2.414214, 5.828427)` and plotting both
+  curves with the points marked; `intersect y = x^2 and y = x + 6 from -5 to 5`
+  and an explicit `from a to b` range are also accepted.
 - `fourier series x from -pi to pi order=5` estimates Fourier coefficients
   and plots the fifth-order partial sum.
 - `newton x^3 - x - 2 guess=1` follows tangent-line iterations toward a root
