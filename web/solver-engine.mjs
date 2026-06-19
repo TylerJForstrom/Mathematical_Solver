@@ -8810,7 +8810,13 @@ function analyzeRegression(statement) {
 }
 
 function analyzeTimeSeries(statement) {
-  if (isArimaQuestion(statement.toLowerCase())) {
+  const lower = statement.toLowerCase();
+
+  if (isLjungBoxQuestion(lower)) {
+    return analyzeLjungBoxTest(statement);
+  }
+
+  if (isArimaQuestion(lower)) {
     return analyzeArimaForecast(statement);
   }
 
@@ -8869,6 +8875,70 @@ function analyzeTimeSeries(statement) {
       ["Innovation SD", formatNumber(result.innovationSd)],
       ["Last observed value", formatNumber(request.values.at(-1))],
       [`${request.forecastSteps}-step forecast`, formatNumber(lastForecast.value)],
+    ],
+  };
+}
+
+function analyzeLjungBoxTest(statement) {
+  const request = parseLjungBoxInput(statement);
+  const result = computeLjungBoxStatistic(request.values, request.lags);
+  const decision = result.pValue < request.alpha
+    ? `reject no autocorrelation at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject no autocorrelation at alpha=${formatNumber(request.alpha)}`;
+  const tree = statsDatasetNode(request.values, [
+    statsMetricNode("Q", result.ljungBoxQ),
+    statsMetricNode("DF", request.lags),
+    statsMetricNode("P", result.pValue),
+  ], "Ljung-Box");
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `Q = ${formatNumber(result.ljungBoxQ)}, p = ${formatNumber(result.pValue)}`,
+    summary: "Ljung-Box autocorrelation test",
+    details: "Time-series autocorrelation diagnostic",
+    variables: [],
+    metrics: treeMetrics(tree),
+    steps: [
+      {
+        title: "Read series and lag count",
+        expression: `n = ${formatNumber(request.values.length)}, lags = ${formatNumber(request.lags)}`,
+        detail: "The Ljung-Box test checks whether the first h autocorrelations are jointly different from zero.",
+      },
+      {
+        title: "Compute sample autocorrelations",
+        expression: result.autocorrelations.map((row) => `r_${row.lag}=${formatNumber(row.autocorrelation)}`).join(", "),
+        detail: "Each lag compares centered values with observations h steps earlier.",
+      },
+      {
+        title: "Form the Ljung-Box statistic",
+        expression: `Q = n(n+2) sum(r_k^2 / (n-k)) = ${formatNumber(result.ljungBoxQ)}`,
+        detail: "The finite-sample correction weights higher lags by the number of paired observations.",
+      },
+      {
+        title: "Compare to chi-square reference",
+        expression: `df = ${formatNumber(request.lags)}, p = ${formatNumber(result.pValue)}; ${decision}`,
+        detail: "A small p-value indicates statistically significant serial autocorrelation up to the requested lag.",
+      },
+    ],
+    table: {
+      headers: ["Lag", "Autocorrelation", "Ljung-Box contribution"],
+      rows: result.autocorrelations.map((row) => [
+        formatNumber(row.lag),
+        formatNumber(row.autocorrelation),
+        formatNumber(row.ljungContribution),
+      ]),
+    },
+    artifacts: [
+      ["Observations", formatNumber(request.values.length)],
+      ["Mean", formatNumber(result.meanValue)],
+      ["Lags tested", formatNumber(request.lags)],
+      ["Ljung-Box Q", formatNumber(result.ljungBoxQ)],
+      ["Box-Pierce Q", formatNumber(result.boxPierceQ)],
+      ["Degrees of freedom", formatNumber(request.lags)],
+      ["p-value", formatNumber(result.pValue)],
+      ["Alpha", formatNumber(request.alpha)],
+      ["Decision", decision],
     ],
   };
 }
@@ -8937,6 +9007,48 @@ function analyzeArimaForecast(statement) {
       ["Last observed value", formatNumber(request.values.at(-1))],
       [`${request.forecastSteps}-step forecast`, formatNumber(lastForecast.value)],
     ],
+  };
+}
+
+function computeLjungBoxStatistic(values, lags) {
+  const n = values.length;
+  const meanValue = mean(values);
+  const denominator = values.reduce((sum, value) => sum + (value - meanValue) ** 2, 0);
+
+  if (!(denominator > EPSILON)) {
+    throw new Error("Ljung-Box testing needs variation in the time-series values.");
+  }
+
+  let ljungSum = 0;
+  let boxPierceSum = 0;
+  const autocorrelations = [];
+
+  for (let lag = 1; lag <= lags; lag += 1) {
+    let numerator = 0;
+    for (let index = lag; index < n; index += 1) {
+      numerator += (values[index] - meanValue) * (values[index - lag] - meanValue);
+    }
+    const autocorrelation = numerator / denominator;
+    const ljungContribution = n * (n + 2) * (autocorrelation ** 2) / (n - lag);
+    autocorrelations.push({
+      lag,
+      autocorrelation: normalizeNumber(autocorrelation),
+      ljungContribution: normalizeNumber(ljungContribution),
+    });
+    ljungSum += (autocorrelation ** 2) / (n - lag);
+    boxPierceSum += autocorrelation ** 2;
+  }
+
+  const ljungBoxQ = n * (n + 2) * ljungSum;
+  const boxPierceQ = n * boxPierceSum;
+  const pValue = chiSquareRightTailApprox(ljungBoxQ, lags);
+
+  return {
+    meanValue: normalizeNumber(meanValue),
+    autocorrelations,
+    ljungBoxQ: normalizeNumber(ljungBoxQ),
+    boxPierceQ: normalizeNumber(boxPierceQ),
+    pValue: normalizeNumber(pValue),
   };
 }
 
@@ -23131,6 +23243,37 @@ function parseTimeSeriesInput(text) {
   return { values, forecastSteps };
 }
 
+function parseLjungBoxInput(text) {
+  const { alpha, cleaned } = extractAlpha(text);
+  const removeParameters = (chunk) => chunk
+    .replace(/\b(?:lags?|h)\s*=\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi, "");
+  const cleanSeriesText = (chunk) => removeParameters(chunk)
+    .replace(/\bljung(?:-|\s*)box\b/gi, "")
+    .replace(/\bbox(?:-|\s*)pierce\b/gi, "")
+    .replace(/\blbq\b/gi, "")
+    .replace(/\bacf\b/gi, "")
+    .replace(/\bautocorrelations?\b/gi, "")
+    .replace(/\bserial\s+correlations?\b/gi, "")
+    .replace(/\btime(?:-|\s*)series\b/gi, "")
+    .replace(/\b(?:test|diagnostic|diagnostics|series|data|values|observations?|residuals?)\b/gi, "");
+  const seriesMatch = cleaned.match(/\b(?:series|data|values|observations?|residuals?)\s*[:=]\s*([^;]+)/i);
+  const values = seriesMatch
+    ? parseNumberList(cleanSeriesText(seriesMatch[1]))
+    : parseNumberList(cleanSeriesText(cleaned));
+
+  if (values.length < 5) {
+    throw new Error("Ljung-Box testing needs at least five time-series values.");
+  }
+
+  const defaultLags = Math.max(1, Math.min(10, Math.floor(values.length / 4)));
+  const lags = readNamedInteger(cleaned, ["lags", "lag", "h"], defaultLags, "Ljung-Box lag count");
+  if (lags < 1 || lags >= values.length || lags > 50) {
+    throw new Error("Ljung-Box lags must be an integer from 1 to min(50, n - 1).");
+  }
+
+  return { values, lags, alpha };
+}
+
 function parseArimaInput(text) {
   const tupleMatch = text.match(/\barima\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
   const tupleP = tupleMatch ? Number(tupleMatch[1]) : 1;
@@ -25673,8 +25816,19 @@ function isArimaQuestion(lower) {
     lower.includes("autoregressive integrated");
 }
 
+function isLjungBoxQuestion(lower) {
+  return lower.includes("ljung") ||
+    lower.includes("box-pierce") ||
+    lower.includes("box pierce") ||
+    lower.includes("lbq") ||
+    lower.includes("autocorrelation") ||
+    lower.includes("serial correlation") ||
+    /\bacf\b/.test(lower);
+}
+
 function isTimeSeriesQuestion(lower) {
   return isArimaQuestion(lower) ||
+    isLjungBoxQuestion(lower) ||
     lower.includes("ar(1)") ||
     lower.includes("ar1") ||
     lower.includes("autoregressive") ||
@@ -25985,6 +26139,7 @@ function isStatisticsQuestion(lower) {
     isSpearmanQuestion(lower) ||
     isKendallQuestion(lower) ||
     isMultipleTestingQuestion(lower) ||
+    isLjungBoxQuestion(lower) ||
     isBayesianAbQuestion(lower) ||
     isBayesianLinearRegressionQuestion(lower) ||
     isQdaQuestion(lower) ||
@@ -26038,6 +26193,12 @@ function isStatisticsQuestion(lower) {
     "ar1",
     "arima",
     "autoregressive integrated",
+    "ljung",
+    "box-pierce",
+    "box pierce",
+    "lbq",
+    "autocorrelation",
+    "serial correlation",
     "autoregressive",
     "time series",
     "time-series",

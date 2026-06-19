@@ -1094,6 +1094,17 @@ runTest("statistics mode computes ARIMA forecasts", () => {
   assert.deepEqual(result.table.rows[2], ["3", "7.212963", "58.824074"]);
 });
 
+runTest("statistics mode computes Ljung-Box autocorrelation tests", () => {
+  const result = analyzeStatistics("ljung-box series: 10, 12, 13, 15, 16, 18, 21, 22 lags=3 alpha=0.05");
+
+  assert.equal(result.summary, "Ljung-Box autocorrelation test");
+  assert.equal(result.answer, "Q = 5.275081, p = 0.150876");
+  assert.equal(artifactValue(result, "Box-Pierce Q"), "3.603906");
+  assert.equal(artifactValue(result, "Decision"), "fail to reject no autocorrelation at alpha=0.05");
+  assert.deepEqual(result.table.rows[0], ["1", "0.621552", "4.415161"]);
+  assert.deepEqual(result.table.rows[2], ["3", "-0.040764", "0.026587"]);
+});
+
 runTest("statistics mode computes binomial probability", () => {
   const result = analyzeStatistics("binomial n=10 p=0.5 k=3");
 
@@ -2112,6 +2123,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("cox regression times: 5, 6, 6, 8, 10, 12; events: 1, 1, 0, 1, 0, 1; x: 0, 1, 0, 1, 1, 0").summary, "Cox proportional hazards");
   assert.equal(analyzeUniversal("ar(1) series: 10, 12, 13, 15, 16, 18 forecast=3").summary, "AR(1) time-series forecast");
   assert.equal(analyzeUniversal("arima(2,1,0) series: 10, 13, 15, 18, 22, 27, 31, 38 forecast=3").summary, "ARIMA forecast");
+  assert.equal(analyzeUniversal("ljung-box series: 10, 12, 13, 15, 16, 18, 21, 22 lags=3").summary, "Ljung-Box autocorrelation test");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("meta-analysis effects: 0.2, 0.5, 0.1, 0.7; se: 0.1, 0.2, 0.15, 0.25").summary, "meta-analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");
