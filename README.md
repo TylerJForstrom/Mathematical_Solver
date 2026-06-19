@@ -177,8 +177,8 @@ The frontend currently supports:
   omega squared, rank-biserial correlation, epsilon squared, Cohen's w,
   Bonferroni-adjusted ANOVA pairwise comparisons, and Dunn-style rank
   comparisons
-- Newton and bisection numerical root solvers with iteration tables and
-  root-finding graphs
+- Newton, secant, and bisection numerical root solvers with iteration tables
+  and root-finding graphs
 - Simpson's rule and trapezoidal-rule numerical integration
 - Expression-tree visualization for every mode
 - Graphviz DOT export for math and logic expression trees, ready to paste into
@@ -329,6 +329,9 @@ The same idea works for algebra and calculus:
   and plots the fifth-order partial sum.
 - `newton x^3 - x - 2 guess=1` follows tangent-line iterations toward a root
   and plots the function, iteration points, and Newton tangent steps.
+- `secant x^2 - 2 guess=1 guess2=2` draws secant lines through the last two
+  points to approximate a root without a derivative; a single `guess=` seeds
+  the second point automatically, and `interval a b` can supply both starts.
 - `bisection x^2 - 4 interval 0 3` tracks midpoint brackets and plots the
   root-finding iterations.
 - `simpson integrate sin(x) from 0 to pi n=100` approximates a definite

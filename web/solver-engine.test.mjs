@@ -1552,6 +1552,36 @@ runTest("numerical mode runs bisection", () => {
   assert.ok(Number(artifactValue(result, "Iterations")) > 20);
 });
 
+runTest("numerical mode runs the secant method", () => {
+  const result = analyzeNumerical("secant x^2 - 2 guess=1 guess2=2");
+
+  assert.equal(result.summary, "secant root");
+  assert.equal(result.answer, "x ~= 1.414214");
+  assert.equal(result.graph.kind, "root-iterations");
+  assert.equal(result.graph.scatterLabel, "Iterations");
+  assert.ok(result.graph.lines.some((series) => series.label === "Secant steps"));
+  assert.equal(result.table.headers.join(","), "Iter,Prev x,Curr x,f(x),Next x");
+  assert.equal(artifactValue(result, "Method"), "secant");
+  assert.equal(artifactValue(result, "Initial guesses"), "1, 2");
+  // The secant method converges superlinearly, so it beats bisection's iteration count.
+  assert.ok(Number(artifactValue(result, "Iterations")) < 10);
+});
+
+runTest("numerical mode derives a second secant guess and routes via Ask", () => {
+  const single = analyzeNumerical("secant x^3 - x - 2 guess=1.5");
+  assert.equal(single.summary, "secant root");
+  assert.ok(Math.abs(Number(single.answer.replace("x ~=", "").trim()) - 1.5213797) < 1e-4);
+  assert.equal(artifactValue(single, "Initial guesses"), "1.5, 2.5");
+
+  const routed = analyzeUniversal("secant x^2 - 2 guess=1 guess2=2");
+  assert.equal(routed.summary, "secant root");
+  assert.equal(routed.answer, "x ~= 1.414214");
+});
+
+runTest("numerical mode rejects degenerate secant guesses", () => {
+  assert.throws(() => analyzeNumerical("secant x^2 - 2 guess=2 guess2=2"), /two distinct starting guesses/);
+});
+
 runTest("numerical mode computes quadrature rules", () => {
   const simpson = analyzeNumerical("simpson integrate sin(x) from 0 to pi n=100");
   const trapezoid = analyzeNumerical("trapezoidal integrate x^2 from 0 to 3 n=6");
