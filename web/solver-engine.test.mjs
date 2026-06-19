@@ -5,6 +5,7 @@ import {
   analyzeCombinatorics,
   analyzeDerivative,
   analyzeDifferentialEquation,
+  analyzeDistributionFit,
   analyzeEquation,
   analyzeFactoring,
   analyzeFourierSeries,
@@ -1193,6 +1194,40 @@ runTest("statistics mode computes binomial probability", () => {
 
   assert.equal(result.summary, "binomial probability");
   assert.equal(result.answer, "P(X = 3) = 0.117188");
+});
+
+runTest("distribution fit mode fits a normal with a goodness-of-fit test", () => {
+  const result = analyzeDistributionFit("fit normal to 10,11,11,12,12,12,12,13,13,13,13,14,14,14,14,15,15,15,16,16");
+
+  assert.equal(result.summary, "normal distribution fit");
+  assert.equal(result.answer, "consistent with a normal distribution");
+  assert.equal(artifactValue(result, "Fitted parameters"), "mu = 13.25, sigma = 1.681947");
+  assert.equal(artifactValue(result, "Chi-square statistic"), "1.2");
+  assert.equal(artifactValue(result, "Degrees of freedom"), "1");
+  assert.equal(artifactValue(result, "p-value"), "0.272814");
+  assert.equal(result.graph.kind, "scatter-fit");
+  assert.ok(result.graph.lines.some((series) => series.label === "Fitted CDF"));
+});
+
+runTest("distribution fit mode fits Poisson and exponential models", () => {
+  const poisson = analyzeDistributionFit("fit poisson to 0,1,0,2,1,3,1,0,2,1,1,2,0,1,3,2,1,0,1,2");
+  assert.equal(poisson.summary, "poisson distribution fit");
+  assert.equal(artifactValue(poisson, "Fitted parameters"), "lambda = 1.2");
+  assert.equal(poisson.answer, "consistent with a poisson distribution");
+  assert.equal(poisson.table.headers.join(","), "Count,Observed,Expected");
+
+  const exponential = analyzeDistributionFit("fit exponential to 0.5,1.2,0.3,2.1,0.8,1.5,0.2,3.0,0.9,1.1,0.4,2.5");
+  assert.equal(artifactValue(exponential, "Fitted parameters"), "lambda = 0.827586");
+  assert.equal(exponential.answer, "consistent with a exponential distribution");
+});
+
+runTest("distribution fit mode routes via Ask and validates input", () => {
+  const routed = analyzeUniversal("fit normal to 10,11,11,12,12,12,12,13,13,13,13,14,14,14,14,15,15,15,16,16");
+  assert.equal(routed.summary, "normal distribution fit");
+  assert.equal(routed.answer, "consistent with a normal distribution");
+
+  assert.throws(() => analyzeDistributionFit("fit normal to 1,2,3"), /at least five/);
+  assert.throws(() => analyzeDistributionFit("fit poisson to 1.5,2.5,3.5,4.5,5.5"), /nonnegative integer/);
 });
 
 runTest("statistics mode computes normal probabilities", () => {

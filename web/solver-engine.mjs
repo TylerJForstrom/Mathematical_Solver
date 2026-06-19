@@ -2033,6 +2033,10 @@ export function analyzeNumberTheory(statement) {
 export function analyzeStatistics(statement) {
   const lower = statement.toLowerCase();
 
+  if (isDistributionFitQuestion(lower)) {
+    return analyzeDistributionFit(statement);
+  }
+
   if (isMarkovQuestion(lower)) {
     return analyzeMarkovChain(statement);
   }
@@ -2490,6 +2494,9 @@ export function analyzeUniversal(question, values = {}) {
   } else if (isSequenceQuestion(lower)) {
     routed = analyzeSequence(question);
     routedLabel = "Sequence";
+  } else if (isDistributionFitQuestion(lower)) {
+    routed = analyzeDistributionFit(question);
+    routedLabel = "Distribution fit";
   } else if (isStatisticsQuestion(lower)) {
     routed = analyzeStatistics(question);
     routedLabel = "Statistics";
@@ -24607,6 +24614,243 @@ function chiSquarePdf(statistic, degreesFreedom) {
   return Math.exp(logDensity);
 }
 
+export function analyzeDistributionFit(statement) {
+  const request = extractDistributionFitQuestion(statement);
+  const values = request.values;
+  const sampleCount = values.length;
+  const sampleMean = mean(values);
+
+  let parameterText;
+  let parameterCount;
+  let cdf;
+  let fitDetail;
+  let metricNodes;
+  if (request.distribution === "poisson") {
+    if (values.some((value) => !Number.isInteger(value) || value < 0)) {
+      throw new Error("Poisson fitting needs nonnegative integer counts.");
+    }
+    const lambda = sampleMean;
+    parameterText = `lambda = ${formatNumber(lambda)}`;
+    parameterCount = 1;
+    cdf = (x) => poissonCdf(lambda, x);
+    fitDetail = "The Poisson rate equals the sample mean (maximum likelihood).";
+    metricNodes = [statsMetricNode("lambda", lambda)];
+  } else if (request.distribution === "exponential") {
+    if (values.some((value) => value < 0)) {
+      throw new Error("Exponential fitting needs nonnegative values.");
+    }
+    if (!(sampleMean > 0)) {
+      throw new Error("Exponential fitting needs a positive mean.");
+    }
+    const rate = 1 / sampleMean;
+    parameterText = `lambda = ${formatNumber(rate)}`;
+    parameterCount = 1;
+    cdf = (x) => (x <= 0 ? 0 : 1 - Math.exp(-rate * x));
+    fitDetail = "The exponential rate is the reciprocal of the sample mean (maximum likelihood).";
+    metricNodes = [statsMetricNode("lambda", rate)];
+  } else {
+    const variance = values.reduce((sum, value) => sum + (value - sampleMean) ** 2, 0) / (sampleCount - 1);
+    const sd = Math.sqrt(variance);
+    if (!(sd > 0)) {
+      throw new Error("Normal fitting needs data with nonzero spread.");
+    }
+    parameterText = `mu = ${formatNumber(sampleMean)}, sigma = ${formatNumber(sd)}`;
+    parameterCount = 2;
+    cdf = (x) => normalCdf((x - sampleMean) / sd);
+    fitDetail = "The normal parameters are the sample mean and standard deviation.";
+    metricNodes = [statsMetricNode("mu", sampleMean), statsMetricNode("sigma", sd)];
+  }
+
+  const gof = chiSquareGoodnessOfFit(values, cdf, parameterCount, request.distribution);
+  const verdict = !Number.isFinite(gof.pValue)
+    ? "inconclusive"
+    : gof.pValue > 0.05
+    ? `consistent with a ${request.distribution} distribution`
+    : `not a good ${request.distribution} fit`;
+
+  const datasetNode = statsDatasetNode(values, metricNodes, request.distribution.toUpperCase());
+  const graph = buildDistributionFitGraph(values, cdf, request.distribution);
+
+  return {
+    mode: "statistics",
+    tree: datasetNode,
+    answer: verdict,
+    summary: `${request.distribution} distribution fit`,
+    details: "Maximum-likelihood fit with a chi-square goodness-of-fit test",
+    variables: [],
+    metrics: treeMetrics(datasetNode),
+    steps: [
+      {
+        title: "Estimate parameters",
+        expression: parameterText,
+        detail: fitDetail,
+      },
+      {
+        title: "Bin the data and compare",
+        expression: `chi-square = ${formatNumber(gof.chiSquare)} on ${formatNumber(gof.df)} df`,
+        detail: "Observed bin counts are compared with the counts the fitted distribution predicts.",
+      },
+      {
+        title: "Decide the fit",
+        expression: `${verdict} (p = ${formatNumber(gof.pValue)})`,
+        detail: "A large p-value means the data are consistent with the fitted distribution.",
+      },
+    ],
+    table: gof.table,
+    artifacts: [
+      ["Distribution", request.distribution],
+      ["Sample size", formatNumber(sampleCount)],
+      ["Fitted parameters", parameterText],
+      ["Chi-square statistic", formatNumber(gof.chiSquare)],
+      ["Degrees of freedom", formatNumber(gof.df)],
+      ["p-value", formatNumber(gof.pValue)],
+      ["Bins", formatNumber(gof.bins)],
+      ["Verdict", verdict],
+    ],
+    ...(graph ? { graph } : {}),
+  };
+}
+
+function chiSquareGoodnessOfFit(values, cdf, parameterCount, distribution) {
+  const sampleCount = values.length;
+  if (distribution === "poisson") {
+    return poissonGoodnessOfFit(values, sampleCount);
+  }
+  const binCount = Math.max(4, Math.min(10, Math.floor(Math.sqrt(sampleCount))));
+  const counts = new Array(binCount).fill(0);
+  for (const value of values) {
+    const u = Math.min(0.9999999999, Math.max(0, cdf(value)));
+    const bin = Math.min(binCount - 1, Math.floor(u * binCount));
+    counts[bin] += 1;
+  }
+  const expected = sampleCount / binCount;
+  let chiSquare = 0;
+  const rows = counts.map((observed, index) => {
+    chiSquare += (observed - expected) ** 2 / expected;
+    return [
+      `[${formatNumber(index / binCount)}, ${formatNumber((index + 1) / binCount)})`,
+      String(observed),
+      formatNumber(normalizeNumber(expected)),
+    ];
+  });
+  const df = Math.max(1, binCount - 1 - parameterCount);
+  return {
+    chiSquare: normalizeNumber(chiSquare),
+    df,
+    pValue: normalizeNumber(chiSquareRightTailApprox(chiSquare, df)),
+    bins: binCount,
+    table: { headers: ["CDF bin", "Observed", "Expected"], rows },
+  };
+}
+
+function poissonGoodnessOfFit(values, sampleCount) {
+  const lambda = mean(values);
+  const maxCount = Math.max(...values);
+  const topCategory = Math.max(2, maxCount);
+  const counts = new Array(topCategory + 1).fill(0);
+  for (const value of values) {
+    if (value >= topCategory) {
+      counts[topCategory] += 1;
+    } else {
+      counts[value] += 1;
+    }
+  }
+  const rows = [];
+  let chiSquare = 0;
+  for (let category = 0; category <= topCategory; category += 1) {
+    const expected = category < topCategory
+      ? sampleCount * poissonProbability(lambda, category)
+      : sampleCount * (1 - poissonCdf(lambda, topCategory - 1));
+    if (expected > 0) {
+      chiSquare += (counts[category] - expected) ** 2 / expected;
+    }
+    rows.push([
+      category < topCategory ? String(category) : `>= ${topCategory}`,
+      String(counts[category]),
+      formatNumber(normalizeNumber(expected)),
+    ]);
+  }
+  const bins = topCategory + 1;
+  const df = Math.max(1, bins - 1 - 1);
+  return {
+    chiSquare: normalizeNumber(chiSquare),
+    df,
+    pValue: normalizeNumber(chiSquareRightTailApprox(chiSquare, df)),
+    bins,
+    table: { headers: ["Count", "Observed", "Expected"], rows },
+  };
+}
+
+function poissonCdf(lambda, k) {
+  if (k < 0) {
+    return 0;
+  }
+  let sum = 0;
+  for (let j = 0; j <= Math.floor(k); j += 1) {
+    sum += poissonProbability(lambda, j);
+  }
+  return Math.min(1, sum);
+}
+
+function buildDistributionFitGraph(values, cdf, distribution) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const sampleCount = sorted.length;
+  const empirical = sorted.map((value, index) => ({
+    x: normalizeNumber(value),
+    y: normalizeNumber((index + 1) / sampleCount),
+  }));
+  const min = sorted[0];
+  const max = sorted[sampleCount - 1];
+  const span = max - min || 1;
+  const low = min - span * 0.1;
+  const high = max + span * 0.1;
+  const fitted = [];
+  for (let index = 0; index <= 80; index += 1) {
+    const x = low + ((high - low) * index) / 80;
+    const y = cdf(x);
+    if (Number.isFinite(y)) {
+      fitted.push({ x: normalizeNumber(x), y: normalizeNumber(y) });
+    }
+  }
+  if (fitted.length < 2) {
+    return null;
+  }
+  return {
+    expression: `empirical vs fitted ${distribution} CDF`,
+    kind: "scatter-fit",
+    scatterLabel: "Empirical CDF",
+    xMin: normalizeNumber(low),
+    xMax: normalizeNumber(high),
+    yMin: 0,
+    yMax: 1,
+    points: fitted,
+    scatter: empirical,
+    lines: [{ label: "Fitted CDF", points: fitted }],
+  };
+}
+
+function extractDistributionFitQuestion(statement) {
+  const lower = statement.toLowerCase();
+  let distribution = "normal";
+  if (/\bpoisson\b/.test(lower)) {
+    distribution = "poisson";
+  } else if (/\bexponential\b/.test(lower)) {
+    distribution = "exponential";
+  } else {
+    distribution = "normal";
+  }
+
+  const dataText = statement
+    .replace(/^fit\s+(?:a\s+)?(?:normal|gaussian|poisson|exponential)\s+(?:distribution\s+)?(?:to\s+|for\s+)?/i, " ")
+    .replace(/\bgoodness of fit\b/gi, " ")
+    .replace(/\b(normal|gaussian|poisson|exponential|distribution|fit|to|for|data|values?)\b/gi, " ");
+  const values = parseNumbers(dataText);
+  if (values.length < 5) {
+    throw new Error("Distribution fitting needs at least five data values, e.g. fit normal to 4,5,5,6,6,7,8.");
+  }
+  return { distribution, values };
+}
+
 function chiSquareRightTailApprox(statistic, degreesFreedom) {
   if (!(degreesFreedom > 0)) {
     return Number.NaN;
@@ -27702,6 +27946,12 @@ function isSequenceQuestion(lower) {
     lower.startsWith("sigma ") ||
     lower.startsWith("summation ") ||
     lower.startsWith("series ");
+}
+
+function isDistributionFitQuestion(lower) {
+  return /^fit\s+(?:a\s+)?(?:normal|gaussian|poisson|exponential)\b/.test(lower) ||
+    (lower.includes("goodness of fit") && /(normal|gaussian|poisson|exponential)/.test(lower)) ||
+    lower.startsWith("distribution fit ");
 }
 
 function isConvergenceQuestion(lower) {

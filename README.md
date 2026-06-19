@@ -172,6 +172,9 @@ The frontend currently supports:
   probability, exponential probability, uniform probability, hypergeometric
   probability, shaded density plots for continuous reference distributions,
   discrete expected value/variance, Bayes theorem, and z-score calculations
+- Distribution fitting for normal, Poisson, and exponential models via
+  maximum likelihood, each with a chi-square goodness-of-fit test, a
+  binned observed-vs-expected table, and an empirical-vs-fitted CDF plot
 - Kaplan-Meier survival analysis, log-rank tests, and one-covariate Cox
   proportional hazards regression for right-censored data with risk sets,
   censoring counts, standard errors, median survival, survival curves,
@@ -523,6 +526,10 @@ The same idea works for algebra and calculus:
 - `geometric p=0.25 k=3`, `exponential lambda=2 x=1`, and
   `uniform min=2 max=10 between 4 and 7` evaluate additional probability
   distribution trees.
+- `fit normal to 10,11,11,12,12,12,12,13,13,13,13,14,14,14,14,15,15,15,16,16`
+  fits `mu = 13.25, sigma = 1.681947` and reports the data are `consistent with a
+  normal distribution`; `fit poisson to ...` and `fit exponential to ...` fit the
+  matching models with their own goodness-of-fit tests.
 - `two-proportion z-test successes1=56 n1=100 successes2=44 n2=100` compares
   two sample proportions and reports `z = 1.697056, p = 0.089686`.
 - `chi-square independence [[30,10],[20,40]]` tests whether two categorical
