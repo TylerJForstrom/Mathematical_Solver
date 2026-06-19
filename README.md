@@ -455,7 +455,8 @@ The same idea works for algebra and calculus:
   clusters coordinate data and reports centroids plus within-cluster SSE.
 - `mann-whitney group1: 10,12,9; group2: 8,7,11` ranks combined samples
   and computes a nonparametric U test with exact p-values for small no-tie
-  samples.
+  samples, rank-biserial effect size, and the Hodges-Lehmann location-shift
+  estimate.
 - `ANOVA group1: 8,9,10; group2: 12,13,14; group3: 9,11,10` reports F,
   p-value, eta squared, omega squared, and pairwise comparisons.
 - `repeated measures anova baseline: 10,12,11,13; week1: 12,13,12,15; week2: 14,15,13,17`
@@ -611,7 +612,8 @@ The demo includes:
   proportion confidence intervals, permutation tests, ANOVA, chi-square tests
   of goodness-of-fit and independence, Fisher exact tests,
   nonparametric rank tests including exact small-sample Mann-Whitney and
-  Wilcoxon signed-rank p-values, Kaplan-Meier survival analysis, log-rank tests,
+  Wilcoxon signed-rank p-values with Hodges-Lehmann shift estimates,
+  Kaplan-Meier survival analysis, log-rank tests,
   Cox proportional hazards regression, power/sample-size analysis, effect sizes
   with approximate confidence intervals for t tests, and pairwise follow-up
   summaries in Stats mode

@@ -6288,6 +6288,7 @@ function analyzeMannWhitney(statement) {
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
   const rankBiserial = (u1 - u2) / (left.length * right.length);
   const normalR = z / Math.sqrt(allValues.length);
+  const hodgesLehmann = hodgesLehmannTwoSampleShift(left, right);
 
   return {
     mode: "statistics",
@@ -6335,6 +6336,11 @@ function analyzeMannWhitney(statement) {
         detail: "Rank-biserial correlation estimates how strongly group 1 tends to rank above group 2.",
       },
       {
+        title: "Estimate location shift",
+        expression: `HL shift = ${formatNumber(hodgesLehmann.estimate)}`,
+        detail: "The Hodges-Lehmann estimate is the median of every group2 - group1 pairwise difference.",
+      },
+      {
         title: "Make decision",
         expression: decision,
         detail: "Small p-values suggest the two distributions are shifted relative to each other.",
@@ -6364,7 +6370,16 @@ function analyzeMannWhitney(statement) {
       ["p-value", formatNumber(pValue)],
       ["Rank-biserial r", formatNumber(rankBiserial)],
       ["Normal approximation r", formatNumber(normalR)],
+      ["Hodges-Lehmann shift (group2 - group1)", formatNumber(hodgesLehmann.estimate)],
+      ["Pairwise shifts", formatOrderedValues(hodgesLehmann.values)],
       ["Decision", decision],
+    ],
+    extraTables: [
+      {
+        title: "Pairwise Location Shifts",
+        headers: ["Order", "group2 - group1"],
+        rows: orderedValueRows(hodgesLehmann.values),
+      },
     ],
   };
 }
@@ -6400,6 +6415,7 @@ function analyzeWilcoxonSignedRank(statement) {
   const decision = pValue < alpha ? `reject H0 at alpha=${formatNumber(alpha)}` : `fail to reject H0 at alpha=${formatNumber(alpha)}`;
   const rankBiserial = (wPlus - wMinus) / (wPlus + wMinus);
   const normalR = z / Math.sqrt(n);
+  const hodgesLehmann = hodgesLehmannPairedShift(nonzeroDifferences);
   let rankCursor = 0;
   const pairRows = left.map((value, index) => {
     const difference = pairedDifferences[index];
@@ -6459,6 +6475,11 @@ function analyzeWilcoxonSignedRank(statement) {
         detail: "The signed rank-biserial correlation measures direction and strength of the paired shift.",
       },
       {
+        title: "Estimate paired location shift",
+        expression: `HL shift = ${formatNumber(hodgesLehmann.estimate)}`,
+        detail: "The paired Hodges-Lehmann estimate is the median Walsh average of the nonzero pair differences.",
+      },
+      {
         title: "Make decision",
         expression: decision,
         detail: "Small p-values suggest a systematic paired shift.",
@@ -6484,9 +6505,69 @@ function analyzeWilcoxonSignedRank(statement) {
       ["p-value", formatNumber(pValue)],
       ["Matched rank-biserial r", formatNumber(rankBiserial)],
       ["Normal approximation r", formatNumber(normalR)],
+      ["Hodges-Lehmann paired shift", formatNumber(hodgesLehmann.estimate)],
+      ["Walsh averages", formatOrderedValues(hodgesLehmann.values)],
       ["Decision", decision],
     ],
+    extraTables: [
+      {
+        title: "Walsh Average Shifts",
+        headers: ["Order", "Walsh average"],
+        rows: orderedValueRows(hodgesLehmann.values),
+      },
+    ],
   };
+}
+
+function hodgesLehmannTwoSampleShift(left, right) {
+  const values = [];
+  for (const leftValue of left) {
+    for (const rightValue of right) {
+      values.push(normalizeNumber(rightValue - leftValue));
+    }
+  }
+  values.sort(compareNumbers);
+  return {
+    estimate: normalizeNumber(median(values)),
+    values,
+  };
+}
+
+function hodgesLehmannPairedShift(differences) {
+  const values = [];
+  for (let leftIndex = 0; leftIndex < differences.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex; rightIndex < differences.length; rightIndex += 1) {
+      values.push(normalizeNumber((differences[leftIndex] + differences[rightIndex]) / 2));
+    }
+  }
+  values.sort(compareNumbers);
+  return {
+    estimate: normalizeNumber(median(values)),
+    values,
+  };
+}
+
+function formatOrderedValues(values, limit = 18) {
+  const displayed = values.length > limit
+    ? [...values.slice(0, limit / 2), "...", ...values.slice(-(limit / 2))]
+    : values;
+  return displayed.map((value) => typeof value === "number" ? formatNumber(value) : value).join(", ");
+}
+
+function orderedValueRows(values, limit = 40) {
+  if (values.length <= limit) {
+    return values.map((value, index) => [formatNumber(index + 1), formatNumber(value)]);
+  }
+  const headCount = Math.floor(limit / 2);
+  const tailCount = limit - headCount;
+  return [
+    ...values.slice(0, headCount).map((value, index) => [formatNumber(index + 1), formatNumber(value)]),
+    ["...", `${formatNumber(values.length - headCount - tailCount)} omitted`],
+    ...values.slice(-tailCount).map((value, index) => [
+      formatNumber(values.length - tailCount + index + 1),
+      formatNumber(value),
+    ]),
+  ];
 }
 
 function analyzeKruskalWallis(statement) {

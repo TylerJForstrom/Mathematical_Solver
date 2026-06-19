@@ -1509,6 +1509,19 @@ runTest("statistics mode computes Mann-Whitney U tests", () => {
   assert.equal(artifactValue(result, "p-value method"), "exact enumeration");
   assert.equal(artifactValue(result, "Exact arrangements"), "20");
   assert.equal(artifactValue(result, "Rank-biserial r"), "0.555556");
+  assert.equal(artifactValue(result, "Hodges-Lehmann shift (group2 - group1)"), "-2");
+  assert.equal(artifactValue(result, "Pairwise shifts"), "-5, -4, -3, -2, -2, -1, -1, 1, 2");
+  assert.deepEqual(result.extraTables[0].rows, [
+    ["1", "-5"],
+    ["2", "-4"],
+    ["3", "-3"],
+    ["4", "-2"],
+    ["5", "-2"],
+    ["6", "-1"],
+    ["7", "-1"],
+    ["8", "1"],
+    ["9", "2"],
+  ]);
 });
 
 runTest("statistics mode falls back to Mann-Whitney normal approximation with ties", () => {
@@ -1527,6 +1540,20 @@ runTest("statistics mode computes Wilcoxon signed-rank tests", () => {
   assert.equal(artifactValue(result, "p-value method"), "exact enumeration");
   assert.equal(artifactValue(result, "Exact sign assignments"), "16");
   assert.equal(artifactValue(result, "Matched rank-biserial r"), "1");
+  assert.equal(artifactValue(result, "Hodges-Lehmann paired shift"), "2.5");
+  assert.equal(artifactValue(result, "Walsh averages"), "1, 1.5, 2, 2, 2.5, 2.5, 3, 3, 3.5, 4");
+  assert.deepEqual(result.extraTables[0].rows, [
+    ["1", "1"],
+    ["2", "1.5"],
+    ["3", "2"],
+    ["4", "2"],
+    ["5", "2.5"],
+    ["6", "2.5"],
+    ["7", "3"],
+    ["8", "3"],
+    ["9", "3.5"],
+    ["10", "4"],
+  ]);
 });
 
 runTest("statistics mode falls back to Wilcoxon normal approximation with tied ranks", () => {
