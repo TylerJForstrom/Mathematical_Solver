@@ -27961,10 +27961,10 @@ function probabilityDependenceVariables(dependence) {
     return [dependence.left, dependence.right];
   }
   if (dependence.kind === "conditional") {
-    return [dependence.parent, dependence.child];
+    return [...dependence.parents, dependence.child];
   }
   if (dependence.kind === "bayesian-network") {
-    return dependence.conditionals.flatMap((conditional) => [conditional.parent, conditional.child]);
+    return dependence.conditionals.flatMap((conditional) => [...conditional.parents, conditional.child]);
   }
   return [];
 }
@@ -27989,9 +27989,8 @@ function parseProbabilityDependence(text) {
   }
   const conditionalSpecs = [...text.matchAll(probabilityConditionalPattern())].map((match) => ({
     child: match[1],
-    parent: match[3],
-    negatedParent: Boolean(match[2]),
-    value: parseProbabilityDependenceValue(match[4], match[5], "Conditional probability"),
+    parents: parseProbabilityConditionalParents(match[2]),
+    value: parseProbabilityDependenceValue(match[3], match[4], "Conditional probability"),
   }));
 
   if (directSpecs.length && conditionalSpecs.length) {
@@ -28023,45 +28022,76 @@ function probabilityCorrelationPattern() {
 }
 
 function probabilityConditionalPattern() {
-  return /\b(?:cond|conditional|prob|p)\s*\(\s*([A-Za-z_]\w*)\s*\|\s*(?:(not|!)\s*)?([A-Za-z_]\w*)\s*\)\s*(?:=|:)\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?/gi;
+  return /\b(?:cond|conditional|prob|p)\s*\(\s*([A-Za-z_]\w*)\s*\|\s*([^)]+?)\s*\)\s*(?:=|:)\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?/gi;
+}
+
+function parseProbabilityConditionalParents(text) {
+  return text.split(/\s*,\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const match = part.match(/^(?:(not|!)\s*)?([A-Za-z_]\w*)$/i);
+      if (!match) {
+        throw new Error("Conditional probability parent states must look like P, not P, or P,Q.");
+      }
+      return {
+        name: match[2],
+        negated: Boolean(match[1]),
+      };
+    });
 }
 
 function parseConditionalProbabilityDependence(specs) {
   const grouped = new Map();
   for (const spec of specs) {
-    if (spec.child.toLowerCase() === spec.parent.toLowerCase()) {
+    if (!spec.parents.length) {
+      throw new Error("Conditional probability specs need at least one parent variable.");
+    }
+    if (spec.parents.some((parent) => spec.child.toLowerCase() === parent.name.toLowerCase())) {
       throw new Error("Conditional probability specs need different parent and child variables.");
     }
-    const key = `${spec.child.toLowerCase()}|${spec.parent.toLowerCase()}`;
+    const parentNames = spec.parents.map((parent) => parent.name);
+    const uniqueParents = new Set(parentNames.map((name) => name.toLowerCase()));
+    if (uniqueParents.size !== parentNames.length) {
+      throw new Error("Conditional probability parent lists cannot repeat the same parent variable.");
+    }
+    const parentKey = parentNames.map((name) => name.toLowerCase()).sort().join(",");
+    const key = `${spec.child.toLowerCase()}|${parentKey}`;
     if (!grouped.has(key)) {
       grouped.set(key, {
         child: spec.child,
-        parent: spec.parent,
-        trueValue: null,
-        falseValue: null,
+        parents: parentNames,
+        rows: new Map(),
       });
     }
     const group = grouped.get(key);
-    const slot = spec.negatedParent ? "falseValue" : "trueValue";
-    if (group[slot] !== null) {
+    const stateKey = conditionalParentStateKey(spec.parents);
+    if (group.rows.has(stateKey)) {
       throw new Error("Duplicate conditional probability row for the same child and parent state.");
     }
-    group[slot] = spec.value;
+    group.rows.set(stateKey, spec.value);
   }
 
   const conditionals = [...grouped.values()].map((group) => {
-    if (group.trueValue === null || group.falseValue === null) {
-      throw new Error(`Conditional probability logic needs both cond(${group.child}|${group.parent})=... and cond(${group.child}|not ${group.parent})=....`);
+    const expectedStates = enumerateParentStateKeys(group.parents);
+    const missing = expectedStates.filter((stateKey) => !group.rows.has(stateKey));
+    if (missing.length) {
+      throw new Error(`Conditional probability logic needs rows for all parent states of ${group.child}: ${missing.join(", ")}.`);
     }
-    return {
-      parent: group.parent,
+    const conditional = {
+      parent: group.parents[0],
+      parents: group.parents,
       child: group.child,
-      whenParentTrue: group.trueValue,
-      whenParentFalse: group.falseValue,
+      table: Object.fromEntries([...group.rows.entries()].sort(([left], [right]) => left.localeCompare(right))),
     };
+    if (group.parents.length === 1) {
+      conditional.whenParentTrue = group.rows.get(conditionalParentStateKey([{ name: group.parents[0], negated: false }]));
+      conditional.whenParentFalse = group.rows.get(conditionalParentStateKey([{ name: group.parents[0], negated: true }]));
+    }
+    return conditional;
   });
 
-  if (conditionals.length === 1) {
+  if (conditionals.length === 1 && conditionals[0].parents.length === 1) {
     return {
       kind: "conditional",
       ...conditionals[0],
@@ -28072,6 +28102,33 @@ function parseConditionalProbabilityDependence(specs) {
     kind: "bayesian-network",
     conditionals,
   };
+}
+
+function conditionalParentStateKey(parents) {
+  return [...parents]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((parent) => `${parent.name}=${parent.negated ? "false" : "true"}`)
+    .join(", ");
+}
+
+function enumerateParentStateKeys(parents) {
+  return enumerateParentStateAssignments(parents)
+    .map((assignment) => conditionalParentStateKey(
+      Object.entries(assignment).map(([name, value]) => ({ name, negated: !value })),
+    ));
+}
+
+function enumerateParentStateAssignments(parents, index = 0, assignment = {}) {
+  if (index === parents.length) {
+    return [{ ...assignment }];
+  }
+  const parent = parents[index];
+  assignment[parent] = true;
+  const trueStates = enumerateParentStateAssignments(parents, index + 1, assignment);
+  assignment[parent] = false;
+  const falseStates = enumerateParentStateAssignments(parents, index + 1, assignment);
+  delete assignment[parent];
+  return [...trueStates, ...falseStates];
 }
 
 function parseProbabilityDependenceValue(rawText, percentMarker, label) {
@@ -28362,9 +28419,7 @@ function buildConditionalProbabilityModel(variables, provided, dependence) {
     for (const variable of variables) {
       const conditional = conditionalByChild.get(variable);
       const probabilityTrue = conditional
-        ? assignment[conditional.parent]
-          ? conditional.whenParentTrue
-          : conditional.whenParentFalse
+        ? conditionalProbabilityForAssignment(conditional, assignment)
         : rootMarginals[variable];
       probability *= assignment[variable] ? probabilityTrue : 1 - probabilityTrue;
     }
@@ -28415,37 +28470,75 @@ function buildConditionalProbabilityModel(variables, provided, dependence) {
 function buildCanonicalConditionalMap(variables, conditionals) {
   const conditionalByChild = new Map();
   for (const conditional of conditionals) {
-    const parent = matchProbabilityVariableName(conditional.parent, variables);
+    const parents = conditional.parents.map((parentName) => matchProbabilityVariableName(parentName, variables));
     const child = matchProbabilityVariableName(conditional.child, variables);
-    if (!parent || !child || parent === child) {
+    if (!child || parents.some((parent) => !parent) || parents.includes(child)) {
       throw new Error("Conditional probability specs must name distinct variables in the probability logic statement.");
     }
+    const uniqueParents = new Set(parents);
+    if (uniqueParents.size !== parents.length) {
+      throw new Error("Conditional probability specs cannot repeat a parent variable.");
+    }
     if (conditionalByChild.has(child)) {
-      throw new Error(`Bayesian network probability logic currently supports one parent for ${child}.`);
+      throw new Error(`Bayesian network probability logic currently supports one conditional table for ${child}.`);
     }
     conditionalByChild.set(child, {
-      parent,
+      parent: parents[0],
+      parents,
       child,
       whenParentTrue: conditional.whenParentTrue,
       whenParentFalse: conditional.whenParentFalse,
+      table: remapConditionalTableParents(conditional.table, conditional.parents, parents),
     });
   }
   return conditionalByChild;
 }
 
+function remapConditionalTableParents(table, originalParents, canonicalParents) {
+  const remapped = {};
+  for (const [stateKey, value] of Object.entries(table)) {
+    const states = new Map(stateKey.split(/\s*,\s*/).map((part) => {
+      const [name, state] = part.split("=");
+      return [name.toLowerCase(), state === "true"];
+    }));
+    const canonicalState = canonicalParents.map((parent, index) => ({
+      name: parent,
+      negated: !states.get(originalParents[index].toLowerCase()),
+    }));
+    remapped[conditionalParentStateKey(canonicalState)] = value;
+  }
+  return remapped;
+}
+
 function validateBayesianNetworkAcyclic(conditionalByChild) {
   for (const child of conditionalByChild.keys()) {
     const seen = new Set([child]);
-    let current = child;
-    while (conditionalByChild.has(current)) {
-      const parent = conditionalByChild.get(current).parent;
-      if (seen.has(parent)) {
-        throw new Error("Bayesian network probability logic needs an acyclic parent structure.");
-      }
-      seen.add(parent);
-      current = parent;
-    }
+    validateBayesianNetworkAcyclicFrom(child, conditionalByChild, seen);
   }
+}
+
+function validateBayesianNetworkAcyclicFrom(child, conditionalByChild, seen) {
+  const conditional = conditionalByChild.get(child);
+  if (!conditional) return;
+  for (const parent of conditional.parents) {
+    if (seen.has(parent)) {
+      throw new Error("Bayesian network probability logic needs an acyclic parent structure.");
+    }
+    seen.add(parent);
+    validateBayesianNetworkAcyclicFrom(parent, conditionalByChild, seen);
+    seen.delete(parent);
+  }
+}
+
+function conditionalProbabilityForAssignment(conditional, assignment) {
+  const stateKey = conditionalParentStateKey(
+    conditional.parents.map((parent) => ({ name: parent, negated: !assignment[parent] })),
+  );
+  const probability = conditional.table[stateKey];
+  if (!Number.isFinite(probability)) {
+    throw new Error(`Missing conditional probability row for ${conditional.child} with ${stateKey}.`);
+  }
+  return probability;
 }
 
 function enumerateProbabilityStates(variables, index = 0, assignment = {}) {
@@ -28670,16 +28763,32 @@ function formatConditionalProbabilityArtifacts(model) {
 
 function formatBayesianNetworkProbabilityArtifacts(model) {
   return [
-    ["Network", model.conditionals.map((conditional) => `${conditional.parent} -> ${conditional.child}`).join(", ")],
+    ["Network", model.conditionals.map((conditional) => `${conditional.parents.join(",")} -> ${conditional.child}`).join(", ")],
     ["Root marginals", Object.entries(model.rootMarginals)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([name, value]) => `${name}=${formatNumber(value)}`)
       .join(", ") || "none"],
-    ["Conditional rows", model.conditionals.map((conditional) => (
-      `cond(${conditional.child}|${conditional.parent})=${formatNumber(conditional.whenParentTrue)}, cond(${conditional.child}|not ${conditional.parent})=${formatNumber(conditional.whenParentFalse)}`
-    )).join("; ")],
+    ["Conditional rows", model.conditionals.map(formatConditionalRows).join("; ")],
     ["State count", formatNumber(model.states.length)],
   ];
+}
+
+function formatConditionalRows(conditional) {
+  return Object.entries(conditional.table)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([stateKey, value]) => (
+      `cond(${conditional.child}|${formatConditionalStateKeyForInput(stateKey)})=${formatNumber(value)}`
+    ))
+    .join(", ");
+}
+
+function formatConditionalStateKeyForInput(stateKey) {
+  return stateKey.split(/\s*,\s*/)
+    .map((part) => {
+      const [name, state] = part.split("=");
+      return state === "true" ? name : `not ${name}`;
+    })
+    .join(",");
 }
 
 function formatEvidenceProbabilityArtifacts(evidenceResult) {

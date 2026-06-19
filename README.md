@@ -318,6 +318,9 @@ The same idea works for algebra and calculus:
 - `bayesian network probability logic P given R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2`
   conditions the network on evidence and returns
   `conditional probability = 0.72`.
+- `bayesian network probability logic R given P with P=0.6 Q=0.5 cond(R|P,Q)=0.95 cond(R|P,not Q)=0.7 cond(R|not P,Q)=0.4 cond(R|not P,not Q)=0.05`
+  evaluates a multi-parent conditional probability table and returns
+  `conditional probability = 0.825`.
 - `dot tree x^2 + 2x + 1` exports the parsed expression tree as Graphviz DOT
   with node and edge tables.
 - `solve system 2x + y = 5; x - y = 1` becomes an augmented matrix.

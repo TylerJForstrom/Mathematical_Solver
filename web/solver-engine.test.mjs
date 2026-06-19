@@ -208,6 +208,7 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   const conditional = analyzeLogicTruthValue("conditional probability logic P or Q with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3");
   const bayesianNetwork = analyzeLogicTruthValue("bayesian network probability logic P or R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2");
   const bayesianEvidence = analyzeLogicTruthValue("bayesian network probability logic P given R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2");
+  const bayesianMultiParent = analyzeLogicTruthValue("bayesian network probability logic R given P with P=0.6 Q=0.5 cond(R|P,Q)=0.95 cond(R|P,not Q)=0.7 cond(R|not P,Q)=0.4 cond(R|not P,not Q)=0.05");
 
   assert.equal(fuzzy.summary, "Fuzzy logic truth value");
   assert.equal(fuzzy.answer, "fuzzy truth = 0.7");
@@ -306,12 +307,34 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   assert.equal(artifactValue(bayesianEvidence, "P(query and evidence)"), "0.36");
   assert.deepEqual(bayesianEvidence.table.rows.slice(-1), [["P given R", "conditional: P(query and evidence) / P(evidence)", "0.72"]]);
 
+  assert.equal(bayesianMultiParent.summary, "Bayesian network conditional probability");
+  assert.equal(bayesianMultiParent.answer, "conditional probability = 0.825");
+  assert.equal(artifactValue(bayesianMultiParent, "Semantics"), "binary Bayesian network");
+  assert.equal(artifactValue(bayesianMultiParent, "Assignments"), "P=0.6, Q=0.5, R=0.585");
+  assert.equal(artifactValue(bayesianMultiParent, "Network"), "P,Q -> R");
+  assert.equal(artifactValue(bayesianMultiParent, "Root marginals"), "P=0.6, Q=0.5");
+  assert.equal(artifactValue(bayesianMultiParent, "Conditional rows"), "cond(R|not P,not Q)=0.05, cond(R|not P,Q)=0.4, cond(R|P,not Q)=0.7, cond(R|P,Q)=0.95");
+  assert.equal(artifactValue(bayesianMultiParent, "P(evidence)"), "0.6");
+  assert.equal(artifactValue(bayesianMultiParent, "P(query and evidence)"), "0.495");
+  assert.deepEqual(bayesianMultiParent.table.rows.slice(-1), [["R given P", "conditional: P(query and evidence) / P(evidence)", "0.825"]]);
+  assert.deepEqual(bayesianMultiParent.extraTables[0].rows, [
+    ["P=true, Q=true, R=true", "0.285"],
+    ["P=true, Q=true, R=false", "0.015"],
+    ["P=true, Q=false, R=true", "0.21"],
+    ["P=true, Q=false, R=false", "0.09"],
+    ["P=false, Q=true, R=true", "0.08"],
+    ["P=false, Q=true, R=false", "0.12"],
+    ["P=false, Q=false, R=true", "0.01"],
+    ["P=false, Q=false, R=false", "0.19"],
+  ]);
+
   assert.equal(analyzeUniversal("fuzzy logic P and Q with P=0.8 Q=0.6").summary, "Fuzzy logic truth value");
   assert.equal(analyzeUniversal("interval fuzzy logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]").summary, "Interval fuzzy logic truth value");
   assert.equal(analyzeUniversal("correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35").summary, "Correlated probabilistic logic truth value");
   assert.equal(analyzeUniversal("conditional probability logic P or Q with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3").summary, "Conditional probabilistic logic truth value");
   assert.equal(analyzeUniversal("bayesian network probability logic P or R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2").summary, "Bayesian network probabilistic logic truth value");
   assert.equal(analyzeUniversal("bayesian network probability logic P given R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2").summary, "Bayesian network conditional probability");
+  assert.equal(analyzeUniversal("bayesian network probability logic R given P with P=0.6 Q=0.5 cond(R|P,Q)=0.95 cond(R|P,not Q)=0.7 cond(R|not P,Q)=0.4 cond(R|not P,not Q)=0.05").summary, "Bayesian network conditional probability");
 });
 
 runTest("tree export emits Graphviz DOT", () => {
