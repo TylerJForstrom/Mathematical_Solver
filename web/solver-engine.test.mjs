@@ -206,6 +206,7 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
   const correlated = analyzeLogicTruthValue("correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35");
   const correlatedFromRho = analyzeLogicTruthValue("correlated probability logic P and Q with P=0.6 Q=0.5 corr(P,Q)=0.5");
   const conditional = analyzeLogicTruthValue("conditional probability logic P or Q with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3");
+  const bayesianNetwork = analyzeLogicTruthValue("bayesian network probability logic P or R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2");
 
   assert.equal(fuzzy.summary, "Fuzzy logic truth value");
   assert.equal(fuzzy.answer, "fuzzy truth = 0.7");
@@ -276,10 +277,30 @@ runTest("logic mode evaluates fuzzy and probabilistic truth values", () => {
     ["P=false, Q=false", "0.28"],
   ]);
 
+  assert.equal(bayesianNetwork.summary, "Bayesian network probabilistic logic truth value");
+  assert.equal(bayesianNetwork.answer, "probability = 0.74");
+  assert.equal(artifactValue(bayesianNetwork, "Semantics"), "binary Bayesian network");
+  assert.equal(artifactValue(bayesianNetwork, "Assignments"), "P=0.6, Q=0.6, R=0.5");
+  assert.equal(artifactValue(bayesianNetwork, "Network"), "P -> Q, Q -> R");
+  assert.equal(artifactValue(bayesianNetwork, "Root marginals"), "P=0.6");
+  assert.equal(artifactValue(bayesianNetwork, "State count"), "8");
+  assert.deepEqual(bayesianNetwork.table.rows.slice(-1), [["P or R", "or: bayesian network joint distribution sum", "0.74"]]);
+  assert.deepEqual(bayesianNetwork.extraTables[0].rows, [
+    ["P=true, Q=true, R=true", "0.336"],
+    ["P=true, Q=true, R=false", "0.144"],
+    ["P=true, Q=false, R=true", "0.024"],
+    ["P=true, Q=false, R=false", "0.096"],
+    ["P=false, Q=true, R=true", "0.084"],
+    ["P=false, Q=true, R=false", "0.036"],
+    ["P=false, Q=false, R=true", "0.056"],
+    ["P=false, Q=false, R=false", "0.224"],
+  ]);
+
   assert.equal(analyzeUniversal("fuzzy logic P and Q with P=0.8 Q=0.6").summary, "Fuzzy logic truth value");
   assert.equal(analyzeUniversal("interval fuzzy logic P or Q with P=[0.2,0.5] Q=[0.4,0.7]").summary, "Interval fuzzy logic truth value");
   assert.equal(analyzeUniversal("correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35").summary, "Correlated probabilistic logic truth value");
   assert.equal(analyzeUniversal("conditional probability logic P or Q with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3").summary, "Conditional probabilistic logic truth value");
+  assert.equal(analyzeUniversal("bayesian network probability logic P or R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2").summary, "Bayesian network probabilistic logic truth value");
 });
 
 runTest("tree export emits Graphviz DOT", () => {

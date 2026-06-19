@@ -43,7 +43,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
   const suggestions = [
     {
       title: "Fuzzy or probabilistic logic",
-      when: () => activeMode === "ask" && /\b(?:fuzzy|graded truth|truth values?|probabilistic logic|probability logic|correlated probability|conditional probability|soft logic)\b/.test(lower),
+      when: () => activeMode === "ask" && /\b(?:fuzzy|graded truth|truth values?|probabilistic logic|probability logic|correlated probability|conditional probability|bayesian network|soft logic)\b/.test(lower),
       reason: "I detected a logic question with truth values between 0 and 1.",
       needs: [
         "A propositional statement using and, or, not, ->, xor, or iff",
@@ -54,6 +54,7 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
         ["Probability logic", "ask", "probabilistic logic P or Q with P=0.2 Q=0.5"],
         ["Correlated", "ask", "correlated probability logic P or Q with P=0.6 Q=0.5 joint(P,Q)=0.35"],
         ["Conditional", "ask", "conditional probability logic P or Q with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3"],
+        ["Bayes net", "ask", "bayesian network probability logic P or R with P=0.6 cond(Q|P)=0.8 cond(Q|not P)=0.3 cond(R|Q)=0.7 cond(R|not Q)=0.2"],
       ],
     },
     {
@@ -937,10 +938,13 @@ export function analyzeLogicBdd(statement) {
 export function analyzeLogicTruthValue(statement) {
   const request = extractLogicTruthValueQuestion(statement);
   const tree = parseLogic(request.expression);
-  const variables = logicVariables(tree);
+  const expressionVariables = logicVariables(tree);
+  const variables = request.dependence
+    ? mergeProbabilityModelVariables(expressionVariables, request.dependence)
+    : expressionVariables;
   let probabilityModel = null;
   let assignment;
-  if (request.dependence?.kind === "conditional") {
+  if (request.dependence?.kind === "conditional" || request.dependence?.kind === "bayesian-network") {
     probabilityModel = buildConditionalProbabilityModel(variables, request.values, request.dependence);
     assignment = { ...probabilityModel.marginal };
   } else {
@@ -1004,7 +1008,7 @@ export function analyzeLogicTruthValue(statement) {
         title: "Evaluate graded operators",
         expression: answer,
         detail: probabilityModel
-          ? "A two-event joint distribution evaluates the whole propositional expression without assuming independence."
+          ? formatProbabilityModelEvaluationDetail(probabilityModel)
           : request.kind === "probability"
           ? "Assuming independent variables, AND multiplies probabilities and OR uses inclusion-exclusion."
           : request.interval
@@ -25635,12 +25639,14 @@ function isLogicBddQuestion(lower) {
 function isLogicTruthValueQuestion(lower) {
   return lower.startsWith("fuzzy ") ||
     lower.startsWith("soft logic ") ||
+    lower.startsWith("bayesian network probability ") ||
+    lower.startsWith("bayesian network probabilistic ") ||
     lower.startsWith("correlated probability ") ||
     lower.startsWith("correlated probabilistic ") ||
     lower.startsWith("conditional probability ") ||
     lower.startsWith("probabilistic logic ") ||
     lower.startsWith("probability logic ") ||
-    /\b(?:fuzzy logic|soft logic|graded truth|truth values?|probabilistic logic|probability logic|correlated probability|conditional probability)\b/.test(lower);
+    /\b(?:fuzzy logic|soft logic|graded truth|truth values?|probabilistic logic|probability logic|correlated probability|conditional probability|bayesian network probability)\b/.test(lower);
 }
 
 function isLogicQuestion(question) {
@@ -26084,7 +26090,7 @@ function extractLogicBddQuestion(question) {
 
 function extractLogicTruthValueQuestion(question) {
   const lower = question.toLowerCase();
-  const kind = /\b(?:conditional probability|conditional probabilistic|correlated probability|correlated probabilistic|probabilistic logic|probability logic|prob logic|independent probability)\b/.test(lower)
+  const kind = /\b(?:bayesian network probability|bayesian network probabilistic|conditional probability|conditional probabilistic|correlated probability|correlated probabilistic|probabilistic logic|probability logic|prob logic|independent probability)\b/.test(lower)
     ? "probability"
     : "fuzzy";
   const interval = kind === "fuzzy" && (
@@ -26102,13 +26108,14 @@ function extractLogicTruthValueQuestion(question) {
   const expression = stripSoftLogicAssignments(stripProbabilityDependenceSpecs(tNormRequest.text))
     .replace(/[?!.]+$/, "")
     .replace(/^(?:evaluate|compute|calculate|find|show)\s+(?:the\s+)?/i, "")
-    .replace(/^(?:(?:interval[-\s]?valued|interval|correlated|conditional)\s+)?(?:fuzzy\s+logic|fuzzy|soft\s+logic|graded\s+truth|truth\s+values?|probabilistic\s+logic|probability\s+logic|prob\s+logic|probability)\s*:?\s*/i, "")
+    .replace(/^(?:(?:interval[-\s]?valued|interval|correlated|conditional|bayesian\s+network)\s+)?(?:fuzzy\s+logic|fuzzy|soft\s+logic|graded\s+truth|truth\s+values?|probabilistic\s+logic|probability\s+logic|prob\s+logic|probability)\s*:?\s*/i, "")
     .replace(/\b(?:using|with|given|where|values?|truth\s+values?|truth\s+intervals?|degrees?)\b/gi, " ")
     .replace(/\bcorrelated\s+(?:probability|probabilistic)\b/gi, " ")
     .replace(/\bconditional\s+(?:probability|probabilistic)\b/gi, " ")
+    .replace(/\bbayesian\s+network\s+(?:probability|probabilistic)\b/gi, " ")
     .replace(/\b(?:interval[-\s]?valued|interval)\s+(?:fuzzy|truth|graded)\b/gi, " ")
     .replace(/\b(?:fuzzy|truth|graded)\s+intervals?\b/gi, " ")
-    .replace(/\b(?:fuzzy\s+logic|soft\s+logic|fuzzy|graded\s+truth|probabilistic\s+logic|probability\s+logic|prob\s+logic|independent\s+probability|correlated\s+probability\s+logic|conditional\s+probability\s+logic)\b/gi, " ")
+    .replace(/\b(?:fuzzy\s+logic|soft\s+logic|fuzzy|graded\s+truth|probabilistic\s+logic|probability\s+logic|prob\s+logic|independent\s+probability|correlated\s+probability\s+logic|conditional\s+probability\s+logic|bayesian\s+network\s+probability\s+logic)\b/gi, " ")
     .replace(/\b(?:logic|boolean|propositional|expression|statement)\b/gi, " ")
     .replace(/^\s*(?:of|for)\s+/i, "")
     .replace(/\s+/g, " ")
@@ -27903,6 +27910,24 @@ function softLogicIntervalAssignmentPattern() {
   return /\b([A-Za-z_]\w*)\s*(?:=|:)\s*[\[(]\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?\s*,\s*([-+]?\d*\.?\d+(?:e[-+]?\d+)?)(\s*%)?\s*[\])]/gi;
 }
 
+function mergeProbabilityModelVariables(expressionVariables, dependence) {
+  return [...new Set([...expressionVariables, ...probabilityDependenceVariables(dependence)])].sort();
+}
+
+function probabilityDependenceVariables(dependence) {
+  if (!dependence) return [];
+  if (dependence.kind === "joint" || dependence.kind === "correlation") {
+    return [dependence.left, dependence.right];
+  }
+  if (dependence.kind === "conditional") {
+    return [dependence.parent, dependence.child];
+  }
+  if (dependence.kind === "bayesian-network") {
+    return dependence.conditionals.flatMap((conditional) => [conditional.parent, conditional.child]);
+  }
+  return [];
+}
+
 function parseProbabilityDependence(text) {
   const directSpecs = [];
   for (const match of text.matchAll(probabilityJointPattern())) {
@@ -27961,23 +27986,50 @@ function probabilityConditionalPattern() {
 }
 
 function parseConditionalProbabilityDependence(specs) {
-  if (specs.length !== 2) {
-    throw new Error("Conditional probability logic needs both cond(Q|P)=... and cond(Q|not P)=....");
+  const grouped = new Map();
+  for (const spec of specs) {
+    if (spec.child.toLowerCase() === spec.parent.toLowerCase()) {
+      throw new Error("Conditional probability specs need different parent and child variables.");
+    }
+    const key = `${spec.child.toLowerCase()}|${spec.parent.toLowerCase()}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        child: spec.child,
+        parent: spec.parent,
+        trueValue: null,
+        falseValue: null,
+      });
+    }
+    const group = grouped.get(key);
+    const slot = spec.negatedParent ? "falseValue" : "trueValue";
+    if (group[slot] !== null) {
+      throw new Error("Duplicate conditional probability row for the same child and parent state.");
+    }
+    group[slot] = spec.value;
   }
-  const [first, second] = specs;
-  const sameChild = first.child.toLowerCase() === second.child.toLowerCase();
-  const sameParent = first.parent.toLowerCase() === second.parent.toLowerCase();
-  if (!sameChild || !sameParent || first.negatedParent === second.negatedParent) {
-    throw new Error("Conditional probability specs must describe the same child given parent true and parent false.");
+
+  const conditionals = [...grouped.values()].map((group) => {
+    if (group.trueValue === null || group.falseValue === null) {
+      throw new Error(`Conditional probability logic needs both cond(${group.child}|${group.parent})=... and cond(${group.child}|not ${group.parent})=....`);
+    }
+    return {
+      parent: group.parent,
+      child: group.child,
+      whenParentTrue: group.trueValue,
+      whenParentFalse: group.falseValue,
+    };
+  });
+
+  if (conditionals.length === 1) {
+    return {
+      kind: "conditional",
+      ...conditionals[0],
+    };
   }
-  const trueSpec = first.negatedParent ? second : first;
-  const falseSpec = first.negatedParent ? first : second;
+
   return {
-    kind: "conditional",
-    child: trueSpec.child,
-    parent: trueSpec.parent,
-    whenParentTrue: trueSpec.value,
-    whenParentFalse: falseSpec.value,
+    kind: "bayesian-network",
+    conditionals,
   };
 }
 
@@ -28249,72 +28301,140 @@ function buildCorrelatedProbabilityModel(variables, assignment, dependence) {
 }
 
 function buildConditionalProbabilityModel(variables, provided, dependence) {
-  if (variables.length !== 2) {
-    throw new Error("Conditional probability logic currently supports exactly two events with one parent and one child.");
-  }
-  const parentName = matchProbabilityVariableName(dependence.parent, variables);
-  const childName = matchProbabilityVariableName(dependence.child, variables);
-  if (!parentName || !childName || parentName === childName) {
-    throw new Error("Conditional probability specs must name the two variables in the probability logic statement.");
+  const conditionals = dependence.kind === "bayesian-network"
+    ? dependence.conditionals
+    : [dependence];
+  const conditionalByChild = buildCanonicalConditionalMap(variables, conditionals);
+  validateBayesianNetworkAcyclic(conditionalByChild);
+  const rootMarginals = {};
+  for (const variable of variables) {
+    if (conditionalByChild.has(variable)) continue;
+    const probability = readProvidedProbabilityValue(provided, variable);
+    if (!Number.isFinite(probability)) {
+      throw new Error(`Bayesian network probability logic needs a root marginal, such as ${variable}=0.6.`);
+    }
+    rootMarginals[variable] = probability;
   }
 
-  const parentProbability = readProvidedProbabilityValue(provided, parentName);
-  if (!Number.isFinite(parentProbability)) {
-    throw new Error(`Conditional probability logic needs the parent marginal, such as ${parentName}=0.6.`);
-  }
-  const childGivenParent = dependence.whenParentTrue;
-  const childGivenNotParent = dependence.whenParentFalse;
-  const joint = normalizeSoftTruth(parentProbability * childGivenParent);
-  const parentOnly = normalizeSoftTruth(parentProbability * (1 - childGivenParent));
-  const childWithoutParent = normalizeSoftTruth((1 - parentProbability) * childGivenNotParent);
-  const neither = normalizeSoftTruth((1 - parentProbability) * (1 - childGivenNotParent));
-  const childProbability = normalizeSoftTruth(joint + childWithoutParent);
-  const denominator = Math.sqrt(
-    parentProbability * (1 - parentProbability) * childProbability * (1 - childProbability),
-  );
-  const correlation = denominator > EPSILON
-    ? normalizeNumber((joint - parentProbability * childProbability) / denominator)
-    : Number.NaN;
+  const states = enumerateProbabilityStates(variables).map((assignment) => {
+    let probability = 1;
+    for (const variable of variables) {
+      const conditional = conditionalByChild.get(variable);
+      const probabilityTrue = conditional
+        ? assignment[conditional.parent]
+          ? conditional.whenParentTrue
+          : conditional.whenParentFalse
+        : rootMarginals[variable];
+      probability *= assignment[variable] ? probabilityTrue : 1 - probabilityTrue;
+    }
+    return {
+      assignment,
+      label: variables.map((variable) => `${variable}=${assignment[variable] ? "true" : "false"}`).join(", "),
+      probability: normalizeSoftTruth(probability),
+    };
+  });
 
-  return {
-    variables: [parentName, childName],
-    marginal: {
-      [parentName]: parentProbability,
-      [childName]: childProbability,
-    },
-    source: "conditional",
+  const marginal = {};
+  for (const variable of variables) {
+    marginal[variable] = normalizeSoftTruth(
+      states.reduce((sum, state) => (state.assignment[variable] ? sum + state.probability : sum), 0),
+    );
+  }
+  const canonicalConditionals = [...conditionalByChild.values()];
+  const singleConditional = dependence.kind === "conditional" && canonicalConditionals.length === 1;
+  const source = singleConditional ? "conditional" : "bayesian-network";
+  const model = {
+    variables,
+    marginal,
+    source,
     sourceValue: Number.NaN,
-    joint,
-    correlation,
-    frechetLower: normalizeSoftTruth(Math.max(0, parentProbability + childProbability - 1)),
-    frechetUpper: normalizeSoftTruth(Math.min(parentProbability, childProbability)),
-    parent: parentName,
-    child: childName,
-    whenParentTrue: childGivenParent,
-    whenParentFalse: childGivenNotParent,
-    states: [
-      {
-        assignment: { [parentName]: true, [childName]: true },
-        label: `${parentName}=true, ${childName}=true`,
-        probability: joint,
-      },
-      {
-        assignment: { [parentName]: true, [childName]: false },
-        label: `${parentName}=true, ${childName}=false`,
-        probability: parentOnly,
-      },
-      {
-        assignment: { [parentName]: false, [childName]: true },
-        label: `${parentName}=false, ${childName}=true`,
-        probability: childWithoutParent,
-      },
-      {
-        assignment: { [parentName]: false, [childName]: false },
-        label: `${parentName}=false, ${childName}=false`,
-        probability: neither,
-      },
-    ],
+    rootMarginals,
+    conditionals: canonicalConditionals,
+    states,
   };
+
+  if (singleConditional) {
+    const [conditional] = canonicalConditionals;
+    model.parent = conditional.parent;
+    model.child = conditional.child;
+    model.whenParentTrue = conditional.whenParentTrue;
+    model.whenParentFalse = conditional.whenParentFalse;
+    model.joint = jointProbabilityFromStates(states, conditional.parent, conditional.child);
+    model.frechetLower = normalizeSoftTruth(Math.max(0, marginal[conditional.parent] + marginal[conditional.child] - 1));
+    model.frechetUpper = normalizeSoftTruth(Math.min(marginal[conditional.parent], marginal[conditional.child]));
+    model.correlation = bernoulliCorrelationFromJoint(
+      marginal[conditional.parent],
+      marginal[conditional.child],
+      model.joint,
+    );
+  }
+  return model;
+}
+
+function buildCanonicalConditionalMap(variables, conditionals) {
+  const conditionalByChild = new Map();
+  for (const conditional of conditionals) {
+    const parent = matchProbabilityVariableName(conditional.parent, variables);
+    const child = matchProbabilityVariableName(conditional.child, variables);
+    if (!parent || !child || parent === child) {
+      throw new Error("Conditional probability specs must name distinct variables in the probability logic statement.");
+    }
+    if (conditionalByChild.has(child)) {
+      throw new Error(`Bayesian network probability logic currently supports one parent for ${child}.`);
+    }
+    conditionalByChild.set(child, {
+      parent,
+      child,
+      whenParentTrue: conditional.whenParentTrue,
+      whenParentFalse: conditional.whenParentFalse,
+    });
+  }
+  return conditionalByChild;
+}
+
+function validateBayesianNetworkAcyclic(conditionalByChild) {
+  for (const child of conditionalByChild.keys()) {
+    const seen = new Set([child]);
+    let current = child;
+    while (conditionalByChild.has(current)) {
+      const parent = conditionalByChild.get(current).parent;
+      if (seen.has(parent)) {
+        throw new Error("Bayesian network probability logic needs an acyclic parent structure.");
+      }
+      seen.add(parent);
+      current = parent;
+    }
+  }
+}
+
+function enumerateProbabilityStates(variables, index = 0, assignment = {}) {
+  if (index === variables.length) {
+    return [{ ...assignment }];
+  }
+  const variable = variables[index];
+  assignment[variable] = true;
+  const trueStates = enumerateProbabilityStates(variables, index + 1, assignment);
+  assignment[variable] = false;
+  const falseStates = enumerateProbabilityStates(variables, index + 1, assignment);
+  delete assignment[variable];
+  return [...trueStates, ...falseStates];
+}
+
+function jointProbabilityFromStates(states, left, right) {
+  return normalizeSoftTruth(
+    states.reduce((sum, state) => (
+      state.assignment[left] && state.assignment[right] ? sum + state.probability : sum
+    ), 0),
+  );
+}
+
+function bernoulliCorrelationFromJoint(leftProbability, rightProbability, joint) {
+  const denominator = Math.sqrt(
+    leftProbability * (1 - leftProbability) * rightProbability * (1 - rightProbability),
+  );
+  return denominator > EPSILON
+    ? normalizeNumber((joint - leftProbability * rightProbability) / denominator)
+    : Number.NaN;
 }
 
 function readProvidedProbabilityValue(provided, variable) {
@@ -28387,7 +28507,7 @@ function evaluateCorrelatedProbabilityLogic(node, model, trace) {
   const value = correlatedNodeProbability(node, model);
   trace.push({
     expression: logicToString(node),
-    rule: `${node.operator}: ${model.source === "conditional" ? "conditional" : "correlated"} joint distribution sum`,
+    rule: `${node.operator}: ${formatProbabilityModelTraceLabel(model)} joint distribution sum`,
     value,
   });
   return value;
@@ -28402,23 +28522,44 @@ function correlatedNodeProbability(node, model) {
 }
 
 function formatProbabilityModelSemantics(model) {
+  if (model.source === "bayesian-network") return "binary Bayesian network";
   if (model.source === "conditional") return "conditional probability table";
   return "correlated probability";
 }
 
 function formatProbabilityModelSummary(model) {
+  if (model.source === "bayesian-network") return "Bayesian network probabilistic logic truth value";
   if (model.source === "conditional") return "Conditional probabilistic logic truth value";
   return "Correlated probabilistic logic truth value";
 }
 
 function formatProbabilityModelInputDetail(model) {
+  if (model.source === "bayesian-network") {
+    return "Root marginals and conditional-probability rows define an acyclic binary Bayesian network.";
+  }
   if (model.source === "conditional") {
     return "A parent marginal probability and two conditional probabilities define the child event distribution.";
   }
   return "Each event receives a marginal probability; the pair receives a joint or correlation constraint.";
 }
 
+function formatProbabilityModelEvaluationDetail(model) {
+  if (model.source === "bayesian-network") {
+    return "The network expands to a full joint distribution, then sums the states where the propositional expression is true.";
+  }
+  return "A two-event joint distribution evaluates the whole propositional expression without assuming independence.";
+}
+
+function formatProbabilityModelTraceLabel(model) {
+  if (model.source === "bayesian-network") return "bayesian network";
+  if (model.source === "conditional") return "conditional";
+  return "correlated";
+}
+
 function formatProbabilityModelArtifacts(model) {
+  if (model.source === "bayesian-network") {
+    return formatBayesianNetworkProbabilityArtifacts(model);
+  }
   if (model.source === "conditional") {
     return formatConditionalProbabilityArtifacts(model);
   }
@@ -28446,6 +28587,20 @@ function formatConditionalProbabilityArtifacts(model) {
   ];
 }
 
+function formatBayesianNetworkProbabilityArtifacts(model) {
+  return [
+    ["Network", model.conditionals.map((conditional) => `${conditional.parent} -> ${conditional.child}`).join(", ")],
+    ["Root marginals", Object.entries(model.rootMarginals)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, value]) => `${name}=${formatNumber(value)}`)
+      .join(", ") || "none"],
+    ["Conditional rows", model.conditionals.map((conditional) => (
+      `cond(${conditional.child}|${conditional.parent})=${formatNumber(conditional.whenParentTrue)}, cond(${conditional.child}|not ${conditional.parent})=${formatNumber(conditional.whenParentFalse)}`
+    )).join("; ")],
+    ["State count", formatNumber(model.states.length)],
+  ];
+}
+
 function formatCorrelatedProbabilityDependence(model) {
   const [leftName, rightName] = model.variables;
   if (model.source === "conditional") {
@@ -28459,7 +28614,11 @@ function formatCorrelatedProbabilityDependence(model) {
 
 function formatCorrelatedProbabilityTable(model) {
   return {
-    title: model.source === "conditional" ? "Conditional Joint Distribution" : "Joint Distribution",
+    title: model.source === "bayesian-network"
+      ? "Bayesian Network Joint Distribution"
+      : model.source === "conditional"
+        ? "Conditional Joint Distribution"
+        : "Joint Distribution",
     headers: ["State", "Probability"],
     rows: model.states.map((state) => [
       state.label,
