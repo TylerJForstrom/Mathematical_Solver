@@ -145,7 +145,7 @@ The frontend currently supports:
   DerSimonian-Laird random-effects meta-analysis with heterogeneity diagnostics,
   multiple-testing correction with Bonferroni, Holm, Benjamini-Hochberg FDR,
   and Benjamini-Yekutieli adjusted p-values,
-  Jarque-Bera normality tests,
+  Jarque-Bera and Anderson-Darling normality tests,
   two-sample variance F tests and Levene equal-variance tests,
   one-sample/two-sample/paired t tests with Student t p-values,
   one-proportion/two-proportion z tests, proportion confidence intervals,
@@ -491,7 +491,9 @@ The same idea works for algebra and calculus:
 - `bootstrap mean data 10,12,14,16,18 resamples=1000 seed=7 confidence=95`
   builds a reproducible percentile bootstrap interval for the mean.
 - `normality test data 10,12,13,15,30,31,32,33` runs a Jarque-Bera
-  diagnostic from skewness and excess kurtosis.
+  diagnostic from skewness and excess kurtosis, while
+  `anderson-darling normality data 10,12,13,15,30,31,32,33` compares the
+  ordered sample to a fitted normal CDF with tail-sensitive weighting.
 - `variance test group1: 10,12,9,11; group2: 8,7,11,9` compares two sample
   variances with an F test, while `levene group1: ...; group2: ...; group3: ...`
   checks equal variances across several groups.
@@ -606,7 +608,7 @@ The demo includes:
   percentiles, Student t, chi-square, and F distribution probabilities and
   critical values with shaded density plots, z-scores, discrete expected value, Bayes theorem,
   Markov chains, Bayesian beta-binomial updates,
-  Jarque-Bera normality tests, equal-variance tests,
+  Jarque-Bera and Anderson-Darling normality tests, equal-variance tests,
   one-sample/two-sample/paired t tests,
   one-proportion/two-proportion z tests,
   proportion confidence intervals, permutation tests, ANOVA, chi-square tests

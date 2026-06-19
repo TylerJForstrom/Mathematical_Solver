@@ -7963,6 +7963,9 @@ function analyzeDescriptiveStatistics(statement) {
 
 function analyzeNormalityTest(statement) {
   const request = parseNormalityTestInput(statement);
+  if (request.method === "anderson-darling") {
+    return analyzeAndersonDarlingNormalityTest(request);
+  }
   const result = jarqueBeraNormalityTest(request.values);
   const decision = result.pValue < request.alpha
     ? `reject normality at alpha=${formatNumber(request.alpha)}`
@@ -8232,6 +8235,79 @@ function analyzePearsonCorrelation(statement) {
       ["Decision", decision],
     ],
     graph: buildScatterFitGraph(request.x, request.y, trendSlope, trendIntercept, "Pearson trend"),
+  };
+}
+
+function analyzeAndersonDarlingNormalityTest(request) {
+  const result = andersonDarlingNormalityTest(request.values);
+  const decision = result.pValue < request.alpha
+    ? `reject normality at alpha=${formatNumber(request.alpha)}`
+    : `fail to reject normality at alpha=${formatNumber(request.alpha)}`;
+
+  return {
+    mode: "statistics",
+    tree: statsDatasetNode(request.values, [
+      statsMetricNode("A2", result.statistic),
+      statsMetricNode("A2*", result.correctedStatistic),
+      statsMetricNode("P", result.pValue),
+    ], "ANDERSON-DARLING"),
+    answer: `A^2* = ${formatNumber(result.correctedStatistic)}, p = ${formatNumber(result.pValue)}`,
+    summary: "Anderson-Darling normality test",
+    details: "Empirical-distribution normality diagnostic",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.values)),
+    steps: [
+      {
+        title: "Parse sample",
+        expression: result.sortedValues.map(formatNumber).join(", "),
+        detail: `The Anderson-Darling test compares ${result.count} ordered observations to a fitted normal CDF.`,
+      },
+      {
+        title: "Fit reference normal",
+        expression: `mean=${formatNumber(result.mean)}, sample sd=${formatNumber(result.sampleStdDev)}`,
+        detail: "The sample mean and sample standard deviation define the reference normal curve.",
+      },
+      {
+        title: "Compare empirical CDF to normal CDF",
+        expression: `A^2 = ${formatNumber(result.statistic)}`,
+        detail: "The statistic gives extra weight to tail mismatches, unlike simpler CDF distance checks.",
+      },
+      {
+        title: "Apply finite-sample correction",
+        expression: `A^2* = ${formatNumber(result.correctedStatistic)}`,
+        detail: "The correction adjusts the statistic because the mean and standard deviation were estimated from the sample.",
+      },
+      {
+        title: "Approximate p-value",
+        expression: `p = ${formatNumber(result.pValue)}`,
+        detail: "The p-value uses Stephens-style approximations for the corrected Anderson-Darling statistic.",
+      },
+      {
+        title: "Make decision",
+        expression: decision,
+        detail: "Small p-values indicate the ordered sample is unlikely under a fitted normal distribution.",
+      },
+    ],
+    table: {
+      headers: ["Order", "Value", "z", "Phi(z)", "Tail term"],
+      rows: result.rows.map((row) => [
+        formatNumber(row.order),
+        formatNumber(row.value),
+        formatNumber(row.z),
+        formatNumber(row.cdf),
+        formatNumber(row.tailTerm),
+      ]),
+    },
+    artifacts: [
+      ["Count", formatNumber(result.count)],
+      ["Mean", formatNumber(result.mean)],
+      ["Sample SD", formatNumber(result.sampleStdDev)],
+      ["A^2 statistic", formatNumber(result.statistic)],
+      ["Corrected A^2*", formatNumber(result.correctedStatistic)],
+      ["p-value", formatNumber(result.pValue)],
+      ["Decision", decision],
+      ["Approximation note", "Approximate p-value for a fitted normal distribution; strongest with moderate or larger samples."],
+    ],
   };
 }
 
@@ -20020,6 +20096,68 @@ function jarqueBeraNormalityTest(values) {
   };
 }
 
+function andersonDarlingNormalityTest(values) {
+  if (values.length < 5) {
+    throw new Error("Anderson-Darling normality testing needs at least 5 observations.");
+  }
+  const sortedValues = [...values].sort(compareNumbers);
+  const count = sortedValues.length;
+  const valueMean = mean(sortedValues);
+  const sampleVariance = sortedValues.reduce((sum, value) => sum + (value - valueMean) ** 2, 0) / (count - 1);
+  if (!(sampleVariance > EPSILON)) {
+    throw new Error("Anderson-Darling normality testing needs nonzero sample variation.");
+  }
+  const sampleStdDev = Math.sqrt(sampleVariance);
+  const cdfValues = sortedValues.map((value) => clampOpenProbability(normalCdf((value - valueMean) / sampleStdDev)));
+  let weightedLogSum = 0;
+  const rows = [];
+  for (let index = 0; index < count; index += 1) {
+    const leftCdf = cdfValues[index];
+    const rightTail = clampOpenProbability(1 - cdfValues[count - index - 1]);
+    const weight = 2 * (index + 1) - 1;
+    const tailTerm = Math.log(leftCdf) + Math.log(rightTail);
+    weightedLogSum += weight * tailTerm;
+    rows.push({
+      order: index + 1,
+      value: sortedValues[index],
+      z: normalizeNumber((sortedValues[index] - valueMean) / sampleStdDev),
+      cdf: normalizeNumber(leftCdf),
+      tailTerm: normalizeNumber(tailTerm),
+    });
+  }
+  const statistic = -count - weightedLogSum / count;
+  const correctedStatistic = statistic * (1 + 0.75 / count + 2.25 / (count ** 2));
+  return {
+    count,
+    sortedValues,
+    mean: normalizeNumber(valueMean),
+    sampleStdDev: normalizeNumber(sampleStdDev),
+    statistic: normalizeNumber(statistic),
+    correctedStatistic: normalizeNumber(correctedStatistic),
+    pValue: normalizeNumber(andersonDarlingNormalPValue(correctedStatistic)),
+    rows,
+  };
+}
+
+function andersonDarlingNormalPValue(correctedStatistic) {
+  const a = correctedStatistic;
+  let pValue;
+  if (a < 0.2) {
+    pValue = 1 - Math.exp(-13.436 + 101.14 * a - 223.73 * a ** 2);
+  } else if (a < 0.34) {
+    pValue = 1 - Math.exp(-8.318 + 42.796 * a - 59.938 * a ** 2);
+  } else if (a < 0.6) {
+    pValue = Math.exp(0.9177 - 4.279 * a - 1.38 * a ** 2);
+  } else {
+    pValue = Math.exp(1.2937 - 5.709 * a + 0.0186 * a ** 2);
+  }
+  return clampProbability(pValue);
+}
+
+function clampOpenProbability(value) {
+  return Math.min(1 - 1e-15, Math.max(1e-15, value));
+}
+
 function descriptiveAnswer(statement, summary) {
   const lower = statement.toLowerCase();
   if (lower.includes("median")) return `median = ${formatNumber(summary.median)}`;
@@ -20339,8 +20477,13 @@ function parseNumbers(text) {
 }
 
 function parseNormalityTestInput(text) {
+  const method = /\b(?:anderson(?:-|\s*)darling|ad\s+normality|ad\s+test)\b/i.test(text)
+    ? "anderson-darling"
+    : "jarque-bera";
   const { alpha, cleaned } = extractAlpha(text);
   const dataText = cleaned
+    .replace(/\banderson(?:-|\s*)darling\b/gi, "")
+    .replace(/\bad\s+(?:normality|test)\b/gi, "")
     .replace(/\bjarque(?:-|\s*)bera\b/gi, "")
     .replace(/\bjb\b/gi, "")
     .replace(/\bnormality\b/gi, "")
@@ -20355,7 +20498,7 @@ function parseNormalityTestInput(text) {
   if (values.length < 3) {
     throw new Error("Use normality test data 10, 12, 13, 15, 30.");
   }
-  return { alpha, values };
+  return { alpha, method, values };
 }
 
 function parsePearsonInput(text) {
@@ -25063,7 +25206,10 @@ function isFisherExactQuestion(lower) {
 
 function isNormalityQuestion(lower) {
   return lower.includes("normality") ||
+    lower.includes("anderson-darling") ||
+    lower.includes("anderson darling") ||
     lower.includes("jarque") ||
+    /\bad\s+(?:normality|test)\b/.test(lower) ||
     /\bjb\s+test\b/.test(lower) ||
     lower.includes("normally distributed") ||
     lower.includes("test for normal");

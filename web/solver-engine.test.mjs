@@ -702,6 +702,18 @@ runTest("statistics mode computes Jarque-Bera normality tests", () => {
   assert.deepEqual(result.table.rows.at(-1), ["p-value", "0.546009"]);
 });
 
+runTest("statistics mode computes Anderson-Darling normality tests", () => {
+  const result = analyzeStatistics("anderson-darling normality data 10, 12, 13, 15, 30, 31, 32, 33 alpha=0.05");
+
+  assert.equal(result.summary, "Anderson-Darling normality test");
+  assert.equal(result.answer, "A^2* = 0.878205, p = 0.024585");
+  assert.equal(artifactValue(result, "A^2 statistic"), "0.777925");
+  assert.equal(artifactValue(result, "Corrected A^2*"), "0.878205");
+  assert.equal(artifactValue(result, "Decision"), "reject normality at alpha=0.05");
+  assert.deepEqual(result.table.rows[0], ["1", "10", "-1.167117", "0.121582", "-4.056693"]);
+  assert.deepEqual(result.table.rows.at(-1), ["8", "33", "1.069857", "0.857658", "-0.283182"]);
+});
+
 runTest("statistics mode computes linear regression", () => {
   const result = analyzeStatistics("regression for (1,2), (2,3), (3,5)");
 
@@ -2058,6 +2070,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("proportion ci successes=42 n=100 confidence=95").summary, "one-proportion confidence interval");
   assert.equal(analyzeUniversal("bootstrap mean data 10, 12, 14, 16, 18 resamples=1000 seed=7 confidence=95").summary, "bootstrap confidence interval");
   assert.equal(analyzeUniversal("normality test data 10, 12, 13, 15, 30, 31, 32, 33").summary, "Jarque-Bera normality test");
+  assert.equal(analyzeUniversal("anderson-darling normality data 10, 12, 13, 15, 30, 31, 32, 33").summary, "Anderson-Darling normality test");
   assert.equal(analyzeUniversal("permutation test group1: 10, 12, 9; group2: 8, 7, 11 resamples=2000 seed=5").summary, "permutation test");
   assert.equal(analyzeUniversal("adjust p-values p: 0.003, 0.02, 0.04, 0.20, 0.001 alpha=0.05").summary, "multiple-testing correction");
   assert.equal(analyzeUniversal("kaplan-meier times: 5, 6, 6, 8, 10; events: 1, 1, 0, 1, 0").summary, "Kaplan-Meier survival");
