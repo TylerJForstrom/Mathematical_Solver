@@ -1105,6 +1105,52 @@ runTest("statistics mode computes Ljung-Box autocorrelation tests", () => {
   assert.deepEqual(result.table.rows[2], ["3", "-0.040764", "0.026587"]);
 });
 
+runTest("statistics mode runs simple exponential smoothing", () => {
+  const result = analyzeStatistics("simple exponential smoothing alpha=0.5 series 10 12 14 forecast=2");
+
+  assert.equal(result.summary, "simple exponential smoothing");
+  assert.equal(result.answer, "2-step forecast = 12.5");
+  assert.equal(artifactValue(result, "Smoothing alpha"), "0.5");
+  assert.equal(artifactValue(result, "Parameters"), "user-specified");
+  assert.equal(artifactValue(result, "Final level"), "12.5");
+  assert.equal(artifactValue(result, "RMSE"), "2.54951");
+  assert.equal(result.table.headers.join(","), "t,Actual,Level,Fitted,Error");
+  assert.equal(result.graph.scatterLabel, "Observed");
+  assert.ok(result.graph.lines.some((series) => series.label === "Forecast"));
+});
+
+runTest("statistics mode fits Holt linear trend smoothing exactly", () => {
+  const result = analyzeStatistics("holt alpha=0.5 beta=0.5 series 10 12 14 16 forecast=2");
+
+  assert.equal(result.summary, "Holt linear exponential smoothing");
+  assert.equal(result.answer, "2-step forecast = 20");
+  assert.equal(artifactValue(result, "Trend beta"), "0.5");
+  assert.equal(artifactValue(result, "Final level"), "16");
+  assert.equal(artifactValue(result, "Final trend"), "2");
+  assert.equal(artifactValue(result, "One-step SSE"), "0");
+  assert.equal(result.table.headers.join(","), "t,Actual,Level,Trend,Fitted,Error");
+});
+
+runTest("statistics mode optimizes smoothing parameters when omitted", () => {
+  const result = analyzeStatistics("holt exponential smoothing 10 13 15 18 22 27 31 38 forecast=4");
+
+  assert.equal(result.summary, "Holt linear exponential smoothing");
+  assert.equal(artifactValue(result, "Parameters"), "optimized by SSE");
+  const alpha = Number(artifactValue(result, "Smoothing alpha"));
+  const beta = Number(artifactValue(result, "Trend beta"));
+  assert.ok(alpha > 0 && alpha < 1);
+  assert.ok(beta > 0 && beta < 1);
+  // A clearly upward series should forecast above the last observation.
+  assert.ok(Number(result.answer.match(/=\s*([-\d.]+)/)[1]) > 38);
+});
+
+runTest("statistics mode validates smoothing weights", () => {
+  assert.throws(
+    () => analyzeStatistics("exponential smoothing alpha=1.5 series 10 12 14 16"),
+    /alpha must be between 0 and 1/,
+  );
+});
+
 runTest("statistics mode computes binomial probability", () => {
   const result = analyzeStatistics("binomial n=10 p=0.5 k=3");
 
@@ -2181,6 +2227,7 @@ runTest("universal mode routes advanced solvers", () => {
   assert.equal(analyzeUniversal("ar(1) series: 10, 12, 13, 15, 16, 18 forecast=3").summary, "AR(1) time-series forecast");
   assert.equal(analyzeUniversal("arima(2,1,0) series: 10, 13, 15, 18, 22, 27, 31, 38 forecast=3").summary, "ARIMA forecast");
   assert.equal(analyzeUniversal("ljung-box series: 10, 12, 13, 15, 16, 18, 21, 22 lags=3").summary, "Ljung-Box autocorrelation test");
+  assert.equal(analyzeUniversal("holt exponential smoothing 10 13 15 18 22 27 forecast=3").summary, "Holt linear exponential smoothing");
   assert.equal(analyzeUniversal("sample size mean effect=0.5 power=0.8 alpha=0.05").summary, "sample size analysis");
   assert.equal(analyzeUniversal("meta-analysis effects: 0.2, 0.5, 0.1, 0.7; se: 0.1, 0.2, 0.15, 0.25").summary, "meta-analysis");
   assert.equal(analyzeUniversal("quadratic regression degree=2 for (1,2), (2,5), (3,10), (4,17); predict x=5").summary, "polynomial regression");

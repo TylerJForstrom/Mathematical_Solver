@@ -273,6 +273,20 @@ export function suggestProblemHelp(statement, mode = "ask", errorMessage = "") {
       ],
     },
     {
+      title: "Exponential smoothing",
+      when: () => wantsStats && /\b(exponential smoothing|holt|double exponential|ses)\b/.test(lower),
+      reason: "I detected an exponential-smoothing forecasting question.",
+      needs: [
+        "A numeric series",
+        "Optional smoothing weights (alpha, and beta for Holt)",
+        "A forecast horizon",
+      ],
+      examples: [
+        ["SES", "statistics", "simple exponential smoothing 10 12 13 12 15 16 18 forecast=3"],
+        ["Holt", "statistics", "holt exponential smoothing 10 13 15 18 22 27 31 38 forecast=4"],
+      ],
+    },
+    {
       title: "Bayesian normal mean",
       when: () => wantsStats && /\b(bayesian normal|bayesian mean|normal-normal|posterior mean|credible interval)\b/.test(lower),
       reason: "I detected a Bayesian mean-estimation question.",
@@ -8984,6 +8998,9 @@ function analyzeTimeSeries(statement) {
   if (isArimaQuestion(lower)) {
     return analyzeArimaForecast(statement);
   }
+  if (isExponentialSmoothingQuestion(lower)) {
+    return analyzeExponentialSmoothing(statement);
+  }
 
   const request = parseTimeSeriesInput(statement);
   const result = fitAr1TimeSeries(request.values, request.forecastSteps);
@@ -9214,6 +9231,373 @@ function computeLjungBoxStatistic(values, lags) {
     ljungBoxQ: normalizeNumber(ljungBoxQ),
     boxPierceQ: normalizeNumber(boxPierceQ),
     pValue: normalizeNumber(pValue),
+  };
+}
+
+function analyzeExponentialSmoothing(statement) {
+  const request = parseExponentialSmoothingInput(statement);
+  const fit = request.method === "holt"
+    ? fitHoltLinearSmoothing(request)
+    : fitSimpleExponentialSmoothing(request);
+  const lastForecast = fit.forecasts.at(-1);
+  const methodLabel = request.method === "holt"
+    ? "Holt linear exponential smoothing"
+    : "simple exponential smoothing";
+  const parameterText = request.method === "holt"
+    ? `alpha = ${formatNumber(fit.alpha)}, beta = ${formatNumber(fit.beta)}`
+    : `alpha = ${formatNumber(fit.alpha)}`;
+
+  const steps = [
+    {
+      title: "Read the time series",
+      expression: `${request.values.length} observations`,
+      detail: `Smoothing weights recent observations more heavily than older ones.`,
+    },
+    {
+      title: request.parametersProvided ? "Use the supplied parameters" : "Optimize smoothing parameters",
+      expression: parameterText,
+      detail: request.parametersProvided
+        ? "The given smoothing weights drive the level (and trend) updates."
+        : "A grid search minimizes one-step squared error to choose the smoothing weights.",
+    },
+    {
+      title: "Run the smoothing recursion",
+      expression: request.method === "holt"
+        ? `level = ${formatNumber(fit.finalLevel)}, trend = ${formatNumber(fit.finalTrend)}`
+        : `level = ${formatNumber(fit.finalLevel)}`,
+      detail: request.method === "holt"
+        ? "Each step blends the new observation into the level and updates the trend."
+        : "Each step blends the new observation into the running level.",
+    },
+    {
+      title: "Forecast forward",
+      expression: `${request.forecastSteps}-step forecast = ${formatNumber(lastForecast.value)}`,
+      detail: request.method === "holt"
+        ? "Holt projects the final level along the final trend."
+        : "Simple smoothing forecasts a flat line at the final level.",
+    },
+  ];
+
+  const tree = statsDatasetNode(request.values, [
+    statsMetricNode("ALPHA", fit.alpha),
+    ...(request.method === "holt" ? [statsMetricNode("BETA", fit.beta)] : []),
+    statsMetricNode("RMSE", fit.rmse),
+    statsMetricNode("FORECAST", lastForecast.value),
+  ], request.method === "holt" ? "Holt" : "SES");
+
+  const table = request.method === "holt"
+    ? {
+        headers: ["t", "Actual", "Level", "Trend", "Fitted", "Error"],
+        rows: fit.rows.map((row) => [
+          formatNumber(row.t),
+          formatNumber(row.actual),
+          formatNumber(row.level),
+          formatNumber(row.trend),
+          formatOptionalNumber(row.fitted),
+          formatOptionalNumber(row.error),
+        ]),
+      }
+    : {
+        headers: ["t", "Actual", "Level", "Fitted", "Error"],
+        rows: fit.rows.map((row) => [
+          formatNumber(row.t),
+          formatNumber(row.actual),
+          formatNumber(row.level),
+          formatOptionalNumber(row.fitted),
+          formatOptionalNumber(row.error),
+        ]),
+      };
+
+  const graph = buildExponentialSmoothingGraph(request, fit);
+
+  return {
+    mode: "statistics",
+    tree,
+    answer: `${request.forecastSteps}-step forecast = ${formatNumber(lastForecast.value)}`,
+    summary: methodLabel,
+    details: "Exponential smoothing forecast with fitted values and error trace",
+    variables: [],
+    metrics: treeMetrics(statsDatasetNode(request.values)),
+    steps,
+    table,
+    artifacts: [
+      ["Method", methodLabel],
+      ["Smoothing alpha", formatNumber(fit.alpha)],
+      ...(request.method === "holt" ? [["Trend beta", formatNumber(fit.beta)]] : []),
+      ["Parameters", request.parametersProvided ? "user-specified" : "optimized by SSE"],
+      ["Final level", formatNumber(fit.finalLevel)],
+      ...(request.method === "holt" ? [["Final trend", formatNumber(fit.finalTrend)]] : []),
+      ["One-step SSE", formatNumber(fit.sse)],
+      ["RMSE", formatNumber(fit.rmse)],
+      ["Last observed value", formatNumber(request.values.at(-1))],
+      [`${request.forecastSteps}-step forecast`, formatNumber(lastForecast.value)],
+    ],
+    ...(graph ? { graph } : {}),
+  };
+}
+
+function fitSimpleExponentialSmoothing(request) {
+  const values = request.values;
+  const alpha = Number.isFinite(request.alpha) ? request.alpha : optimizeSesAlpha(values);
+  let level = values[0];
+  const rows = [{ t: 1, actual: normalizeNumber(values[0]), level: normalizeNumber(level), fitted: Number.NaN, error: Number.NaN }];
+  let sse = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    const fitted = level;
+    const error = values[index] - fitted;
+    sse += error * error;
+    level = alpha * values[index] + (1 - alpha) * level;
+    rows.push({
+      t: index + 1,
+      actual: normalizeNumber(values[index]),
+      level: normalizeNumber(level),
+      fitted: normalizeNumber(fitted),
+      error: normalizeNumber(error),
+    });
+  }
+  const forecasts = [];
+  for (let step = 1; step <= request.forecastSteps; step += 1) {
+    forecasts.push({ step, value: normalizeNumber(level) });
+  }
+  const observationsScored = values.length - 1;
+  return {
+    alpha: normalizeNumber(alpha),
+    beta: Number.NaN,
+    finalLevel: normalizeNumber(level),
+    finalTrend: Number.NaN,
+    rows,
+    forecasts,
+    sse: normalizeNumber(sse),
+    rmse: normalizeNumber(observationsScored > 0 ? Math.sqrt(sse / observationsScored) : Number.NaN),
+  };
+}
+
+function simpleExponentialSmoothingSse(values, alpha) {
+  let level = values[0];
+  let sse = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    const error = values[index] - level;
+    sse += error * error;
+    level = alpha * values[index] + (1 - alpha) * level;
+  }
+  return sse;
+}
+
+function optimizeSesAlpha(values) {
+  let bestAlpha = 0.5;
+  let bestSse = Number.POSITIVE_INFINITY;
+  for (let step = 1; step <= 99; step += 1) {
+    const alpha = step / 100;
+    const sse = simpleExponentialSmoothingSse(values, alpha);
+    if (sse < bestSse) {
+      bestSse = sse;
+      bestAlpha = alpha;
+    }
+  }
+  return bestAlpha;
+}
+
+function fitHoltLinearSmoothing(request) {
+  const values = request.values;
+  let alpha = request.alpha;
+  let beta = request.beta;
+  if (!Number.isFinite(alpha) || !Number.isFinite(beta)) {
+    const optimized = optimizeHoltParameters(values, request.alpha, request.beta);
+    alpha = optimized.alpha;
+    beta = optimized.beta;
+  }
+  let level = values[0];
+  let trend = values[1] - values[0];
+  const rows = [{
+    t: 1,
+    actual: normalizeNumber(values[0]),
+    level: normalizeNumber(level),
+    trend: normalizeNumber(trend),
+    fitted: Number.NaN,
+    error: Number.NaN,
+  }];
+  let sse = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    const fitted = level + trend;
+    const error = values[index] - fitted;
+    sse += error * error;
+    const previousLevel = level;
+    level = alpha * values[index] + (1 - alpha) * (previousLevel + trend);
+    trend = beta * (level - previousLevel) + (1 - beta) * trend;
+    rows.push({
+      t: index + 1,
+      actual: normalizeNumber(values[index]),
+      level: normalizeNumber(level),
+      trend: normalizeNumber(trend),
+      fitted: normalizeNumber(fitted),
+      error: normalizeNumber(error),
+    });
+  }
+  const forecasts = [];
+  for (let step = 1; step <= request.forecastSteps; step += 1) {
+    forecasts.push({ step, value: normalizeNumber(level + step * trend) });
+  }
+  const observationsScored = values.length - 1;
+  return {
+    alpha: normalizeNumber(alpha),
+    beta: normalizeNumber(beta),
+    finalLevel: normalizeNumber(level),
+    finalTrend: normalizeNumber(trend),
+    rows,
+    forecasts,
+    sse: normalizeNumber(sse),
+    rmse: normalizeNumber(observationsScored > 0 ? Math.sqrt(sse / observationsScored) : Number.NaN),
+  };
+}
+
+function holtLinearSse(values, alpha, beta) {
+  let level = values[0];
+  let trend = values[1] - values[0];
+  let sse = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    const fitted = level + trend;
+    const error = values[index] - fitted;
+    sse += error * error;
+    const previousLevel = level;
+    level = alpha * values[index] + (1 - alpha) * (previousLevel + trend);
+    trend = beta * (level - previousLevel) + (1 - beta) * trend;
+  }
+  return sse;
+}
+
+function optimizeHoltParameters(values, fixedAlpha, fixedBeta) {
+  let bestAlpha = Number.isFinite(fixedAlpha) ? fixedAlpha : 0.5;
+  let bestBeta = Number.isFinite(fixedBeta) ? fixedBeta : 0.1;
+  let bestSse = Number.POSITIVE_INFINITY;
+  const alphaValues = Number.isFinite(fixedAlpha) ? [fixedAlpha] : gridParameters();
+  const betaValues = Number.isFinite(fixedBeta) ? [fixedBeta] : gridParameters();
+  for (const alpha of alphaValues) {
+    for (const beta of betaValues) {
+      const sse = holtLinearSse(values, alpha, beta);
+      if (sse < bestSse) {
+        bestSse = sse;
+        bestAlpha = alpha;
+        bestBeta = beta;
+      }
+    }
+  }
+  return { alpha: bestAlpha, beta: bestBeta };
+}
+
+function gridParameters() {
+  const grid = [];
+  for (let step = 1; step <= 19; step += 1) {
+    grid.push(step / 20);
+  }
+  return grid;
+}
+
+function buildExponentialSmoothingGraph(request, fit) {
+  const values = request.values;
+  const actualPoints = values.map((value, index) => ({ x: index + 1, y: normalizeNumber(value) }));
+  const fittedPoints = fit.rows
+    .filter((row) => Number.isFinite(row.fitted))
+    .map((row) => ({ x: row.t, y: normalizeNumber(row.fitted) }));
+  const lastIndex = values.length;
+  const lastValue = values.at(-1);
+  const forecastPoints = [
+    { x: lastIndex, y: normalizeNumber(lastValue) },
+    ...fit.forecasts.map((forecast) => ({ x: lastIndex + forecast.step, y: normalizeNumber(forecast.value) })),
+  ];
+  const allY = [
+    ...actualPoints.map((point) => point.y),
+    ...fittedPoints.map((point) => point.y),
+    ...forecastPoints.map((point) => point.y),
+  ];
+  if (allY.length === 0) {
+    return null;
+  }
+  return {
+    expression: "Exponential smoothing forecast",
+    kind: "scatter-fit",
+    scatterLabel: "Observed",
+    xMin: 1,
+    xMax: lastIndex + request.forecastSteps,
+    yMin: Math.min(...allY),
+    yMax: Math.max(...allY),
+    scatter: actualPoints,
+    lines: [
+      { label: "Fitted", points: fittedPoints },
+      { label: "Forecast", className: "graph-line-muted", points: forecastPoints },
+    ],
+  };
+}
+
+function parseExponentialSmoothingInput(text) {
+  const lower = text.toLowerCase();
+  let cleaned = text;
+  let forecastSteps = 1;
+  const forecastMatch = cleaned.match(/\b(?:forecast|steps|horizon|ahead)\s*=?\s*(\d+)\b/i);
+  if (forecastMatch) {
+    forecastSteps = Number(forecastMatch[1]);
+    cleaned = cleaned.replace(forecastMatch[0], " ");
+  }
+
+  let alpha = Number.NaN;
+  let beta = Number.NaN;
+  const alphaMatch = cleaned.match(/\balpha\s*=?\s*([-+]?\d*\.?\d+)/i);
+  if (alphaMatch) {
+    alpha = Number(alphaMatch[1]);
+    cleaned = cleaned.replace(alphaMatch[0], " ");
+  }
+  const betaMatch = cleaned.match(/\bbeta\s*=?\s*([-+]?\d*\.?\d+)/i);
+  if (betaMatch) {
+    beta = Number(betaMatch[1]);
+    cleaned = cleaned.replace(betaMatch[0], " ");
+  }
+
+  const method = lower.includes("holt") ||
+    lower.includes("double exponential") ||
+    lower.includes("linear trend") ||
+    betaMatch
+    ? "holt"
+    : "ses";
+
+  cleaned = cleaned
+    .replace(/\bdouble exponential(?:\s+smoothing)?\b/gi, " ")
+    .replace(/\bexponential smoothing\b/gi, " ")
+    .replace(/\bholt(?:'s)?(?:\s+linear)?(?:\s+trend)?(?:\s+method)?\b/gi, " ")
+    .replace(/\bsimple\b/gi, " ")
+    .replace(/\bsmoothing\b/gi, " ")
+    .replace(/\bmethod\b/gi, " ")
+    .replace(/\blinear trend\b/gi, " ")
+    .replace(/\bforecast\b/gi, " ")
+    .replace(/\bseries\b/gi, " ")
+    .replace(/\bvalues\b/gi, " ")
+    .replace(/\bdata\b/gi, " ")
+    .replace(/\bses\b/gi, " ");
+
+  const values = parseNumbers(cleaned);
+  const minimum = method === "holt" ? 3 : 3;
+  if (values.length < minimum) {
+    throw new Error("Exponential smoothing needs at least three time-series values.");
+  }
+  if (!Number.isSafeInteger(forecastSteps) || forecastSteps < 1 || forecastSteps > 100) {
+    throw new Error("Exponential smoothing forecast steps must be an integer from 1 to 100.");
+  }
+  if (alphaMatch && !(alpha > 0 && alpha < 1)) {
+    throw new Error("Smoothing alpha must be between 0 and 1.");
+  }
+  if (betaMatch && !(beta >= 0 && beta < 1)) {
+    throw new Error("Trend beta must be between 0 and 1.");
+  }
+
+  const parametersProvided = method === "holt"
+    ? Boolean(alphaMatch && betaMatch)
+    : Boolean(alphaMatch);
+
+  return {
+    method,
+    values,
+    forecastSteps,
+    alpha,
+    beta,
+    parametersProvided,
   };
 }
 
@@ -26150,12 +26534,20 @@ function isLjungBoxQuestion(lower) {
 function isTimeSeriesQuestion(lower) {
   return isArimaQuestion(lower) ||
     isLjungBoxQuestion(lower) ||
+    isExponentialSmoothingQuestion(lower) ||
     lower.includes("ar(1)") ||
     lower.includes("ar1") ||
     lower.includes("autoregressive") ||
     lower.includes("time series") ||
     lower.includes("time-series") ||
     lower.includes("forecast");
+}
+
+function isExponentialSmoothingQuestion(lower) {
+  return lower.includes("exponential smoothing") ||
+    lower.includes("holt") ||
+    lower.includes("double exponential") ||
+    /\bses\b/.test(lower);
 }
 
 function isMultivariableQuestion(lower) {

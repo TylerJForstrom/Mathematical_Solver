@@ -136,6 +136,9 @@ The frontend currently supports:
 - Time-series AR(1), ARIMA(p,d,0), and Ljung-Box diagnostics with lag
   coefficients, differencing, residual error, autocorrelation tables, and
   multi-step predictions
+- Exponential smoothing forecasts: simple (SES) and Holt's linear-trend (double)
+  smoothing with optional or SSE-optimized smoothing weights, a fitted-value and
+  error table, RMSE, and an observed/fitted/forecast overlay plot
 - Multivariate statistics: covariance matrices, correlation matrices,
   one-way MANOVA with Wilks' lambda, Pillai trace, Lawley-Hotelling trace, and
   pairwise Hotelling T-squared follow-ups, and multi-variable principal
@@ -459,6 +462,11 @@ The same idea works for algebra and calculus:
   multi-step forecasts on the original scale.
 - `ljung-box series: 10,12,13,15,16,18,21,22 lags=3` reports sample
   autocorrelations and a Ljung-Box Q test for serial dependence.
+- `simple exponential smoothing 10 12 13 12 15 16 18 forecast=3` smooths the
+  level with an SSE-optimized alpha (or a supplied `alpha=`) and forecasts a
+  flat line, while `holt exponential smoothing 10 13 15 18 22 27 31 38
+  forecast=4` adds a trend component and projects it forward (`alpha=`/`beta=`
+  fix the weights).
 - `covariance matrix x: 1,2,3,4; y: 2,3,5,8` returns a sample covariance
   matrix, and `correlation matrix ...` scales it to pairwise correlations.
 - `pca x: 1,2,3,4,5; y: 2,3,5,8,13; z: 5,4,3,2,1` finds covariance
